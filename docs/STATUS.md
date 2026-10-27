@@ -429,7 +429,12 @@ Known gaps that remain:
    top, the loading screen as one picture (layer 110 strips at y 168 / 433 / 570), layer 98 with its 97 menu, the
    Request Log / quest card (layer 100 beside a 97 menu) top, the Quest Complete border and results rule bottom,
    the cutscene's top bar top, and the item bar drawn without the game's scissor (that draw only; the next draw and
-   clears get it back). Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
+   clears get it back). 2026-10-27 (issue 58): a window drawn in pieces on one layer (the chat window, the shoutout list,
+   the Guild Card greeting, the Hunting Style viewer) takes one anchor when its pieces' rules disagree (exec.c
+   ui_group_end: by the nearer edge, or the centre; patched in transient memory before the pass ends), the village / Hub
+   button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the title's PRESS A scales
+   about the centre with its layout (layer 108), and a model preview follows the frame drawn over it, not the last quad
+   (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
 10. Keyboard remapping: an ini [Keyboard] section, one line per Switch button (`A = Mouse2`, `B = Space`; SDL key

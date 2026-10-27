@@ -122,6 +122,7 @@ static void script_parse(void) {
 //   burst <n> <name>       save the next n presented frames as shots/<name>_<i>.png
 //   dump [n]               save colour target 0 (or the depth of a depth-only pass) of every render pass of the next
 //                          frame (shots/pass_*.png), or of the next n frames (shots/f<i>_pass_*.png for i >= 1)
+//   hudtrace               log every HUD quad of the next frame: its layer, place, and where 16:10 / ultrawide moved it
 //   frame                  log the current frame number
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
@@ -129,6 +130,7 @@ char g_shot_request[256];  // (runtime/nvn/vulkan/device.c saves it)
 char g_burst_name[200];
 int g_burst_left, g_burst_index;
 volatile int g_dump_request;
+volatile int g_hudtrace_request;  // (debug) "hudtrace": nvn/vulkan/exec.c logs the next frame's HUD quads
 static void control_poll(void) {
     static const char *path = (const char *)1;
     static long done;
@@ -153,6 +155,7 @@ static void control_poll(void) {
             if (sscanf(line, "%31s %255s %199s", cmd, arg, arg2) < 1) continue;
             if (!strcmp(cmd, "msaa")) { void vk_set_msaa(uint32_t); vk_set_msaa((uint32_t)atoi(arg)); continue; }
             if (!strcmp(cmd, "gpuprof")) { extern volatile int g_gpuprof_request; g_gpuprof_request = 1; continue; }
+            if (!strcmp(cmd, "hudtrace")) { g_hudtrace_request = 1; continue; }
             if (!strcmp(cmd, "dump")) { g_dump_request = atoi(arg) > 0 ? atoi(arg) : 1; continue; }
             if (!strcmp(cmd, "memsave")) {  // memsave <guest hex address> <hex bytes> <file>: raw guest memory to a file
                 char path[200] = "";
