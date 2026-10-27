@@ -690,6 +690,8 @@ void vk_framebuffers_forget_view(VkImageView v) {
 static VkFormat pass_color[8], pass_depth;
 static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
+static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
+                               // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 // The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom): a model preview
 // follows the window drawn over it (ui_preview_map)
@@ -709,19 +711,45 @@ volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every H
 // window follows its anchor) or the end of the pass.
 #define UI_GROUP_MAX 512
 static struct {
-    int n;
-    float z, ymin, ymax;
+    int n, predict;  // predict: the anchor this group got last frame (ui_group_known), -1 if not seen
+    float z, x0, y0, xmin, xmax, ymin, ymax;
+    uint8_t anchors;  // (bit per vertical anchor among its pieces)
     struct { float *m, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
+// Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
+// scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
+#define UI_KNOWN 64
+static struct { float z, x, y; int v; } ui_group_known[UI_KNOWN];
+static uint32_t ui_nknown;
+static int ui_group_lookup(float z, float x, float y) {
+    for (int i = 0; i < UI_KNOWN; i++)
+        if (ui_group_known[i].z == z && ui_group_known[i].x == x && ui_group_known[i].y == y) return ui_group_known[i].v;
+    return -1;
+}
+static void ui_group_remember(int v) {
+    for (int i = 0; i < UI_KNOWN; i++)
+        if (ui_group_known[i].z == ui_group.z && ui_group_known[i].x == ui_group.x0 && ui_group_known[i].y == ui_group.y0) {
+            ui_group_known[i].v = v;
+            return;
+        }
+    int i = (int)(ui_nknown++ % UI_KNOWN);
+    ui_group_known[i].z = ui_group.z, ui_group_known[i].x = ui_group.x0, ui_group_known[i].y = ui_group.y0, ui_group_known[i].v = v;
+}
+// The anchor the group's pieces so far get: their own when they agree, else one from where the group sits (-1: agree)
+static int ui_group_vanchor(void) {
+    bool agree = true;
+    for (int i = 1; i < ui_group.n; i++) agree &= ui_group.p[i].vanchor == ui_group.p[0].vanchor;
+    if (agree) return -1;
+    float above = ui_group.ymin, below = 720.0f - ui_group.ymax;  // (piece centres: the edges and corners lie on the frame)
+    return above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
+}
 static void ui_group_end(void) {
     int n = ui_group.n;
+    if (!n) return;
+    int v = n < 2 ? -1 : ui_group_vanchor();
+    ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
-    if (n < 2) return;
-    bool agree = true;
-    for (int i = 1; i < n; i++) agree &= ui_group.p[i].vanchor == ui_group.p[0].vanchor;
-    if (agree) return;
-    float above = ui_group.ymin, below = 720.0f - ui_group.ymax;  // (piece centres: the edges and corners lie on the frame)
-    int v = above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
+    if (v < 0) return;
     float sy = g_render_aspect / (16.0f / 9.0f);
     for (int i = 0; i < n; i++) {
         float y = ui_group.p[i].pos_y;
@@ -730,12 +758,25 @@ static void ui_group_end(void) {
     }
     if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
 }
-static void ui_group_add(float *m, float pos_z, float pos_y, int vanchor) {
-    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 250.0f || pos_y > ui_group.ymax + 250.0f ||
-                       ui_group.n == UI_GROUP_MAX))
+static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int vanchor) {
+    // Not near: more than 400 above or below (a frame drawn as its corners only, the help windows' 336 high, is one group;
+    // the target cam at y 42..82 and the Hunter Arts prompts below y 600 are two), or a piece of another anchor beside the
+    // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
+    // pieces line up with the rest of it on one side: its other corner, its bottom edge)
+    const float margin = 24.0f;
+    bool apart = !(ui_group.anchors & (1u << vanchor)) && (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
+                 (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
+    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 400.0f || pos_y > ui_group.ymax + 400.0f ||
+                       apart || ui_group.n == UI_GROUP_MAX))
         ui_group_end();
-    if (!ui_group.n) ui_group.z = pos_z, ui_group.ymin = ui_group.ymax = pos_y;
+    if (!ui_group.n) {
+        ui_group.z = pos_z, ui_group.x0 = ui_group.xmin = ui_group.xmax = pos_x, ui_group.y0 = ui_group.ymin = ui_group.ymax = pos_y;
+        ui_group.anchors = 0;
+        ui_group.predict = ui_group_lookup(pos_z, pos_x, pos_y);
+    }
+    ui_group.xmin = fminf(ui_group.xmin, pos_x), ui_group.xmax = fmaxf(ui_group.xmax, pos_x);
     ui_group.ymin = fminf(ui_group.ymin, pos_y), ui_group.ymax = fmaxf(ui_group.ymax, pos_y);
+    ui_group.anchors |= (uint8_t)(1u << vanchor);
     ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_y = pos_y, ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
     ui_group.p[ui_group.n].recent = ui_nrecent - 1;  // (cbuf_info recorded it just before)
     ui_group.n++;
@@ -1314,6 +1355,16 @@ static VkRect2D scissor_rect(void) {
     if (!w) return (VkRect2D){{0, 0}, {pass_w, pass_h}};
     int x = st.scissor[0][0], y = st.scissor[0][1], sw = st.scissor[0][2], sh = st.scissor[0][3];
     if (ui_relax_scissor) { x = y = 0; sw = w; sh = h; }
+    if (ui_scissor_v >= 0 && !ui_relax_scissor) {  // (16:10: a HUD piece's scissor moves with it, unless it is the whole pass)
+        float pw, ph;
+        pass_guest_size(&pw, &ph);
+        if (x > 0 || y > 0 || sw < (int)pw || sh < (int)ph) {
+            float sy = g_render_aspect / (16.0f / 9.0f), y0 = (float)y, y1 = (float)(y + sh);
+            float off = ui_scissor_v == 0 ? 0.0f : ui_scissor_v == 2 ? ph * (1.0f - sy) : ph * 0.5f * (1.0f - sy);
+            y = (int)floorf(off + y0 * sy);
+            sh = (int)ceilf(off + y1 * sy) - y;
+        }
+    }
     {
         PreviewMap pm;
         if (!ui_relax_scissor && ui_preview_map(&pm)) {
@@ -2271,7 +2322,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (size > r.size && r.size) size = r.size;
     if (size < 16) size = 16;
     if (!guest_range_ok(r.addr, size)) return zero_buffer(size);
-    if (stage == 0 && k == 3) ui_relax_scissor = false;
+    if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = -1;
     if (stage == 0 && k == 3 && !st.ds[0] && (pass_h == g_render_size[1] || pass_sy != 1.0f) &&  // (FSR: stand-ins)
         fabsf(g_render_aspect - 16.0f / 9.0f) > 0.01f) {
         if (size >= 64) {
@@ -2284,6 +2335,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                                   (fabsf(m[0]) >= 1200.0f || fabsf(m[5]) >= 700.0f)) ||
                                  (fabsf(pos_x) <= 1.0f && fabsf(pos_y) <= 1.0f);
 
+            if (is_fullscreen && g_hudtrace_active)
+                LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
             if (!is_fullscreen) {
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
@@ -2309,6 +2362,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool grouped = false;
                 int vgroup = 1;
 
+                if (is_3d_overlay && g_hudtrace_active)
+                    LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: 3D overlay, not moved\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
                 if (!is_3d_overlay) {
                     enum { ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_CENTER } anchor = ANCHOR_CENTER;
                     // vertically one anchor per layer (or per part of one), so a window drawn in pieces stays together
@@ -2410,8 +2465,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f;
                     vgroup = v;
                     if (g_hudtrace_active)
-                        LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5],
-                            "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "");
+                        LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],
+                            m[5], "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "", st.scissor[0][0],
+                            st.scissor[0][1], st.scissor[0][2], st.scissor[0][3]);
                 }
 
                 m[0] *= s; m[4] *= s; m[8] *= s;
@@ -2421,7 +2477,14 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
-                if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_y, vgroup);
+                if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
+                // The game clips some windows (a list, the help windows' body) with a scissor laid out for the 16:9 window:
+                // it moves with the piece, as its group was anchored last frame (the group is not complete yet), or for a
+                // group not seen before as the pieces so far are.
+                if (sy < 1.0f && !is_3d_overlay) {
+                    int gv = !grouped ? -1 : ui_group.predict >= 0 ? ui_group.predict : ui_group_vanchor();
+                    ui_scissor_v = gv >= 0 ? gv : vgroup;
+                }
                 return ubo_span(sp, size);
             }
         }
@@ -2825,9 +2888,9 @@ static void draw(CmdRec *r, bool indexed) {
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0)};
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);
-    if (ui_relax_scissor) {  // (set while the constants above were built: for this draw only; the next draw and any
-        apply_scissor(cb);   // clear before it get the game's scissor again)
-        ui_relax_scissor = false;
+    if (ui_relax_scissor || ui_scissor_v >= 0) {  // (set while the constants above were built: for this draw only; the
+        apply_scissor(cb);                         // next draw and any clear before it get the game's scissor again)
+        ui_relax_scissor = false, ui_scissor_v = -1;
     }
 
     // ---- indices (copied; the largest index bounds the vertex data copied below)
