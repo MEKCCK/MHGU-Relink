@@ -25,6 +25,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"HUD placement", "Posición del HUD"},
         {"Frame rate limit", "Límite de FPS"},
         {"VSync", "Sincronización vertical"},
+        {"Shader prewarm", "Precarga de shaders"},
         {"Application audio", "Audio de la aplicación"},
         {"Master volume", "Volumen general"},
         {"Face buttons", "Botones frontales"},

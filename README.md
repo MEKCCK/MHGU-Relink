@@ -143,7 +143,10 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Upscaler]`: `FSR` (Off / On, default Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
   UltraPerformance), `Sharpness`, and `Upscaler` (FSR3, the default, or FSR4: needs an AMD RDNA 4 GPU and its driver, and an exe built with `make FSR4_DRIVER_PATCH=1`;
   falls back to FSR 3.1). FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`, `docs/FSR4-PORT.md`
-- `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off)
+- `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off), `ShaderPrewarm`
+  (On / Off: translate all of the game's shaders in the background at startup, so fewer things are drawn black the
+  first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about
+  340 MB)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
   with a wiki in front of it; default On)

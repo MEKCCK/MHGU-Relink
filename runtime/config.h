@@ -57,6 +57,7 @@ typedef struct {
     int fsr_animsurf;         // FSR: surfaces animated through their texture (banners, water): 1 detected, 0 off
     int fsr_upscaler;         // [Upscaler] Upscaler: FSR_UP_3 (FSR 3.1) or FSR_UP_4 (FSR 4, runtime/nvn/vulkan/fsr4.c)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
+    int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
 } Config;
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides

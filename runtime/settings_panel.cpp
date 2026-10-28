@@ -127,6 +127,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fsr_reactive);
     SAME(fsr_animsurf);
     SAME(vsync);
+    SAME(shader_prewarm);
     SAME(msaa);
     SAME(fxaa);
     SAME(face_buttons);
@@ -373,6 +374,7 @@ void reset_section() {
         c.fsr_animsurf = f.fsr_animsurf;
         c.fps = f.fps;
         c.vsync = f.vsync;
+        c.shader_prewarm = f.shader_prewarm;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.volume = f.volume;
@@ -447,6 +449,7 @@ std::vector<Row> main_rows() {
     case 1:
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, cold("FPS"));
         add_bool(r, "vsync", "VSync", &c.vsync, cold("VSync"));
+        add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, cold("ShaderPrewarm"));
         add_choice(r, "msaa", "MSAA",
                    c.msaa == 8   ? 3
                    : c.msaa == 4 ? 2

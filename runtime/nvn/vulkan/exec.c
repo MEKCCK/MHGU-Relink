@@ -9,7 +9,8 @@
 //   MHGU_SAVE_GLSL=1      translated shaders -> build/glsl/<code address>_<stage>.glsl
 //   MHGU_VK_STATS=1       draw / pass / skip counts in the log every 2 s (and shader / pipeline build stats)
 //   MHGU_SKIP_LOG=1       every draw skipped for a building program / pipeline: its shaders and colour target
-//   MHGU_NO_PREWARM=1     don't translate the game's programs ahead of their first use (see "prewarm")
+//   MHGU_NO_PREWARM=1     don't translate the game's programs ahead of their first use (see "prewarm"; the ini's
+//                         [Performance] ShaderPrewarm = Off does the same)
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -2140,7 +2141,7 @@ static void prewarm_translate(void *arg) {
 // (game thread) nvnProgramSetShaders
 void backend_program_created(const NvnProgram *np) {
     static int on = -1;
-    if (on < 0) on = !getenv("MHGU_NO_PREWARM") && !sync_shaders();
+    if (on < 0) on = g_config.shader_prewarm && !getenv("MHGU_NO_PREWARM") && !sync_shaders();
     if (!on || !(np->stage_mask & 1) || !(np->stage_mask & 2)) return;
     PrewarmReq *r = malloc(sizeof *r);
     for (int i = 0; i < 2; i++) {

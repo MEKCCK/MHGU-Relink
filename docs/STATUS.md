@@ -434,7 +434,8 @@ draw is gone): a program the prewarm has not reached yet is skipped as before. M
   of the programs draws use) are translated on first use as before; new pipelines on a cold driver cache.
 Not covered: draws of the scene itself skipped in the very frame the photo is taken stay missing from it (a "half
 black" photo may be that; not reproduced). Debug aids: MHGU_SKIP_LOG=1 (each skipped draw with its shaders and colour
-target), MHGU_NO_PREWARM=1, the prewarm's progress in MHGU_VK_STATS's 2 s builds line ("prewarm N new, N cached, N
+target), the ini's [Performance] ShaderPrewarm = Off (default On; a restart setting, in the F1 menu's Graphics & Audio
+page) or MHGU_NO_PREWARM=1, the prewarm's progress in MHGU_VK_STATS's 2 s builds line ("prewarm N new, N cached, N
 queued") and a "[shader] prewarm:" line when it is done. MHGU_QUICKHUNT from the airship (an HR save in the Hub)
 crashes (null function in the town's depart path), so the test route walks: scratchpad scripts hstart.ps1 (scratch
 MHGU_HOME / save), to_pub_quest.ps1, to_depart.ps1, to_box.ps1.
