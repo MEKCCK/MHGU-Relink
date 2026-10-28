@@ -103,7 +103,7 @@ To move an existing Switch save over, put its `system` and `system_backup` files
 
 ## Controls
 
-Almost every controller under the sun should work, as long as it has SDL support. If you really want to swap the face buttons on non-Nintendo controllers, open the .ini file and set `FaceButtons = Label`.
+Almost every controller under the sun should work, as long as it has SDL support. With more than one connected (a Steam Deck with a controller plugged in, say), press a button on the one you want to use. If you really want to swap the face buttons on non-Nintendo controllers, open the .ini file and set `FaceButtons = Label`.
 
 Keyboard and mouse support (not recommended):
 

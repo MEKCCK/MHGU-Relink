@@ -8,8 +8,9 @@
 //   frames (exact rendered pixels, run\shots\), F10 dumps every render pass of the next 2 frames (debug, slow), F9 toggles how colour clears are done (debug).
 // Gamepad (SDL): face buttons by position as on a Switch controller (the bottom one is B), or by their labels
 //   (settings FaceButtons, runtime/config.c; MHGU_PAD_POSITIONAL=0|1 overrides).
-//   SDL calls other devices a gamepad too (a Steam Controller's puck, an analog keyboard's mouse interface) and the
-//   first one it sees owns the input: MHGU_PAD=<part of the name> picks yours, and the log lists every one it finds.
+//   Every controller is open and the one a button was last pressed on is read (a Steam Deck with a controller plugged
+//   in has two). SDL calls other devices a gamepad too (a Steam Controller's puck, an analog keyboard's mouse
+//   interface): MHGU_PAD=<part of the name> keeps only yours, and the log lists every one it finds.
 // Scripted input (tests): MHGU_INPUT="frame:BUTTON:frames,..." holds BUTTON from that presented frame for that many
 //   frames. BUTTON: A B X Y L R ZL ZR PLUS MINUS LEFT UP RIGHT DOWN LSTICK RSTICK, or STICK_UP/DOWN/LEFT/RIGHT and
 //   RSTICK_UP/DOWN/LEFT/RIGHT (full tilt).
@@ -31,7 +32,10 @@
 #define B(x) (1ull << (x))
 
 static bool keys[SDL_SCANCODE_COUNT];
-static SDL_Gamepad *pad;
+static SDL_Gamepad *pad;  // the controller read: of those open, the one a button was last pressed on
+#define MAX_PADS 8
+static struct { SDL_Gamepad *pad; uint64_t opened_ns; } pads[MAX_PADS];
+static int npads;
 
 static const struct { SDL_Scancode sc; int btn; } key_buttons[] = {
     {SDL_SCANCODE_SPACE, BTN_B}, {SDL_SCANCODE_R, BTN_Y},
@@ -292,6 +296,26 @@ static void control_poll(void) {
                 LOG("[control] key %s (%d)\n", arg, (int)sc);
                 continue;
             }
+            if (!strcmp(cmd, "vpad")) {  // vpad: attach an SDL virtual controller (tests: picking the controller)
+                static SDL_Joystick *vpads[4];
+                static int nv;
+                if (!strcmp(arg, "") && nv < 4) {
+                    SDL_VirtualJoystickDesc d;
+                    SDL_INIT_INTERFACE(&d);
+                    d.type = SDL_JOYSTICK_TYPE_GAMEPAD, d.naxes = SDL_GAMEPAD_AXIS_COUNT, d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+                    d.name = nv ? "Virtual pad 2" : "Virtual pad 1";
+                    d.vendor_id = 0x1234, d.product_id = (Uint16)(nv + 1);  // (SDL names it by its mapping: one per id)
+                    SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+                    vpads[nv] = id ? SDL_OpenJoystick(id) : NULL;
+                    LOG("[control] vpad %d: %s\n", nv, vpads[nv] ? "attached" : SDL_GetError());
+                    nv++;
+                } else {  // vpad <n> <SDL button number> <0|1>: that button of virtual controller n up or down
+                    int n = atoi(arg), down = 0, btn = atoi(arg2);
+                    sscanf(line, "%*s %*s %*s %d", &down);
+                    if (n >= 0 && n < nv && vpads[n]) SDL_SetJoystickVirtualButton(vpads[n], btn, down != 0);
+                }
+                continue;
+            }
             if (!strcmp(cmd, "sdltext")) {  // sdltext <text>: typed text, as the keyboard sends it (not the game's entry)
                 static char text[256];
                 snprintf(text, sizeof text, "%s", arg);
@@ -342,9 +366,11 @@ static void control_poll(void) {
     fclose(f);
 }
 // ---- events
-// Which controller the game reads. SDL calls other devices a gamepad as well (a Steam Controller's puck, an analog
-// keyboard's mouse interface) and the first one wins, which reads as stuck buttons and sticks: so every device is
-// logged, and MHGU_PAD=<part of the name, case-insensitive> says which one to use.
+// Which controller the game reads. Every one is open, and a button pressed on one makes it the one read: the first
+// one SDL listed was not always the one in the player's hands (a Steam Deck's own controls and a controller plugged
+// into it, or Steam Input's virtual controller beside the real one). SDL calls other devices a gamepad as well (a
+// Steam Controller's puck, an analog keyboard's mouse interface), which would read as stuck buttons and sticks: so
+// every device and every change is logged, and MHGU_PAD=<part of the name, case-insensitive> says which one to use.
 static bool pad_matches(SDL_JoystickID id) {
     const char *sel = getenv("MHGU_PAD");
     if (!sel || !*sel) return true;
@@ -361,14 +387,47 @@ static void log_pad(SDL_JoystickID id, const char *tag) {
         SDL_GetGamepadProductForID(id), SDL_GetGamepadMappingForID(id) ? "known" : "NONE (SDL guesses the buttons)");
 }
 
-static void open_pad(SDL_JoystickID id) {
-    if (pad) { log_pad(id, "gamepad appeared, keeping the one in use"); return; }
-    if (!pad_matches(id)) { log_pad(id, "gamepad skipped (MHGU_PAD)"); return; }
-    pad = SDL_OpenGamepad(id);
-    if (pad) log_pad(id, "gamepad in use");
+static int find_pad(SDL_JoystickID id) {
+    for (int i = 0; i < npads; i++)
+        if (SDL_GetGamepadID(pads[i].pad) == id) return i;
+    return -1;
 }
 
-static void pick_pad(void) {  // over every controller SDL sees now: MHGU_PAD picks, else the first
+static void open_pad(SDL_JoystickID id) {
+    if (find_pad(id) >= 0) return;
+    if (!pad_matches(id)) { log_pad(id, "gamepad skipped (MHGU_PAD)"); return; }
+    if (npads == MAX_PADS) { log_pad(id, "gamepad skipped (too many)"); return; }
+    SDL_Gamepad *p = SDL_OpenGamepad(id);
+    if (!p) { LOG("[input] gamepad %u failed to open: %s\n", (unsigned)id, SDL_GetError()); return; }
+    pads[npads].pad = p, pads[npads++].opened_ns = plat_now_ns();
+    if (!pad) pad = p, log_pad(id, "gamepad in use");
+    else log_pad(id, "gamepad open too (a button pressed on it makes it the one in use)");
+}
+
+// A button pressed on another open controller: that one is read from now on. Not in the first half second after it
+// opened (a device whose buttons read as held sends their presses then, and would take over at startup).
+static void pad_pressed(SDL_JoystickID id) {
+    int i = find_pad(id);
+    if (i < 0 || pads[i].pad == pad || plat_now_ns() - pads[i].opened_ns < 500000000ull) return;
+    pad = pads[i].pad;
+    log_pad(id, "gamepad in use (a button pressed on it)");
+}
+
+static void close_pad(SDL_JoystickID id) {
+    int i = find_pad(id);
+    if (i < 0) return;
+    bool was = pads[i].pad == pad;
+    const char *name = SDL_GetGamepadName(pads[i].pad);  // (its id is gone already: log_pad would find nothing)
+    LOG("[input] gamepad removed%s: %s\n", was ? " (it was in use)" : "", name ? name : "?");
+    SDL_CloseGamepad(pads[i].pad);
+    pads[i] = pads[--npads];
+    if (was) {
+        pad = npads ? pads[0].pad : NULL;
+        if (pad) log_pad(SDL_GetGamepadID(pad), "gamepad in use");
+    }
+}
+
+static void pick_pad(void) {  // over every controller SDL sees now: those MHGU_PAD allows (all without it), first in use
     int n = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&n);
     for (int i = 0; i < n; i++) open_pad(ids[i]);
@@ -376,6 +435,7 @@ static void pick_pad(void) {  // over every controller SDL sees now: MHGU_PAD pi
 }
 
 void host_input_event(const SDL_Event *e) {
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
     if (textinput_event(e)) return;  // (typing into a text entry: not controller buttons)
     switch (e->type) {
@@ -439,12 +499,7 @@ void host_input_event(const SDL_Event *e) {
         open_pad(e->gdevice.which);
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
-        if (pad && SDL_GetGamepadID(pad) == e->gdevice.which) {
-            log_pad(e->gdevice.which, "gamepad removed");
-            SDL_CloseGamepad(pad);
-            pad = NULL;
-            pick_pad();
-        }
+        close_pad(e->gdevice.which);
         break;
     }
 }

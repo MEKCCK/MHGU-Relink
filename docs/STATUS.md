@@ -763,7 +763,9 @@ version (building the regions from the RomFS) is possible once the flag bits and
 
 Controls: see `runtime/host_input.c` (keyboard and mouse: WASD, mouse look (relative mode after a click, Esc releases; the mouse speed smoothed
 over 25 ms as the right stick tilt, offset past the camera's round ~39% stick dead zone; ini [Mouse] MouseSensitivity), clicks = X / A, Space / R = B / Y, Tab / T = ZL / ZR,
-arrows = d-pad, Ctrl / Alt = stick clicks, Enter = Plus; SDL gamepads, face
+arrows = d-pad, Ctrl / Alt = stick clicks, Enter = Plus; SDL gamepads (all open, the one a button was last pressed on is
+read: a Steam Deck with a controller plugged in has two, and taking the first one SDL listed left the player's pad dead;
+MHGU_PAD=<name part or vid:pid> keeps only that one), face
 buttons by position (Switch layout) or label: ini FaceButtons; the controller also works with the window in the
 background, ini BackgroundInput = On (default; SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, set before SDL's gamepad
 subsystem starts, runtime/ui.c; MHGU_BACKGROUND_INPUT=0|1), keyboard / mouse only with the focus;
