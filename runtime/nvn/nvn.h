@@ -59,6 +59,7 @@ typedef struct NvnTexture {
     NvnPool *pool;
     uint64_t pool_offset;
     void *backend;  // renderer-side texture
+    bool drawn;     // (renderer) a draw has been recorded into it as a colour target
     uint64_t debug_id;
     char label[64];
 } NvnTexture;

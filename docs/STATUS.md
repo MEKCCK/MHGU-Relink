@@ -386,9 +386,35 @@ logo frames), slowest frame 56-62 ms (was 83, the load hitch itself), steady 57 
 caches): 761 skipped over 9 frames (was 1230 over 13): translation throughput bound, waits cap at 6 ms a frame.
 Known gaps that remain:
 - A program never seen before (first run, or after the translator changed) can still be missing for a few frames when many arrive
-  at once.
+  at once. A draw into a colour target's first draw is never skipped for this (next section).
 - R9 200 approximations: no custom border colours (nearest standard colour), D24S8 stored as D32F_S8 (polygon-offset
   units differ for decals).
+
+## Fixed (2026-10-28): black quest-end photo (reward screen background)
+
+The Quest Rewards / Reward Box screen shows a photo of the moment the quest was cleared. A player saw it fully black
+on a first run, with the user's screenshot also showing junk blocks. How the game does it: sScreenShot (cSystem,
+setup 0xa6f854 at quest start) makes its buffers (nScreenShot::Buffer, 0x2c bytes; Buffer::create 0xe48814: an
+rTexture of the 3D size / 1, 2 or 4); at the clear, uFestaScreenShot (0x7628d8) calls the request 0xa6f97c, and the
+unit's draw copies the scene once into the buffer: one draw, never repeated. The reward screen draws the buffer each
+frame (pass vs 77e9f300 fs 79c6ef00). Evidence (R9, Harvest Tour: Jurassic Frontier, quest 11119, finished by
+delivering the Paw Pass Ticket from the camp's supply box): with empty caches the capture draw (vs 78515c00 fs 7a2ac600,
+into a 960x540 RGBA8 target) was skipped two frames after the delivery, its program needed 9 ms and the per-frame
+wait budget is 6 ms; the buffer was never drawn, and a texture never drawn is read from its guest memory (zeros or
+whatever the pool held before: black, or junk). With that program and its pipeline in cache/ (the next run) the photo
+was right. Fix (exec.c first_draw): a draw into a colour target no draw has been recorded into yet waits for its
+program and pipeline (up to 2 s, like a movie frame) instead of being skipped; targets drawn every frame keep the
+6 ms budget. Same cold run with the fix: 0 skipped at the clear, two waits costing 11 ms, photo right. Cost: these
+waits happen when targets get their first draws (start-up 11 waits / 18 ms, a cold area load 4-8 waits / 37-136 ms,
+inside frames that are load hitches anyway: slowest load frames 499 / 765 ms vs 889 / 826 ms before); none with warm
+caches. Not covered: draws of the scene itself skipped in the very frame the photo is taken stay missing from it (a
+"half black" photo on a second run may be that; not reproduced). Options not taken: prebuilding programs from a shipped
+or collected list (pipelines.bin already prebuilds everything a player has seen; a shipped list would be derived from
+game code), and blocking every build (MHGU_SYNC_SHADERS=1: hitches on every new effect). Debug aids:
+MHGU_SKIP_LOG=1 (each skipped draw with its shaders and colour target), "first-draw / movie waits" in MHGU_VK_STATS's
+2 s builds line. MHGU_QUICKHUNT from the airship (an HR save in the Hub) crashes (null function in the town's depart
+path), so the test route walks: scratchpad scripts hstart.ps1 (scratch MHGU_HOME / save), to_pub_quest.ps1,
+to_depart.ps1, to_box.ps1.
 
 ## Updater (2026-10-28)
 
@@ -724,7 +750,7 @@ MHGU_CONTROL's `emact <group> <index>` starts an action, `emsweep <group> <first
 runtime/hle/emtrace.c), MHGU_CONTROL's `fntrace lo hi n r0lo r0hi` (only calls with r0 in that range: one object's
 methods) and `interpwatch <addr> <file of function entries>` (runs those functions and all game code they call in the
 interpreter, logging every instruction that changes the word at addr),
-`MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`,
+`MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`, `MHGU_SKIP_LOG=1`,
 `MHGU_NO_PROGRAM_CACHE=1`, `MHGU_SAVE_GLSL=1`.
 `python tools/disasm.py <game dir> <addr | module:symbol> [count] [before]` disassembles guest code.
 

@@ -8,6 +8,7 @@
 //   MHGU_NO_PROGRAM_CACHE=1  don't keep translated programs / pipeline states in cache/ for the next run to prebuild
 //   MHGU_SAVE_GLSL=1      translated shaders -> build/glsl/<code address>_<stage>.glsl
 //   MHGU_VK_STATS=1       draw / pass / skip counts in the log every 2 s (and shader / pipeline build stats)
+//   MHGU_SKIP_LOG=1       every draw skipped for a building program / pipeline: its shaders and colour target
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -28,6 +29,7 @@ static _Atomic int stat_compiles;
 // (MHGU_VK_STATS) shader / pipeline builds: skips by cause, frames with skips, the waits, build times per job kind
 // (translate, GLSL -> SPIR-V + modules, pipeline), request -> ready latency, the slowest frame (exec thread's view)
 static uint64_t stat_skip_prog, stat_skip_pipe, stat_skip_frames, stat_waited_ns, stat_waits, stat_rescued, stat_frame_max;
+static uint64_t stat_long_waits, stat_long_ns;  // waits past the budget (a first draw: first_draw; a movie frame)
 static _Atomic uint64_t stat_job_n[3], stat_job_ns[3], stat_job_max[3], stat_lat_n, stat_lat_ns, stat_lat_max;
 static void atomic_max(_Atomic uint64_t *m, uint64_t v) {
     uint64_t o = atomic_load(m);
@@ -524,19 +526,12 @@ static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
     pthread_mutex_unlock(&ready_lock);
     s = atomic_load(state);
     uint64_t d = plat_now_ns() - t0;
+    if (at_least_ns > wait_budget_ns) stat_long_waits++, stat_long_ns += d;
     wait_budget_ns -= (int64_t)d;
     stat_waited_ns += d;
     stat_waits++;
     if (s == 1) stat_rescued++;
     return s == 1;
-}
-
-static void skip_draw(uint64_t *cause) {
-    static uint64_t last = ~0ull;
-    uint64_t f = vk_frame_counter();
-    if (f != last) last = f, stat_skip_frames++;
-    stat_skipped++;
-    (*cause)++;
 }
 
 // ================================================================== state
@@ -577,6 +572,24 @@ static struct {
     float alpha_ref;
     uint64_t copy_row_stride, copy_image_stride;
 } st;
+
+// A draw skipped because its program / pipeline is still building. MHGU_SKIP_LOG=1 logs each one with its shaders and
+// colour target 0 (which pass lost it; a one-off pass, like the quest photo, stays wrong).
+static void skip_draw(uint64_t *cause) {
+    static uint64_t last = ~0ull;
+    static int log = -1;
+    uint64_t f = vk_frame_counter();
+    if (f != last) last = f, stat_skip_frames++;
+    stat_skipped++;
+    (*cause)++;
+    if (log < 0) log = getenv("MHGU_SKIP_LOG") != NULL;
+    if (log && st.program) {
+        NvnTexture *t = st.rt.ncolor ? st.rt.color[0] : NULL;
+        LOG("[skip] frame %llu %s vs %llx fs %llx | rt0 %p %ux%u f%#x\n", (unsigned long long)f,
+            cause == &stat_skip_prog ? "program" : "pipeline", (unsigned long long)st.program->stages[0].code_addr,
+            (unsigned long long)st.program->stages[1].code_addr, (void *)t, t ? t->width : 0, t ? t->height : 0, t ? t->format : 0);
+    }
+}
 
 uint32_t nvn_window_origin(void);
 uint32_t nvn_depth_mode(void);
@@ -2737,6 +2750,20 @@ static bool movie_viewport(NvnTexture *y, const float *vp, float out[4]) {
     return true;
 }
 
+// A colour target that no draw has been recorded into yet may get only this one (the quest-end photo: sScreenShot's
+// capture draws the scene once into its own buffer, which the reward screen shows; skipped, the photo was black or
+// garbage). Its draw waits for its shaders (FIRST_DRAW_WAIT_NS) rather than being skipped; a skipped draw into a target
+// drawn every frame only shows up a frame or two late. Targets get their first draws at start-up and when the game
+// makes new ones, so these waits are rare.
+#define FIRST_DRAW_WAIT_NS 2000000000ll
+static bool first_draw(void) {
+    for (int i = 0; i < st.rt.ncolor; i++) {
+        NvnTexture *t = st.rt.color[i];
+        if (t && ((st.channel_mask >> (i * 4)) & 0xF) && !t->drawn) return true;
+    }
+    return false;
+}
+
 static void draw(CmdRec *r, bool indexed) {
     if (!st.program) { stat_skipped++; return; }
     ShaderKey vkey = {0}, fkey = {0};
@@ -2748,7 +2775,8 @@ static void draw(CmdRec *r, bool indexed) {
     if (st.color_state[2] >= 1 && st.color_state[2] <= 7) fkey.alpha_func = st.color_state[2];  // (NVN alpha test)
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
-    if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
+    int64_t must_wait = first_draw() ? FIRST_DRAW_WAIT_NS : 0;
+    if (!await_build(&pr->state, pr, must_wait)) { skip_draw(&stat_skip_prog); return; }
     if (fxaa_skipped(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];
@@ -2776,7 +2804,7 @@ static void draw(CmdRec *r, bool indexed) {
         fkey.alpha_coverage = (uint8_t)pass_samples;
         pr = get_program(st.program, &vkey, &fkey);
         if (!pr) { stat_skipped++; return; }
-        if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
+        if (!await_build(&pr->state, pr, must_wait)) { skip_draw(&stat_skip_prog); return; }
     }
 
     // ---- pipeline
@@ -2858,7 +2886,9 @@ static void draw(CmdRec *r, bool indexed) {
     // A movie frame is the whole picture: skipped, the screen showed the pass's black clear for a few frames at the
     // start of the first movie after an update (its pipeline not in cache/pipelines.bin yet, ~2 frames to build). It
     // waits for its pipeline, so the picture before it stays up that long instead.
-    if (!await_build(&pp->state, pp, movie ? 2000000000ll : 0)) { skip_draw(&stat_skip_pipe); return; }
+    if (!await_build(&pp->state, pp, movie ? 2000000000ll : must_wait)) { skip_draw(&stat_skip_pipe); return; }
+    for (int i = 0; i < st.rt.ncolor; i++)
+        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) st.rt.color[i]->drawn = true;
     if (ss_need(SS_PIPE, ss.pipe == pp->pipe)) { ss.pipe = pp->pipe; vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pp->pipe); }
 
     // ---- dynamic state
@@ -3527,13 +3557,15 @@ void backend_execute(uint64_t handle) {
             double lat = ln ? atomic_exchange(&stat_lat_ns, 0) / 1e6 / ln : 0, lmax = atomic_exchange(&stat_lat_max, 0) / 1e6;
             LOG("[vk] 2s builds: %llu programs from the cache | skipped %llu (program %llu, pipeline %llu) in %llu frames | waited %.0f ms in %llu waits, %llu "
                 "ready in time | translate %llu x %.1f ms (max %.0f), spirv %llu x %.1f (max %.0f), pipeline %llu x %.1f "
-                "(max %.0f) | needed -> ready %.0f ms avg, %.0f max | slowest frame %.1f ms\n",
+                "(max %.0f) | needed -> ready %.0f ms avg, %.0f max | slowest frame %.1f ms | first-draw / movie waits %llu, %.0f ms\n",
                 (unsigned long long)stat_prog_cached, (unsigned long long)stat_skipped, (unsigned long long)stat_skip_prog,
                 (unsigned long long)stat_skip_pipe, (unsigned long long)stat_skip_frames, stat_waited_ns / 1e6, (unsigned long long)stat_waits,
                 (unsigned long long)stat_rescued, (unsigned long long)n[0], ms[0], mx[0], (unsigned long long)n[1], ms[1],
-                mx[1], (unsigned long long)n[2], ms[2], mx[2], lat, lmax, stat_frame_max / 1e6);
+                mx[1], (unsigned long long)n[2], ms[2], mx[2], lat, lmax, stat_frame_max / 1e6, (unsigned long long)stat_long_waits,
+                stat_long_ns / 1e6);
         }
         stat_prog_cached = stat_skip_prog = stat_skip_pipe = stat_skip_frames = stat_waited_ns = stat_waits = stat_rescued = stat_frame_max = 0;
+        stat_long_waits = stat_long_ns = 0;
         stat_draws = stat_skipped = stat_passes = stat_dispatches = stat_snapshots = 0;
         stat_exec_ns = stat_wait_ns = stat_copy_bytes = stat_upload_ns = stat_vc_hits = stat_vc_refresh = 0;
     }
