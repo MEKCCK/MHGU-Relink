@@ -558,6 +558,15 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
    names, several keys per button, mouse buttons too), plus the left stick's four directions and the walk key. Today
    the layout is fixed: key_buttons in runtime/host_input.c, WASD / Shift handled beside it. The current layout stays
    the default, so existing ini files keep working; the settings launcher (item 7) can show it later.
+11. Button-combo windows at high frame rates (reported 2026-10-28). Two-button inputs such as the Hunting Horn's
+   X+A have to be pressed almost together at high frame rates, and the window shrinks as the frame rate rises: the
+   game most likely accepts the second button only within a fixed number of updates of the first (tuned for 30
+   updates a second), like the buff icon countdown (runtime/hle/buffcycle.c) and the monster jumps
+   (runtime/hle/emjump.c) were. Find the window: the player's input buffer / command check (fnnew while pressing X,
+   then A, a few frames apart; watch which counter decides), and make it count in the frame step (step / 2 updates)
+   so it lasts as long as at 30 fps. Keep what is snappier at high frame rates: only the time windows should stay
+   30 fps-long, not when a press is read. Check other weapons' combos and input buffers too (Charge Blade, Insect
+   Glaive, Hunter Arts / Styles' inputs).
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
