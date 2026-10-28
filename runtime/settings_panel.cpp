@@ -759,10 +759,11 @@ void navigate(std::vector<Row> &rows) {
 // Keep ImGui internals at this boundary: rows retain native activation and rendering.
 void own_focus(ImGuiWindow *w, ImGuiID id, const ImRect &rect) {
     ImGuiContext &g = *ImGui::GetCurrentContext();
+    // Focus first: a click outside the menu leaves no focused window, and SetNavID asserts one
+    ImGui::FocusWindow(w);
     ImGui::SetNavID(id, ImGuiNavLayer_Main, 0,
                     ImRect(ImVec2(rect.Min.x - w->Pos.x, rect.Min.y - w->Pos.y),
                            ImVec2(rect.Max.x - w->Pos.x, rect.Max.y - w->Pos.y)));
-    ImGui::FocusWindow(w);
     g.NavCursorVisible = true;
     g.NavInitRequest = false;
     g.NavMoveSubmitted = false;

@@ -94,6 +94,13 @@ int main() {
 
     idle();
     selected("display.mode");
+    // A click outside the menu unfocuses every window; the menu takes its focus back (it used to assert in SetNavID)
+    io.AddMousePosEvent(4, 4);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    idle();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    idle();
+    selected("display.mode");
     confirm();
     selected("choice.2");
     back();
