@@ -23,6 +23,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Optional: village quests are playable in multiplayer (press L/R at the quest counter), with appropriately re-scaled monster HP
 - Mod support. The vast majority of mods work by dropping them into the `mods` folder, including Forge mods. (see [Mods](#mods))
 - Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
+- Ingame PC Settings menu overlay (F1 to open, will be replaced with a real settings menu in the future)
 
 ## Requirements
 
