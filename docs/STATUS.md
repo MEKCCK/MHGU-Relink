@@ -375,7 +375,9 @@ pipeline cache), so ~1100-1230 draws were skipped over 13 frames. Now (exec.c):
 - a draw whose program / pipeline is still building waits for it, up to MHGU_PIPE_WAIT_MS (default 6) per frame in
   all, and its job moves to the front of its queue;
 - cache/programs.bin keeps every translated program (GLSL + reflection, keyed by a hash of the guest code the
-  translator reads + the shader keys; tied to the executable's size / time stamp, so a rebuild starts it afresh), and
+  translator reads + the shader keys; tied to the translator: the Makefile's SHADER_ID, a hash of
+  runtime/nvn/maxwell/translate.c + shader.h, and exec.c's CACHE_FORMAT, so updates that leave the translator alone
+  keep it, as Ryujinx's cache does; until 2026-10-28 any rebuild started it afresh), and
   cache/pipelines.bin each pipeline's state (program by content key, render pass by formats). The next run builds them
   all on the workers at its first draw (~130 programs + ~170 pipelines: well under a second, during the logos), like
   Ryujinx's shader cache. Both are appended as they grow, so a killed run keeps them. MHGU_NO_PROGRAM_CACHE=1: off.
@@ -383,7 +385,7 @@ Village load on the R9 (warm caches): 0 skipped draws on entering (was 1064 / 12
 logo frames), slowest frame 56-62 ms (was 83, the load hitch itself), steady 57 fps unchanged. First run ever (empty
 caches): 761 skipped over 9 frames (was 1230 over 13): translation throughput bound, waits cap at 6 ms a frame.
 Known gaps that remain:
-- A program never seen before (first run, or after a rebuild) can still be missing for a few frames when many arrive
+- A program never seen before (first run, or after the translator changed) can still be missing for a few frames when many arrive
   at once.
 - R9 200 approximations: no custom border colours (nearest standard colour), D24S8 stored as D32F_S8 (polygon-offset
   units differ for decals).

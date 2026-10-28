@@ -87,6 +87,10 @@ endif
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+# SHADER_ID: the shader translator, whose output cache/programs.bin keeps (runtime/nvn/vulkan/exec.c): the cache stays
+# valid across builds until the translator changes. (Line endings ignored: the same sources hash the same everywhere.)
+SHADER_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
+SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
@@ -160,6 +164,10 @@ $(O)/gen/tools/gamelib_entry.o: tools/gamelib_entry.c $(O)/gamelib.id
 	$(CC) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
 $(O)/rt/gamelib.o: $(O)/gamelib.id
 $(O)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
+$(O)/shader.id: FORCE
+	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(SHADER_ID)' ] || echo '$(SHADER_ID)' > $@
+$(O)/rt/nvn/vulkan/exec.o: $(O)/shader.id
+$(O)/rt/nvn/vulkan/exec.o: RTFLAGS += -DSHADER_ID='"$(SHADER_ID)"'
 
 $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)

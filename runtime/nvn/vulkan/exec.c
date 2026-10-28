@@ -1796,8 +1796,9 @@ static void translate_program(void *arg) {
 // ---- program cache: cache/programs.bin keeps every translated program (sources + reflection, keyed by a hash of the
 // guest code the translator reads and the shader keys), and the next run builds them all on the workers at its first
 // draw, as Ryujinx's shader cache does: an area's programs are then ready when it is entered (translation is serial
-// and was most of the wait). The file is tied to this executable (size + time stamp: any rebuild may have changed the
-// translator) and appended to as programs are translated (a killed run keeps them). MHGU_NO_PROGRAM_CACHE=1: off
+// and was most of the wait). The file is tied to the translator (the Makefile's SHADER_ID, a hash of its sources, and
+// CACHE_FORMAT below), so it outlives updates that leave the translator alone, as Ryujinx's cache does; it is appended
+// to as programs are translated (a killed run keeps them). MHGU_NO_PROGRAM_CACHE=1: off
 // (also off with the translator debug options MHGU_SAVE_GLSL / MHGU_SAVE_MSL / MHGU_NO_DISCARD).
 #define PROG_TAB 4096
 typedef struct {
@@ -1812,6 +1813,7 @@ typedef struct {
 static FILE *progcache_f;
 static bool progcache_on;
 typedef struct { char magic[8]; uint64_t stamp; } CacheHeader;
+#define CACHE_FORMAT 1  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
 static void pipecache_init(const CacheHeader *hdr);
 static uint64_t stat_prog_cached;
 static struct { uint64_t ck; Prog *prog; } progcache_tab[PROG_TAB];
@@ -1865,10 +1867,15 @@ static void progcache_init(void) {
     if (getenv("MHGU_NO_PROGRAM_CACHE") || getenv("MHGU_SAVE_GLSL") || getenv("MHGU_SAVE_MSL") || getenv("MHGU_NO_DISCARD"))
         return;
     CacheHeader hdr = {"MHGUPRG", sizeof(ProgRec)}, fh;
+    hdr.stamp = hash_words(hdr.stamp, (uint64_t[]){CACHE_FORMAT}, 8);
+#ifdef SHADER_ID
+    hdr.stamp = hash_words(hdr.stamp, SHADER_ID, sizeof SHADER_ID - 1);
+#else  // (built without the Makefile's id: tied to this executable, size + time stamp)
     char exe[1024];
     struct stat es;
     if (!plat_exe_path(exe, sizeof exe) || stat(exe, &es)) return;
     hdr.stamp = hash_words(hdr.stamp, (uint64_t[]){(uint64_t)es.st_size, (uint64_t)es.st_mtime}, 16);
+#endif
     mkdir("cache", 0755);
     uint64_t t0 = plat_now_ns();
     int n = 0;
