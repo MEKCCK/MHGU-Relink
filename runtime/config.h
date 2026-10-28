@@ -1,9 +1,16 @@
 // Player settings: mhgurecomp.ini in the game folder (written with the defaults when it is missing).
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
+enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
@@ -36,6 +43,12 @@ typedef struct {
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
     int background_input;     // the controller keeps working while the window is in the background (runtime/ui.c)
+    int volume;               // host master volume, 0..100; independent of the game's music / SFX settings
+    int button_icons;         // 0: Xbox, 1: Switch, 2: PlayStation (visual guides only)
+    int language;             // 0: English, 1: Spanish (host menu only)
+    int menu_scale;           // host UI text/layout scale, 100..200 percent
+    int menu_confirm;         // independent confirmation policy for the host settings menu
+    int confirm_exit;         // ask before closing the application
     int fsr;                  // [Upscaler] FSR 3.1: 1 on (runtime/nvn/vulkan/fsr.c), 0 off
     int fsr_quality;          // FSR_*: the render scale
     float fsr_sharpness;      // FSR's RCAS sharpening, 0..1
@@ -51,7 +64,7 @@ enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORM
 extern Config g_config;
 extern uint32_t g_render_size[2];  // read by the game code (tools/gen.py PATCHES: its docked render size)
 extern float g_render_aspect;      // the picture's shape, 16:10 or wider: the 3D cameras' aspect (tools/gen.py PATCHES)
-extern float g_fov_scale;          // 3D camera field of view factor (tools/gen.py PATCHES)
+extern float g_fov_scale;          // boot diagnostic value; camera_fovy reads config_live_fov()
 extern uint32_t g_ui_size[2];      // the game's 2D canvas size (tools/gen.py PATCHES: 0xdbcd48, 0xdbcd54)
 extern float g_ui_anchor_aspect;   // the HUD's width / height, 16:9 .. g_render_aspect (nvn/vulkan/exec.c)
 extern uint32_t g_fsr_output[2];   // FSR on: the size it upscales to (what g_render_size would be without it), else 0
@@ -59,3 +72,29 @@ extern float g_fsr_lod_bias;       // FSR on: texture LOD bias for the lower ren
 float camera_fovy(float fovy, float aspect);  // a 3D camera's vertical field of view for its aspect (gen.py PATCHES)
 
 void config_load(void);  // before the window and the guest start
+// File values, before environment overrides and automatic resolution are resolved.
+void config_store_loaded(const Config *config);
+Config config_editable(void);
+Config config_defaults(void);
+bool config_save(const Config *config, char *error, size_t error_size);
+bool config_validate(const Config *config, char *error, size_t error_size);
+// Immutable boot settings stay in g_config. These getters are atomic live values.
+void config_runtime_init(const Config *effective); // After environment/Auto resolution at startup.
+float config_live_fps(void);
+float config_live_fov(void);
+float config_live_mouse_sensitivity(void);
+int config_live_fxaa(void);
+int config_live_msaa(void);
+int config_live_vsync(void);
+int config_live_face_buttons(void);
+int config_live_menu_confirm(void);
+int config_live_background_input(void);
+bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
+bool config_field_restart(const char *field);       // Compact per-field UI marker.
+float config_audio_gain(void);  // atomic, safe on audio threads
+int config_language(void);     // last saved UI language, atomic across host threads
+bool config_confirm_exit(void); // atomic, safe on the host main thread
+
+#ifdef __cplusplus
+}
+#endif

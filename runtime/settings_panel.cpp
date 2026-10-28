@@ -1,0 +1,1114 @@
+#include "settings_panel.h"
+#include "config.h"
+#include "menu_confirm.h"
+#include "settings_locale.h"
+#include "settings_icons.h"
+#include "app_actions.h"
+#include "overlay.h"
+#include "imgui_internal.h"
+#include <SDL3/SDL.h>
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace {
+enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move };
+enum class Command { None, Save };
+struct Row {
+    std::string id, title, value;
+    bool enabled = true, cold = false, action = false;
+    std::function<void(int)> adjust;
+    std::function<void()> activate;
+};
+struct Target {
+    std::string id;
+    ImVec2 center;
+    bool enabled;
+};
+struct Origin {
+    View view;
+    std::string focus;
+    float scroll;
+};
+struct Choice {
+    std::vector<std::string> names;
+    int selected;
+    std::function<void(int)> set;
+    std::string title;
+};
+struct Keyboard {
+    std::string title, original, buffer;
+    size_t cursor = 0, capacity = 255;
+    bool upper = false, select_all = false;
+    std::function<bool(const std::string &, std::string &)> commit;
+};
+struct State {
+    Config draft = {}, saved = {};
+    bool editing = false, floating = false, advanced = false, focus_request = true, saved_notice = false;
+    int page = 0;
+    View view = View::Main;
+    Command command = Command::None;
+    std::string focus, error;
+    std::vector<Target> targets;
+    std::vector<Origin> origins;
+    Choice choice;
+    Keyboard keyboard;
+    uint64_t quest_keys[HP_QUESTS_MAX] = {}, next_quest_key = 1;
+    bool restore_scroll = false;
+    float scroll = 0, guide_height = 0;
+    int focus_scroll_frames = 0;
+    ImVec2 move_start = {}, move_position = {};
+    bool position_override = false;
+} s;
+std::atomic<bool> request_exit, request_back, is_dirty, is_confirming;
+const char *tr(const char *text) { return settings_text(s.draft.language, text); }
+struct GuideLayout {
+    ImVec2 offset[3];
+    float height = 0;
+};
+GuideLayout guide_layout(float width) {
+    GuideLayout layout;
+    float f = ImGui::GetFontSize(), x = 0, y = 0;
+    const char *labels[] = {"Navigation", "Confirm", "Back"};
+    for (int i = 0; i < 3; i++) {
+        float item_width = f * 1.4f + ImGui::CalcTextSize(tr(labels[i])).x;
+        if (x && x + item_width > width) {
+            x = 0;
+            y += f + ImGui::GetStyle().ItemSpacing.y;
+        }
+        layout.offset[i] = ImVec2(x, y);
+        x += item_width + f;
+    }
+    layout.height = y + f;
+    return layout;
+}
+void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
+    auto *draw = window->DrawList;
+    ImVec2 start(window->InnerRect.Min.x + ImGui::GetStyle().WindowPadding.x, top);
+    ImU32 background = ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK;
+    draw->AddRectFilled(ImVec2(window->InnerRect.Min.x, top - ImGui::GetStyle().ItemSpacing.y),
+                        ImVec2(window->InnerRect.Max.x, top + layout.height), background);
+    const int icons[] = {SettingsIcons::Dpad, SettingsIcons::Confirm, SettingsIcons::Back};
+    const char *labels[] = {"Navigation", "Confirm", "Back"};
+    float f = ImGui::GetFontSize();
+    for (int i = 0; i < 3; i++) {
+        ImVec2 pos(start.x + layout.offset[i].x, start.y + layout.offset[i].y);
+        SettingsIcons::draw(draw, pos, f, s.draft.button_icons, icons[i],
+                            menu_confirm_position(config_live_menu_confirm(), overlay_face_position(0),
+                                                  overlay_face_position(1), i == 2));
+        draw->AddText(ImVec2(pos.x + f * 1.4f, pos.y), ImGui::GetColorU32(ImGuiCol_Text), tr(labels[i]));
+    }
+}
+bool confirmation() {
+    return s.view == View::CloseChanges || s.view == View::Exit || s.view == View::Restart ||
+           s.view == View::Reset;
+}
+bool equal(const Config &a, const Config &b) {
+#define SAME(f)                                                                                              \
+    if (a.f != b.f)                                                                                          \
+    return false
+    SAME(display_mode);
+    SAME(width);
+    SAME(height);
+    SAME(render_w);
+    SAME(render_h);
+    SAME(fps);
+    SAME(fsr);
+    SAME(fsr_upscaler);
+    SAME(fsr_quality);
+    SAME(fsr_sharpness);
+    SAME(fsr_objmotion);
+    SAME(fsr_reactive);
+    SAME(fsr_animsurf);
+    SAME(vsync);
+    SAME(msaa);
+    SAME(fxaa);
+    SAME(face_buttons);
+    SAME(ldn_port);
+    SAME(sync_small_monsters);
+    SAME(bonus_content);
+    SAME(village_in_hub);
+    SAME(mouse_sensitivity);
+    SAME(aspect_ratio);
+    SAME(fov);
+    SAME(ui_anchor);
+    SAME(background_input);
+    SAME(volume);
+    SAME(button_icons);
+    SAME(language);
+    SAME(menu_scale);
+    SAME(menu_confirm);
+    SAME(confirm_exit);
+    SAME(hp.village);
+    SAME(hp.quests);
+#undef SAME
+    if (strcmp(a.ldn_join, b.ldn_join))
+        return false;
+    for (int n = 0; n < 4; ++n)
+        if (a.hp.scale[n] != b.hp.scale[n])
+            return false;
+    for (int i = 0; i < a.hp.quests; ++i) {
+        if (a.hp.quest[i].quest != b.hp.quest[i].quest)
+            return false;
+        for (int n = 0; n < 4; ++n)
+            if (a.hp.quest[i].scale[n] != b.hp.quest[i].scale[n])
+                return false;
+    }
+    return true;
+}
+bool dirty() { return !equal(s.draft, s.saved); }
+bool pending_text() {
+    bool editing = s.view == View::Keyboard;
+    for (const auto &o : s.origins)
+        editing |= o.view == View::Keyboard;
+    return editing && s.keyboard.buffer != s.keyboard.original;
+}
+std::string quest_id(int index) { return "quest." + std::to_string(s.quest_keys[index]); }
+void quest_keys() {
+    for (int i = 0; i < s.draft.hp.quests; ++i)
+        s.quest_keys[i] = s.next_quest_key++;
+}
+void focus(const std::string &id) {
+    s.focus = id;
+    s.focus_request = true;
+}
+void push(View view, const std::string &first) {
+    auto *root = ImGui::FindWindowByName("Settings##main");
+    s.origins.push_back({s.view, s.focus, root ? root->Scroll.y : 0});
+    s.view = view;
+    focus(first);
+    s.error.clear();
+    s.restore_scroll = true;
+    s.scroll = 0;
+    ImGui::ClearActiveID();
+}
+void pop() {
+    if (s.origins.empty()) {
+        s.view = View::Main;
+        s.focus.clear();
+    } else {
+        auto o = s.origins.back();
+        s.origins.pop_back();
+        s.view = o.view;
+        focus(o.focus);
+        s.scroll = o.scroll;
+    }
+    s.restore_scroll = true;
+    s.error.clear();
+    ImGui::ClearActiveID();
+}
+void first_page(int page) {
+    s.page = page;
+    s.view = View::Main;
+    s.origins.clear();
+    s.focus.clear();
+    s.focus_request = true;
+    s.restore_scroll = true;
+    s.scroll = 0;
+    s.error.clear();
+}
+void discard() {
+    s.draft = s.saved;
+    quest_keys();
+    s.error.clear();
+    s.saved_notice = false;
+}
+void ask_back(bool *open) {
+    if (s.view != View::Main) {
+        if (s.view == View::Move) {
+            s.move_position = s.move_start;
+            s.position_override = true;
+        }
+        pop();
+    } else if (dirty())
+        push(View::CloseChanges, "dialog.cancel");
+    else
+        *open = false;
+}
+void keyboard(const std::string &title, const std::string &initial, size_t cap,
+              std::function<bool(const std::string &, std::string &)> commit) {
+    s.keyboard = {title, initial, initial, initial.size(), cap, false, false, std::move(commit)};
+    push(View::Keyboard, "key.0");
+}
+void insert(const std::string &text) {
+    if (s.keyboard.select_all) {
+        s.keyboard.buffer.clear();
+        s.keyboard.cursor = 0;
+        s.keyboard.select_all = false;
+    }
+    if (s.keyboard.buffer.size() + text.size() > s.keyboard.capacity)
+        return;
+    s.keyboard.buffer.insert(s.keyboard.cursor, text);
+    s.keyboard.cursor += text.size();
+    s.error.clear();
+}
+void erase_previous() {
+    if (s.keyboard.select_all) {
+        s.keyboard.buffer.clear();
+        s.keyboard.cursor = 0;
+        s.keyboard.select_all = false;
+        return;
+    }
+    if (!s.keyboard.cursor)
+        return;
+    size_t begin = s.keyboard.cursor - 1;
+    while (begin && (static_cast<unsigned char>(s.keyboard.buffer[begin]) & 0xc0) == 0x80)
+        --begin;
+    s.keyboard.buffer.erase(begin, s.keyboard.cursor - begin);
+    s.keyboard.cursor = begin;
+    s.error.clear();
+}
+bool accept_keyboard() {
+    if (!s.keyboard.commit(s.keyboard.buffer, s.error))
+        return false;
+    pop();
+    return true;
+}
+void choices(const Row &row, std::vector<std::string> names, int selected, std::function<void(int)> set) {
+    s.choice = {std::move(names), selected, std::move(set), row.title};
+    push(View::Choices, "choice." + std::to_string(selected));
+}
+void add_bool(std::vector<Row> &rows, const char *id, const char *name, int *value, bool cold = false) {
+    Row r;
+    r.id = id;
+    r.title = tr(name);
+    r.cold = cold;
+    r.value = tr(*value ? "On" : "Off");
+    r.adjust = [value](int d) { *value = d > 0 ? 1 : 0; };
+    r.activate = [value]() { *value = !*value; };
+    rows.push_back(std::move(r));
+}
+void add_choice(std::vector<Row> &rows, const char *id, const char *name, int selected,
+                const std::vector<std::string> &names, std::function<void(int)> set, bool cold = false) {
+    Row r;
+    r.id = id;
+    r.title = tr(name);
+    r.value = names[std::clamp(selected, 0, (int)names.size() - 1)];
+    r.cold = cold;
+    r.adjust = [selected, names, set](int d) { set((selected + d + (int)names.size()) % (int)names.size()); };
+    Row copy = r;
+    r.activate = [copy, names, selected, set]() { choices(copy, names, selected, set); };
+    rows.push_back(std::move(r));
+}
+void add_number(std::vector<Row> &rows, const std::string &id, const std::string &name,
+                std::function<double()> get, std::function<void(double)> set, double low, double high,
+                double step, bool integral, bool cold = false,
+                std::function<bool(double, std::string &)> check = {}) {
+    char text[64];
+    snprintf(text, sizeof text, integral ? "%.0f" : "%.2f", get());
+    Row r;
+    r.id = id;
+    r.title = name;
+    r.value = text;
+    r.cold = cold;
+    r.adjust = [get, set, low, high, step, check](int d) {
+        double v = std::clamp(get() + d * step, low, high);
+        std::string error;
+        for (int attempts = 0; attempts <= HP_QUESTS_MAX; ++attempts) {
+            if (!check || check(v, error)) {
+                set(v);
+                break;
+            }
+            double next = std::clamp(v + d * step, low, high);
+            if (next == v)
+                break;
+            v = next;
+        }
+    };
+    rows.push_back(std::move(r));
+}
+void number(std::vector<Row> &r, const char *id, const char *name, int *p, int low, int high, int step = 1,
+            bool cold = false) {
+    add_number(
+        r, id, tr(name), [p]() { return (double)*p; }, [p](double v) { *p = (int)v; }, low, high, step, true,
+        cold);
+}
+void number(std::vector<Row> &r, const std::string &id, const std::string &name, float *p, float low,
+            float high, float step, bool cold = false) {
+    add_number(
+        r, id, name, [p]() { return (double)*p; }, [p](double v) { *p = (float)v; }, low, high, step, false,
+        cold);
+}
+void action(std::vector<Row> &rows, const std::string &id, const std::string &name, std::function<void()> fn,
+            bool enabled = true) {
+    Row r;
+    r.id = id;
+    r.title = name;
+    r.action = true;
+    r.activate = std::move(fn);
+    r.enabled = enabled;
+    rows.push_back(std::move(r));
+}
+void reset_section() {
+    Config f = config_defaults(), &c = s.draft;
+    switch (s.page) {
+    case 0:
+        c.display_mode = f.display_mode;
+        c.width = f.width;
+        c.height = f.height;
+        c.render_w = f.render_w;
+        c.render_h = f.render_h;
+        c.aspect_ratio = f.aspect_ratio;
+        c.fov = f.fov;
+        c.ui_anchor = f.ui_anchor;
+        break;
+    case 1:
+        c.fsr = f.fsr;
+        c.fsr_upscaler = f.fsr_upscaler;
+        c.fsr_quality = f.fsr_quality;
+        c.fsr_sharpness = f.fsr_sharpness;
+        c.fsr_objmotion = f.fsr_objmotion;
+        c.fsr_reactive = f.fsr_reactive;
+        c.fsr_animsurf = f.fsr_animsurf;
+        c.fps = f.fps;
+        c.vsync = f.vsync;
+        c.msaa = f.msaa;
+        c.fxaa = f.fxaa;
+        c.volume = f.volume;
+        break;
+    case 2:
+        c.face_buttons = f.face_buttons;
+        c.menu_confirm = f.menu_confirm;
+        c.button_icons = f.button_icons;
+        c.background_input = f.background_input;
+        c.mouse_sensitivity = f.mouse_sensitivity;
+        break;
+    case 3:
+        c.ldn_port = f.ldn_port;
+        SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
+        c.sync_small_monsters = f.sync_small_monsters;
+        c.village_in_hub = f.village_in_hub;
+        break;
+    case 4:
+        c.hp = f.hp;
+        quest_keys();
+        break;
+    case 5:
+        c.language = f.language;
+        c.menu_scale = f.menu_scale;
+        c.confirm_exit = f.confirm_exit;
+        c.bonus_content = f.bonus_content;
+        break;
+    }
+    pop();
+}
+std::vector<Row> main_rows() {
+    std::vector<Row> r;
+    Config &c = s.draft;
+    switch (s.page) {
+    case 0:
+        add_choice(
+            r, "display.mode", "Window mode", c.display_mode,
+            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, true);
+        add_choice(
+            r, "display.auto", "Screen resolution", !c.width ? 0 : 1, {tr("Desktop"), tr("Custom")},
+            [](int v) {
+                s.draft.width = v ? 1920 : 0;
+                s.draft.height = v ? 1080 : 0;
+            },
+            true);
+        if (c.width) {
+            number(r, "display.width", "Width", &c.width, 320, 16384, 80, true);
+            number(r, "display.height", "Height", &c.height, 180, 16384, 45, true);
+        }
+        add_choice(
+            r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
+            [](int v) {
+                s.draft.render_w = v ? 1920 : 0;
+                s.draft.render_h = v ? 1080 : 0;
+            },
+            true);
+        if (c.render_w) {
+            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, true);
+            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, true);
+        }
+        add_choice(
+            r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
+            {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, true);
+        if (c.aspect_ratio)
+            number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, .5f, 10, .05f, true);
+        number(r, "fov", tr("Field of view"), &c.fov, .5f, 2, .05f);
+        add_choice(
+            r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
+            [](int v) { c.ui_anchor = v + 1; }, true);
+        break;
+    case 1:
+        number(r, "fps", "Frame rate limit", &c.fps, 30, 240, 1);
+        add_bool(r, "vsync", "VSync", &c.vsync);
+        add_choice(r, "msaa", "MSAA",
+                   c.msaa == 8   ? 3
+                   : c.msaa == 4 ? 2
+                   : c.msaa == 2 ? 1
+                                 : 0,
+                   {tr("Off"), "2x", "4x", "8x"}, [](int v) { c.msaa = 1 << v; });
+        if (g_config.fsr) {
+            r.back().cold = true;
+            if (c.fsr) {
+                r.back().enabled = false;
+                r.back().value = tr("Off (FSR)");
+            }
+        }
+        add_bool(r, "fxaa", "FXAA", &c.fxaa);
+        if (g_config.fsr) {
+            r.back().cold = true;
+            if (c.fsr) {
+                r.back().enabled = false;
+                r.back().value = tr("Off (FSR)");
+            }
+        }
+        number(r, "volume", "Volume (%)", &c.volume, 0, 100);
+        add_bool(r, "fsr", "FSR", &c.fsr, true);
+        if (c.fsr) {
+            add_choice(
+                r, "fsr.provider", "Upscaler", c.fsr_upscaler, {"FSR 3.1", "FSR 4"},
+                [](int v) { s.draft.fsr_upscaler = v; }, true);
+            add_choice(
+                r, "fsr.quality", "FSR quality", c.fsr_quality,
+                {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},
+                [](int v) { s.draft.fsr_quality = v; }, true);
+            number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, 0, 1, .05f, true);
+            add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, true);
+            number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, 0, 1, .05f, true);
+            add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, true);
+        }
+        break;
+    case 2:
+        add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
+                   [](int v) { c.face_buttons = v; });
+        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
+                   {tr("Original"), tr("Bottom button"), tr("Right button")},
+                   [](int v) { s.draft.menu_confirm = v; });
+        add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
+                   [](int v) { c.button_icons = v; });
+        add_bool(r, "background", "Background input", &c.background_input);
+        number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, .1f, 10, .05f);
+        break;
+    case 3:
+        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, 1, 65535, 1, true);
+        {
+            Row row;
+            row.id = "hosts";
+            row.title = tr("Search hosts");
+            row.value = *c.ldn_join ? c.ldn_join : tr("LAN");
+            row.cold = true;
+            row.activate = []() {
+                keyboard(tr("Search hosts"), c.ldn_join, 255,
+                         [](const std::string &text, std::string &error) {
+                             Config temp = c;
+                             SDL_strlcpy(temp.ldn_join, text.c_str(), sizeof temp.ldn_join);
+                             char why[512];
+                             if (!config_validate(&temp, why, sizeof why)) {
+                                 error = settings_text(c.language, why);
+                                 return false;
+                             }
+                             c = temp;
+                             return true;
+                         });
+            };
+            r.push_back(std::move(row));
+        }
+        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, true);
+        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, true);
+        break;
+    case 4:
+        for (int i = 0; i < 4; i++)
+            number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
+                   HP_SCALE_MIN, HP_SCALE_MAX, .05f, true);
+        number(r, "hp.village", tr("Village HP multiplier"), &c.hp.village, HP_SCALE_MIN, HP_SCALE_MAX, .05f,
+               true);
+        action(r, "hp.advanced", tr("Per-quest overrides"), []() { s.advanced = !s.advanced; });
+        if (s.advanced) {
+            for (int i = 0; i < c.hp.quests; i++) {
+                auto id = quest_id(i);
+                add_number(
+                    r, id, tr("Quest ID"), [i]() { return (double)s.draft.hp.quest[i].quest; },
+                    [i](double v) { s.draft.hp.quest[i].quest = (uint32_t)v; }, 1, 4294967295., 1, true, true,
+                    [i](double v, std::string &e) {
+                        for (int j = 0; j < s.draft.hp.quests; j++)
+                            if (j != i && s.draft.hp.quest[j].quest == (uint32_t)v) {
+                                e = tr("Duplicate quest ID.");
+                                return false;
+                            }
+                        return true;
+                    });
+                for (int n = 0; n < 4; n++)
+                    number(r, id + "." + std::to_string(n), std::to_string(n + 1) + " " + tr(n == 0 ? "Hunter" : "Hunters"),
+                           &c.hp.quest[i].scale[n], HP_SCALE_MIN, HP_SCALE_MAX, .05f, true);
+                action(r, id + ".remove", tr("Remove quest"), [i]() {
+                    for (int j = i; j < s.draft.hp.quests - 1; j++) {
+                        s.draft.hp.quest[j] = s.draft.hp.quest[j + 1];
+                        s.quest_keys[j] = s.quest_keys[j + 1];
+                    }
+                    --s.draft.hp.quests;
+                    focus(i < s.draft.hp.quests ? quest_id(i) : "hp.add");
+                });
+            }
+            action(
+                r, "hp.add", tr("Add quest"),
+                []() {
+                    auto &hp = s.draft.hp;
+                    uint32_t q = 1;
+                    bool exists;
+                    do {
+                        exists = false;
+                        for (int i = 0; i < hp.quests; i++)
+                            if (hp.quest[i].quest == q) {
+                                exists = true;
+                                ++q;
+                                break;
+                            }
+                    } while (exists);
+                    int i = hp.quests++;
+                    hp.quest[i].quest = q;
+                    for (float &v : hp.quest[i].scale)
+                        v = 1;
+                    s.quest_keys[i] = s.next_quest_key++;
+                    focus(quest_id(i));
+                },
+                c.hp.quests < HP_QUESTS_MAX);
+        }
+        break;
+    case 5:
+        add_choice(r, "language", "Language", c.language, {"English", "Español"},
+                   [](int v) { c.language = v; });
+        number(r, "scale", "Interface scale (%)", &c.menu_scale, 100, 200, 10);
+        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit);
+        add_bool(r, "bonus", "Bonus content", &c.bonus_content, true);
+        action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
+               []() { s.floating = !s.floating; });
+        if (s.floating)
+            action(r, "move", tr("Move menu"), []() {
+                auto *w = ImGui::GetCurrentWindow();
+                s.move_start = s.move_position = w->Pos;
+                push(View::Move, "move.accept");
+            });
+        action(r, "restart", tr("Restart"), []() { push(View::Restart, "dialog.cancel"); });
+        action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
+        break;
+    }
+    action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
+    action(r, "reset", tr("Reset this tab"), []() { push(View::Reset, "dialog.cancel"); });
+    return r;
+}
+bool save() {
+    if (pending_text()) {
+        std::string error;
+        if (!s.keyboard.commit(s.keyboard.buffer, error)) {
+            while (s.view != View::Keyboard && !s.origins.empty())
+                pop();
+            s.error = error;
+            return false;
+        }
+        s.keyboard.original = s.keyboard.buffer;
+    }
+    char error[512];
+    if (!config_save(&s.draft, error, sizeof error)) {
+        s.error = settings_text(s.draft.language, error);
+        return false;
+    }
+    s.saved = s.draft;
+    s.saved_notice = true;
+    s.error.clear();
+    return true;
+}
+std::vector<Row> rows_for_view(bool *open) {
+    if (s.view == View::Main)
+        return main_rows();
+    std::vector<Row> r;
+    if (s.view == View::Choices) {
+        for (int i = 0; i < (int)s.choice.names.size(); i++)
+            action(r, "choice." + std::to_string(i), s.choice.names[i], [i]() {
+                s.choice.set(i);
+                pop();
+            });
+        action(r, "choice.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Keyboard) {
+        std::string chars = "1234567890abcdefghijklmnopqrstuvwxyz.:,-_/@";
+        if (s.keyboard.upper)
+            for (char &c : chars)
+                c = (char)SDL_toupper(c);
+        for (int i = 0; i < (int)chars.size(); i++) {
+            std::string ch(1, chars[i]);
+            action(r, "key." + std::to_string(i), ch, [ch]() { insert(ch); });
+        }
+        action(r, "key.delete", tr("Delete"), []() { erase_previous(); });
+        action(r, "key.clear", tr("Clear"), []() {
+            s.keyboard.buffer.clear();
+            s.keyboard.cursor = 0;
+        });
+        action(r, "key.space", tr("Space"), []() { insert(" "); });
+        action(r, "key.case", tr("Case"), []() { s.keyboard.upper = !s.keyboard.upper; });
+        action(r, "key.accept", tr("Accept"), []() { accept_keyboard(); });
+        action(r, "key.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Move) {
+        action(r, "move.accept", tr("Accept"), []() { pop(); });
+        action(r, "move.cancel", tr("Cancel"), []() {
+            s.move_position = s.move_start;
+            s.position_override = true;
+            pop();
+        });
+    } else {
+        action(r, "dialog.cancel", tr("Cancel"), []() { pop(); });
+        if (s.view == View::Reset)
+            action(r, "dialog.reset", tr("Reset"), []() { reset_section(); });
+        if (s.view == View::CloseChanges) {
+            action(r, "dialog.save", tr("Save and close"), [open]() {
+                if (save())
+                    *open = false;
+            });
+            action(r, "dialog.discard", tr("Discard and close"), [open]() {
+                discard();
+                *open = false;
+            });
+        }
+        if (s.view == View::Exit) {
+            action(r, "dialog.exit", tr((dirty() || pending_text()) ? "Save and exit" : "Exit game"), []() {
+                if ((!dirty() && !pending_text()) || save())
+                    ui_request_action(false);
+            });
+            if (dirty() || pending_text())
+                action(r, "dialog.discard", tr("Exit without saving"), []() { ui_request_action(false); });
+        }
+        if (s.view == View::Restart)
+            action(r, "dialog.restart", tr("Save and restart"), []() {
+                if (save())
+                    ui_request_action(true);
+            });
+    }
+    return r;
+}
+bool pressed(ImGuiKey key, bool repeat = false) { return ImGui::IsKeyPressed(key, repeat); }
+bool direction(ImGuiKey a, ImGuiKey b, ImGuiKey c) {
+    return pressed(a, true) || pressed(b, true) || pressed(c, true);
+}
+void navigate(std::vector<Row> &rows) {
+    if (rows.empty())
+        return;
+    auto it =
+        std::find_if(rows.begin(), rows.end(), [](const Row &r) { return r.id == s.focus && r.enabled; });
+    if (it == rows.end()) {
+        it = std::find_if(rows.begin(), rows.end(), [](const Row &r) { return r.enabled; });
+        if (it == rows.end())
+            return;
+        focus(it->id);
+    }
+    int index = (int)(it - rows.begin());
+    int dy = direction(ImGuiKey_DownArrow, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown) ? 1
+             : direction(ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp)     ? -1
+                                                                                                 : 0;
+    int dx = direction(ImGuiKey_RightArrow, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight) ? 1
+             : direction(ImGuiKey_LeftArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft)  ? -1
+                                                                                                    : 0;
+    if (pressed(ImGuiKey_Tab, true))
+        dy = ImGui::GetIO().KeyShift ? -1 : 1;
+    if (dx && it->adjust) {
+        it->adjust(dx);
+        return;
+    }
+    int delta = dy;
+    if (s.view == View::Keyboard && (dx || dy) && !pressed(ImGuiKey_Tab, true)) {
+        auto from =
+            std::find_if(s.targets.begin(), s.targets.end(), [](const Target &t) { return t.id == s.focus; });
+        if (from != s.targets.end()) {
+            float best = 1e30f;
+            std::string next;
+            for (const auto &t : s.targets) {
+                float x = t.center.x - from->center.x, y = t.center.y - from->center.y;
+                if (!t.enabled || (dy && y * dy <= 1) || (dx && (x * dx <= 1 || std::abs(y) > 1)))
+                    continue;
+                float score = dy ? std::abs(y) * 1000 + std::abs(x) : std::abs(x);
+                if (score < best) {
+                    best = score;
+                    next = t.id;
+                }
+            }
+            if (!next.empty())
+                focus(next);
+            return;
+        }
+    }
+    if (dx)
+        delta = dx;
+    if (delta) {
+        int next = std::clamp(index + delta, 0, (int)rows.size() - 1);
+        int step = delta > 0 ? 1 : -1;
+        while (next >= 0 && next < (int)rows.size() && !rows[next].enabled)
+            next += step;
+        if (next >= 0 && next < (int)rows.size())
+            focus(rows[next].id);
+    }
+    if (pressed(ImGuiKey_Home))
+        focus(rows.front().id);
+    if (pressed(ImGuiKey_End))
+        focus(rows.back().id);
+}
+// Keep ImGui internals at this boundary: rows retain native activation and rendering.
+void own_focus(ImGuiWindow *w, ImGuiID id, const ImRect &rect) {
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    ImGui::SetNavID(id, ImGuiNavLayer_Main, 0,
+                    ImRect(ImVec2(rect.Min.x - w->Pos.x, rect.Min.y - w->Pos.y),
+                           ImVec2(rect.Max.x - w->Pos.x, rect.Max.y - w->Pos.y)));
+    ImGui::FocusWindow(w);
+    g.NavCursorVisible = true;
+    g.NavInitRequest = false;
+    g.NavMoveSubmitted = false;
+    // Let auto-sizing settle after a view change; do not fight later mouse-wheel scrolling.
+    if (s.focus_request) {
+        s.focus_scroll_frames = 3;
+        s.focus_request = false;
+    }
+    if (s.focus_scroll_frames > 0) {
+        --s.focus_scroll_frames;
+        if (s.guide_height) {
+            float top = w->ClipRect.Min.y, bottom = w->ClipRect.Max.y;
+            float delta = rect.Min.y < top ? rect.Min.y - top : rect.Max.y > bottom ? rect.Max.y - bottom : 0;
+            if (delta)
+                ImGui::SetScrollY(w, w->Scroll.y + delta);
+        } else
+            ImGui::ScrollToRect(w, rect, ImGuiScrollFlags_KeepVisibleEdgeY);
+    }
+}
+void draw_rows(std::vector<Row> &rows) {
+    auto *w = ImGui::GetCurrentWindow();
+    float font = ImGui::GetFontSize(), width = ImGui::GetContentRegionAvail().x;
+    bool keyboard_view = s.view == View::Keyboard;
+    float gap = ImGui::GetStyle().ItemSpacing.x;
+    float cell = (width - 9 * gap) / 10;
+    s.targets.clear();
+    std::function<void()> activate;
+    for (int i = 0; i < (int)rows.size(); i++) {
+        Row &r = rows[i];
+        bool grid = keyboard_view && r.id.size() > 4 && r.id[4] >= '0' && r.id[4] <= '9';
+        float rw = grid ? cell : width;
+        if (grid && i % 10)
+            ImGui::SameLine();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float wrap = std::max(font, rw * (r.action ? 1.f : .58f) - font);
+        ImVec2 label = ImGui::CalcTextSize(r.title.c_str(), nullptr, false, wrap);
+        float h = grid ? font * 2 : std::max(font * 2.1f, label.y + font * .8f);
+        ImGui::PushID(r.id.c_str());
+        ImGuiID id = w->GetID("row");
+        ImRect rect(p, ImVec2(p.x + rw, p.y + h));
+        bool selected = s.focus == r.id;
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              selected ? ImVec4(.16f, .32f, .46f, 1) : ImVec4(.09f, .13f, .19f, 1));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.15f, .28f, .39f, 1));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.18f, .36f, .49f, 1));
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+        ImGui::BeginDisabled(!r.enabled);
+        bool clicked = ImGui::Button("###row", ImVec2(rw, h));
+        ImGui::EndDisabled();
+        ImGui::PopStyleColor(4);
+        if (selected && r.enabled) {
+            own_focus(w, id, rect);
+            w->DrawList->AddRect(rect.Min, rect.Max, IM_COL32(111, 216, 255, 255), 3.f, 2.f, 0);
+        }
+        w->DrawList->PushClipRect(rect.Min, rect.Max, true);
+        ImU32 ink = r.enabled ? IM_COL32(244, 247, 252, 255) : IM_COL32(132, 145, 160, 255);
+        w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .5f, p.y + (h - label.y) * .5f), ink,
+                             r.title.c_str(), nullptr, wrap);
+        if (!r.value.empty()) {
+            std::string value = r.value + (r.cold ? " *" : "");
+            float available = rw * .38f - font;
+            if (ImGui::CalcTextSize(value.c_str()).x > available) {
+                do {
+                    size_t n = value.size() - 1;
+                    while (n && ((unsigned char)value[n] & 0xc0) == 0x80)
+                        --n;
+                    value.resize(n);
+                } while (!value.empty() && ImGui::CalcTextSize((value + "...").c_str()).x > available);
+                value += "...";
+            }
+            auto sz = ImGui::CalcTextSize(value.c_str());
+            w->DrawList->AddText(ImVec2(p.x + rw - font * .5f - sz.x, p.y + (h - font) * .5f), ink,
+                                 value.c_str());
+        }
+        w->DrawList->PopClipRect();
+        s.targets.push_back({r.id, rect.GetCenter(), r.enabled});
+        ImGui::PopID();
+        if (clicked && r.enabled) {
+            focus(r.id);
+            activate = r.activate;
+        }
+    }
+    if (activate)
+        activate();
+}
+} // namespace
+void settings_panel_request_close() { request_exit.store(true); }
+void settings_panel_request_back() { request_back.store(true); }
+bool settings_panel_dirty() { return is_dirty.load(); }
+bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
+// Ownership has to precede NewFrame: native cancel/windowing runs there.
+void settings_panel_before_frame(bool open) {
+    if (!open && !request_exit.load())
+        return;
+    const ImGuiKey keys[] = {ImGuiKey_GamepadFaceRight,
+                             ImGuiKey_GamepadFaceLeft,
+                             ImGuiKey_GamepadFaceUp,
+                             ImGuiKey_GamepadL1,
+                             ImGuiKey_GamepadR1,
+                             ImGuiKey_GamepadDpadUp,
+                             ImGuiKey_GamepadDpadDown,
+                             ImGuiKey_GamepadDpadLeft,
+                             ImGuiKey_GamepadDpadRight,
+                             ImGuiKey_GamepadLStickUp,
+                             ImGuiKey_GamepadLStickDown,
+                             ImGuiKey_GamepadLStickLeft,
+                             ImGuiKey_GamepadLStickRight,
+                             ImGuiKey_Escape,
+                             ImGuiKey_UpArrow,
+                             ImGuiKey_DownArrow,
+                             ImGuiKey_LeftArrow,
+                             ImGuiKey_RightArrow,
+                             ImGuiKey_Tab,
+                             ImGuiKey_Home,
+                             ImGuiKey_End};
+    for (ImGuiKey key : keys)
+        ImGui::SetKeyOwner(key, 0x6d686775, ImGuiInputFlags_LockThisFrame);
+    if (s.view == View::Keyboard) {
+        ImGui::SetKeyOwner(ImGuiKey_Enter, 0x6d686775, ImGuiInputFlags_LockThisFrame);
+        ImGui::SetKeyOwner(ImGuiKey_Space, 0x6d686775, ImGuiInputFlags_LockThisFrame);
+    }
+}
+void settings_panel(bool *open) {
+    if (!*open) {
+        s.editing = false;
+        is_dirty = false;
+        is_confirming = false;
+        return;
+    }
+    if (!s.editing) {
+        s.draft = s.saved = config_editable();
+        s.editing = true;
+        s.view = View::Main;
+        s.origins.clear();
+        s.focus.clear();
+        s.focus_request = true;
+        s.error.clear();
+        s.saved_notice = false;
+        s.floating = false;
+        s.advanced = false;
+        quest_keys();
+    }
+    if (request_exit.exchange(false) && s.view != View::Exit)
+        push(View::Exit, "dialog.cancel");
+    Config before = s.draft;
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    float scale = s.draft.menu_scale / 100.f;
+    float base = ImGui::GetFontSize();
+    float margin = std::min(16.f, vp->WorkSize.x * .025f);
+    float width = std::min(vp->WorkSize.x - 2 * margin, base * scale * 56);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, vp->WorkSize.y - 2 * margin));
+    if (s.view == View::Move) {
+        float x =
+            (direction(ImGuiKey_RightArrow, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight) ? 1 : 0) -
+            (direction(ImGuiKey_LeftArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft) ? 1 : 0);
+        float y =
+            (direction(ImGuiKey_DownArrow, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown) ? 1 : 0) -
+            (direction(ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp) ? 1 : 0);
+        auto *w = ImGui::FindWindowByName("Settings##main");
+        float h = w ? w->Size.y : 200;
+        s.move_position.x = std::clamp(s.move_position.x + x * 16, vp->WorkPos.x,
+                                       vp->WorkPos.x + std::max(0.f, vp->WorkSize.x - width));
+        s.move_position.y = std::clamp(s.move_position.y + y * 16, vp->WorkPos.y,
+                                       vp->WorkPos.y + std::max(0.f, vp->WorkSize.y - h));
+        s.position_override = true;
+    }
+    if (s.position_override && s.floating) {
+        ImGui::SetNextWindowPos(s.move_position, ImGuiCond_Always);
+        s.position_override = false;
+    }
+    if (!s.floating)
+        ImGui::SetNextWindowPos(
+            ImVec2(vp->WorkPos.x + (vp->WorkSize.x - width) * .5f, vp->WorkPos.y + margin), ImGuiCond_Always);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(.025f, .04f, .065f, .98f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(.96f, .97f, 1, 1));
+    ImGui::Begin("Settings##main", nullptr,
+                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar |
+                     (s.floating ? 0 : ImGuiWindowFlags_NoMove));
+    ImGui::SetWindowFontScale(scale);
+    if (s.restore_scroll) {
+        ImGui::SetScrollY(s.scroll);
+        s.restore_scroll = false;
+    }
+    if (request_back.exchange(false) || pressed(ImGuiKey_GamepadFaceRight) || pressed(ImGuiKey_Escape))
+        ask_back(open);
+    bool pinned_guides = s.view == View::Main;
+    bool clipped_body = false;
+    auto *window = ImGui::GetCurrentWindow();
+    GuideLayout guides = guide_layout(ImGui::GetContentRegionAvail().x);
+    s.guide_height = pinned_guides ? guides.height : 0;
+    float guide_top =
+        std::max(window->Pos.y + window->Size.y - ImGui::GetStyle().WindowPadding.y - guides.height,
+                 window->InnerClipRect.Min.y);
+    if (pinned_guides)
+        ImGui::PushClipRect(
+            window->InnerClipRect.Min,
+            ImVec2(window->InnerClipRect.Max.x,
+                   std::max(window->InnerClipRect.Min.y, guide_top - ImGui::GetStyle().ItemSpacing.y)),
+            true);
+    if (s.view == View::Main) {
+        if (pressed(ImGuiKey_GamepadR1))
+            first_page((s.page + 1) % 6);
+        if (pressed(ImGuiKey_GamepadL1))
+            first_page((s.page + 5) % 6);
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Miscellaneous", "App"};
+        float avail = ImGui::GetContentRegionAvail().x;
+        float fw = ImGui::GetFontSize();
+        ImVec2 scrolling_start = ImGui::GetCursorScreenPos();
+        ImVec2 tabs_start(scrolling_start.x, window->Pos.y + ImGui::GetStyle().WindowPadding.y);
+        ImGui::SetCursorScreenPos(tabs_start);
+        float gutter = fw * 2.1f;
+        float tabs_width = avail - gutter * 2;
+        int columns = tabs_width / fw < 43 ? 3 : 6;
+        float tabw = (tabs_width - ImGui::GetStyle().ItemSpacing.x * (columns - 1)) / columns;
+        float tabh = fw * (columns == 3 ? 2.1f : 2.7f);
+        int lines = 6 / columns;
+        float header_height = tabh * lines + ImGui::GetStyle().ItemSpacing.y * (lines - 1);
+        auto *header = ImGui::GetWindowDrawList();
+        header->AddRectFilled(
+            ImVec2(window->InnerRect.Min.x, window->InnerRect.Min.y),
+            ImVec2(window->InnerRect.Max.x, tabs_start.y + header_height + ImGui::GetStyle().ItemSpacing.y),
+            ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK);
+        SettingsIcons::draw(header, ImVec2(tabs_start.x, tabs_start.y + (header_height - fw) * .5f), fw,
+                            s.draft.button_icons, SettingsIcons::Left, 0);
+        SettingsIcons::draw(
+            header, ImVec2(tabs_start.x + avail - fw * 1.5f, tabs_start.y + (header_height - fw) * .5f), fw,
+            s.draft.button_icons, SettingsIcons::Right, 0);
+        for (int i = 0; i < 6; i++) {
+            if (i % columns)
+                ImGui::SameLine();
+            else
+                ImGui::SetCursorPosX(tabs_start.x - ImGui::GetWindowPos().x + gutter);
+            ImGui::PushID(i);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            bool active = s.page == i;
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                                  active ? ImVec4(.18f, .4f, .56f, 1) : ImVec4(.06f, .09f, .14f, 1));
+            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+            if (ImGui::Button("###tab", ImVec2(tabw, tabh)))
+                first_page(i);
+            ImGui::PopItemFlag();
+            auto label = ImGui::CalcTextSize(tr(pages[i]), nullptr, false, tabw - fw * .5f);
+            ImGui::GetWindowDrawList()->AddText(
+                ImGui::GetFont(), fw, ImVec2(p.x + fw * .25f, p.y + (tabh - label.y) * .5f),
+                IM_COL32(244, 247, 252, 255), tr(pages[i]), nullptr, tabw - fw * .5f);
+            if (active)
+                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + tabh - 3),
+                                                          ImVec2(p.x + tabw, p.y + tabh),
+                                                          IM_COL32(111, 216, 255, 255));
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+        }
+        ImGui::SetCursorScreenPos(
+            ImVec2(scrolling_start.x, scrolling_start.y + header_height + ImGui::GetStyle().ItemSpacing.y));
+        float body_top = tabs_start.y + header_height + ImGui::GetStyle().ItemSpacing.y;
+        ImGui::PushClipRect(ImVec2(window->ClipRect.Min.x, std::min(body_top, window->ClipRect.Max.y)),
+                            window->ClipRect.Max, true);
+        clipped_body = true;
+    } else {
+        const char *title = s.view == View::Choices    ? s.choice.title.c_str()
+                            : s.view == View::Keyboard ? s.keyboard.title.c_str()
+                                                       : tr(s.view == View::Exit      ? "Exit game?"
+                                                            : s.view == View::Restart ? "Restart game?"
+                                                            : s.view == View::Reset   ? "Reset this tab?"
+                                                            : s.view == View::Move    ? "Move menu"
+                                                                                      : "Unsaved changes");
+        ImGui::TextWrapped("%s", title);
+    }
+    if (s.view == View::Keyboard) {
+        ImGuiIO &io = ImGui::GetIO();
+        for (ImWchar ch : io.InputQueueCharacters) {
+            char utf8[5];
+            int n = ImTextCharToUtf8(utf8, ch);
+            utf8[n] = 0;
+            insert(utf8);
+        }
+        if (pressed(ImGuiKey_Backspace, true))
+            erase_previous();
+        if (io.KeyCtrl && pressed(ImGuiKey_V)) {
+            char *clip = SDL_GetClipboardText();
+            if (clip) {
+                insert(clip);
+                SDL_free(clip);
+            }
+        }
+        if (io.KeyCtrl && pressed(ImGuiKey_A))
+            s.keyboard.select_all = true;
+        if (pressed(ImGuiKey_Delete, true) && s.keyboard.select_all)
+            erase_previous();
+        else if (pressed(ImGuiKey_Delete, true) && s.keyboard.cursor < s.keyboard.buffer.size()) {
+            size_t n = s.keyboard.cursor + 1;
+            while (n < s.keyboard.buffer.size() && ((unsigned char)s.keyboard.buffer[n] & 0xc0) == 0x80)
+                ++n;
+            s.keyboard.buffer.erase(s.keyboard.cursor, n - s.keyboard.cursor);
+        }
+        if (pressed(ImGuiKey_GamepadL1, true) && s.keyboard.cursor) {
+            --s.keyboard.cursor;
+            while (s.keyboard.cursor && ((unsigned char)s.keyboard.buffer[s.keyboard.cursor] & 0xc0) == 0x80)
+                --s.keyboard.cursor;
+        }
+        if (pressed(ImGuiKey_GamepadR1, true) && s.keyboard.cursor < s.keyboard.buffer.size()) {
+            ++s.keyboard.cursor;
+            while (s.keyboard.cursor < s.keyboard.buffer.size() &&
+                   ((unsigned char)s.keyboard.buffer[s.keyboard.cursor] & 0xc0) == 0x80)
+                ++s.keyboard.cursor;
+        }
+        if (pressed(ImGuiKey_Enter))
+            accept_keyboard();
+        if (s.view == View::Keyboard) {
+            auto text = s.keyboard.buffer;
+            text.insert(s.keyboard.cursor, "|");
+            ImGui::TextWrapped("%s", text.c_str());
+        }
+    }
+    auto rows = rows_for_view(open);
+    if (s.view != View::Move)
+        navigate(rows);
+    else
+        focus("move.accept");
+    draw_rows(rows);
+    if (s.command != Command::None) {
+        auto cmd = s.command;
+        s.command = Command::None;
+        if (cmd == Command::Save && save())
+            focus("reset");
+    }
+    if (!equal(before, s.draft) && dirty())
+        s.saved_notice = false;
+    if (ui_action_failed())
+        s.error = tr("Restart failed. The game is still running.");
+    if (!s.error.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, .72f, .57f, 1));
+        ImGui::TextWrapped("%s", s.error.c_str());
+        ImGui::PopStyleColor();
+    } else if (s.saved_notice)
+        ImGui::TextUnformatted(tr(config_restart_required(&s.draft) ? "Saved - restart pending" : "Saved"));
+    if (s.view == View::Main) {
+        if (s.page == 1 && (s.draft.fsr || g_config.fsr))
+            ImGui::TextWrapped("%s", tr("FSR overrides MSAA and FXAA while active."));
+        ImGui::TextUnformatted(tr("* Restart required"));
+        // Keep scroll space for the pinned hints so the last action can scroll fully above them.
+        ImGui::Dummy(ImVec2(1, guides.height + ImGui::GetStyle().ItemSpacing.y));
+    }
+    if (clipped_body)
+        ImGui::PopClipRect();
+    if (pinned_guides)
+        ImGui::PopClipRect();
+    if (pinned_guides && s.view == View::Main)
+        draw_guides(window, guides, guide_top);
+    ImGui::End();
+    ImGui::PopStyleColor(2);
+    is_dirty = *open && (dirty() || pending_text());
+    is_confirming = *open && confirmation();
+    if (!*open)
+        s.editing = false;
+}

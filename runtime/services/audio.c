@@ -9,6 +9,7 @@
 
 #include "../hle.h"
 #include "../ipc.h"
+#include "../config.h"
 
 // ------------------------------------------------------------------ audren: a CPU mixer modelled on
 // Ryujinx's AudioRenderer (VoiceState / DataSourceHelper / StateUpdater, copies in notes/ryujinx_audio).
@@ -966,7 +967,7 @@ static void render_frame(Renderer *r, float *stereo) {
 static void apply_gain(SDL_AudioStream *st) {
     static double env = -1;
     if (env < 0) env = getenv("MHGU_AUDIO_GAIN") ? atof(getenv("MHGU_AUDIO_GAIN")) : 1.0;
-    float g = (float)(env * 1.0);
+    float g = (float)env * config_audio_gain();
     if (st && SDL_GetAudioStreamGain(st) != g) SDL_SetAudioStreamGain(st, g);
 }
 
@@ -1327,7 +1328,7 @@ static void renderer_open_output(Renderer *r) {
     SDL_AudioSpec spec = {SDL_AUDIO_F32, 2, (int)r->sample_rate};
     r->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
     if (!r->stream) { LOG("[audren] SDL audio open failed: %s\n", SDL_GetError()); return; }
-    if (getenv("MHGU_AUDIO_GAIN")) SDL_SetAudioStreamGain(r->stream, (float)atof(getenv("MHGU_AUDIO_GAIN")));
+    apply_gain(r->stream);
     SDL_ResumeAudioStreamDevice(r->stream);
 }
 
@@ -1615,7 +1616,7 @@ SERVICE("audout:u", audout_u) {
             SDL_AudioSpec spec = {SDL_AUDIO_S16, (int)a->channels, (int)a->rate};
             a->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
             if (a->stream) {
-                if (getenv("MHGU_AUDIO_GAIN")) SDL_SetAudioStreamGain(a->stream, (float)atof(getenv("MHGU_AUDIO_GAIN")));
+                apply_gain(a->stream);
                 SDL_ResumeAudioStreamDevice(a->stream);
             }
         }

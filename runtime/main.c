@@ -9,6 +9,7 @@
 #include "hle.h"
 #include "kernel.h"
 #include "mods.h"
+#include "app_actions.h"
 
 const char *g_game_dir = "game";  // folder holding exefs/ and romfs/ (the player's own dump)
 
@@ -75,6 +76,13 @@ static void boot(const char *root) {
 }
 
 int main(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (!strncmp(argv[i], "--recomp-wait=", 14)) {
+            char *end; unsigned long pid = strtoul(argv[i] + 14, &end, 10);
+            if (!pid || *end || !plat_wait_process(pid)) return 1;
+        }
+    }
+    ui_capture_launch_args(argc, argv);
     plat_init();
     setvbuf(stderr, NULL, _IONBF, 0);
     bool given = false;

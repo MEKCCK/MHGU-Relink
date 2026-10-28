@@ -17,35 +17,25 @@ uint32_t g_native_window;
 // (pointer in the global at 0x2326764, the same field theboy181's 60fps patch sets). The game puts 30.0 there at
 // start and resets it at some transitions, so every presented frame writes the chosen rate back (the 90 / 120 fps
 // cheat codes write this same field). The frame delta is in 60 fps frames, measured: walking speed is the same at 30,
-// 60 and ~135 fps. The settings' FPS (mhgurecomp.ini: 30..240, default 60); MHGU_FRAMERATE overrides it. Above the
+// 60 and ~135 fps. The settings' FPS (mhgurecomp.ini: 30..240, default 60); MHGU_FRAMERATE supplies the initial override. Above the
 // monitor's refresh rate the settings' VSync must be Off (immediate present): FIFO / mailbox wait for the display.
 #define FPS_OBJ_GLOBAL 0x2326764u
-static float framerate(void) {
-    static float f = -1;
-    if (f < 0) {
-        const char *e = getenv("MHGU_FRAMERATE");
-        f = e ? (float)atof(e) : (float)g_config.fps;
-        if (!(f >= 30.0f)) f = 30.0f;
-        if (f > 240.0f) f = 240.0f;
-        LOG("[vi] frame rate target %.0f\n", f);
-    }
-    return f;
-}
+static float framerate(void) { return config_live_fps(); }
 void vi_apply_framerate(void) {  // (also called per presented frame: runtime/nvn/vulkan/device.c)
     float want = framerate();
     uint32_t obj = LD32(FPS_OBJ_GLOBAL);
     if (obj < HEAP_BASE || obj >= HEAP_BASE + HEAP_MAX) return;  // (not created yet)
     float cur = LDF(obj + 0x3c);
-    if (cur == 30.0f && want != 30.0f) STF(obj + 0x3c, want);
+    if (cur != want) STF(obj + 0x3c, want);
 }
 
 // The display's vsync event: 60 Hz, or the frame rate target when that is higher (the game waits for it per frame).
 static void *vsync_thread(void *arg) {
     (void)arg;
-    float fr = framerate();
-    const uint64_t period = (uint64_t)(1e9 / (fr > 60.0f ? fr : 60.0f));
     uint64_t next = plat_now_ns();
     for (;;) {
+        float fr = framerate();
+        const uint64_t period = (uint64_t)(1e9 / (fr > 60.0f ? fr : 60.0f));
         next += period;
         plat_sleep_until_ns(next);
         uint64_t now = plat_now_ns();
