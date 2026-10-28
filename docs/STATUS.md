@@ -429,7 +429,13 @@ Known gaps that remain:
    top, the loading screen as one picture (layer 110 strips at y 168 / 433 / 570), layer 98 with its 97 menu, the
    Request Log / quest card (layer 100 beside a 97 menu) top, the Quest Complete border and results rule bottom,
    the cutscene's top bar top, and the item bar drawn without the game's scissor (that draw only; the next draw and
-   clears get it back). Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
+   clears get it back). 2026-10-27 (issue 58): a window drawn in pieces on one layer (the chat window, the shoutout list,
+   the Guild Card greeting, the Hunting Style viewer) takes one anchor when its pieces' rules disagree (exec.c
+   ui_group_end: by the nearer edge, or the centre; patched in transient memory before the pass ends; the game's scissor
+   of a piece moves with it, as its group was anchored last frame, so the help windows' body is not cut), the village / Hub
+   button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the title's PRESS A scales
+   about the centre with its layout (layer 108), and a model preview follows the frame drawn over it, not the last quad
+   (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
 10. Keyboard remapping: an ini [Keyboard] section, one line per Switch button (`A = Mouse2`, `B = Space`; SDL key
@@ -490,10 +496,44 @@ plugins verify it) that dispatch.c runs as the unhooked function. forge_hook_cre
 [pc,#-4]; detour` over the entry (plugins verify that too; a hook inside a function: see Damage Numbers below);
 patches over code are re-read for that form (or a `b`),
 anything else in code is logged as not applicable. Forge's own points: sApp::run (main+0xB8692C: resolve singletons,
-forge_onLoad / version check / forge_onInit), the frame update (main+0x3DA8FC: forge_onUpdate(dt)), cSystem ctor /
-dtor (singletons). Not provided: forge_socket_* (an "UNIMPLEMENTED" log line, 0). MHGU_FORGE_LOG=debug|info|warn|error
-(default info). Install = the mod's folder in mods\ (Forge itself is not needed). Log: "[forge] plugin ...",
-"[forge] starting ...", the plugin's own messages as "[forge] [info] ...". Plugins are built -mfloat-abi=softfp, as
+forge_onLoad / version check / forge_onInit; every plugin's DT_INIT and DT_INIT_ARRAY run first, as nn::ro runs them
+at load: an entry that is 0, -1, a Thumb address or outside the module is skipped and logged, DT_INIT 0 is no
+initializer, DT_PREINIT_ARRAY is not run (nn::ro does not for a shared object); while DT_INIT runs the init array holds
+no-ops and its constructors run once after it, so a module whose DT_INIT walks __init_array_start__ (Forge's
+source/crti.c does) does not run them twice. A plugin with no forge_onLoad still gets update and ImGui calls, as in
+Forge), the frame update (main+0x3DA8FC: forge_onUpdate(dt), then the input is read and the overlay drawn, in Forge's
+order), cSystem ctor / dtor (singletons: typed at sApp::run, like Forge's; unlike Forge's, ones made later are typed
+too, a frame after they are made and once their vtable looks finished, on a lookup or forge_singleton_getAllInstances;
+one that never looks finished is given up after 120 frames). forge_socket_*: forwarded to the port's nn::socket (the
+virtual local-play network of net/vsock.c; no internet), failures -1; forge_socket_init / deinit are nn::socket's
+Initialize / Finalize with the plugin's arguments (no-ops there). Plugins built -mtp=soft -ftls-model=initial-exec get
+__aeabi_read_tp (one block per thread: 8-byte TCB, then 4 KiB for each plugin that uses __thread data; a thread's block
+goes back to a free list when the thread ends) and R_ARM_TLS_TPOFF32 is resolved against it. An NRO has no PT_TLS and
+its link-time symbols for .tdata are not in the dynamic table, so the template cannot be found: __thread variables
+start zeroed (a plugin with an initialized one would see zeros; none of the installed plugins uses TLS). A plugin with a
+relocation type this port doesn't know, or a damaged NRO, is skipped with a "[loader]" line (the imports nothing
+provides are named there too; MOD0, the dynamic section, DT_STRTAB / DT_STRSZ, symbol names and DT_HASH are bounds
+checked). Hook creation fails cleanly (no original, a log line) when the trampoline region is full, the tables are
+(1024 function hooks, 1024 trampolines, 1024 kept entry words, 512 interpreted functions), the next function starts
+under two words after an entry hook, or an inside-hook's function cannot run in the interpreter (the two words are
+put back); hooks may target a plugin's own code; Thumb targets are refused (the interpreter is ARM only; Forge hooks
+Thumb code too).
+forge_input_* is read once a frame after the plugins' forge_onUpdate, as Forge does when it draws: isConnected is true
+from the first frame (the game's player 1 pad is always there), the sticks are clamped to -1..1, the buttons include the
+stick-direction bits (16-23) of the game's pad. forge_input_getTouch is the free mouse's left button (not while the
+mouse is captured or Forge's menu is open), as the first touch point in whole 1280x720 screen pixels: the pointer must be
+on the game's picture (fitted in the window by g_render_aspect, centred; outside it: no touch), and the picture's HUD
+canvas (g_ui_anchor_aspect wide at most, centred) spans 0..1279 (beyond it: the edge). Forge's keyboard is 256 HID
+usages.
+Forge's config.ini ([menu] key, font_size; [log] level) is read as iniparser reads it, from one file: the topmost mod's
+romfs nativeNX/forge/config.ini (files are not merged; a long line, a stray line or an unreadable file means the defaults:
+level info, key Insert, 12 px), key = strtol base 0 (decimal, 0x hex, 0 octal), font_size = atof, a level that is not a
+name is error (as in Forge); the default key is Insert (73), not Forge's F9 (66), a choice of the port's author.
+Forge's own messages are written at Forge's levels ("[forge] [INFO] ..."); third_party/cimgui's
+cimgui.h / cimgui.cpp are byte-identical to cimgui commit d298666 (Forge's pin; checked against GitHub, ImGui itself
+being a submodule there is 1.92.8 by its header only).
+Extras beyond Fexty's exported.txt, kept as harmless: forge_log_trace(format, ...) (printed at any level, as [DEBUG]), forge_graphics_isInitialized, forge_graphics_isMenuOpen. MHGU_FORGE_LOG=debug|info|warn|error (default info; overrides the file when it names a level). Install = the mod's folder in mods\ (Forge itself is not needed). Log: "[forge] plugin ...",
+the plugin's own messages as "[forge] [INFO] ..." (Forge's tags). Plugins are built -mfloat-abi=softfp, as
 Forge is: floats in core registers (forge_onUpdate's dt in r0; until 2026-10-23 it went in s0 only).
 
 Forge's ImGui overlay (runtime/overlay.cpp, forge_imgui.c, tools/imgui_thunks.py; 2026-10-23): Forge's "forge"
@@ -505,12 +545,15 @@ thread after forge_onUpdate (plugin code runs there); texture uploads there too,
 draws a copy of the draw lists at the end of the window image's pass (device.c). Input: while open, keyboard / mouse
 / text go to ImGui (host_input.c asks overlay_event first; F-keys and Alt+Enter still work), the controller navigates
 (A activates, B cancels) and the game gets no input. Plugins call cimgui's C API (ig* / Im*, which Forge exports):
-tools/imgui_thunks.py generates runtime/forge_imgui_thunks.inc from cimgui's generator output, 1434 of 1476 functions
+tools/imgui_thunks.py generates runtime/forge_imgui_thunks.inc from cimgui's generator output, 1445 of 1465 functions
 (OVERRIDE ones are hand-written in forge_imgui.c; the rest, listed at its end: draw callbacks, size_t* helpers...): softfp arguments
 converted, guest data pointers as their host address, printf-style ones formatted from the guest's arguments.
 ImGui's objects (ImGuiIO, ImGuiStyle, ImDrawList...) reach plugins as mirrors in guest memory with the 32-bit
 layout (computed per struct, checked against the compiler's with static asserts), synced both ways around each
-call; internal structs are opaque. igNewFrame / igRender / igGetDrawData from a plugin are ignored; igMemAlloc is
+call; internal structs are opaque. Functions taking or returning an ImTextureRef by value (ImDrawList_AddImage /
+AddImageQuad / AddImageRounded, ImTextureData_GetTexRef, igImage...) are provided: its 16 bytes (pointer, pad, ImU64: 8-aligned,
+so r2:r3 + the stack after a first argument, or the hidden result pointer in r0) are rebuilt field by field, _TexData as the
+host ImTextureData behind the plugin's mirror. igNewFrame / igRender / igGetDrawData from a plugin are ignored; igMemAlloc is
 the guest's malloc. Tested with Key Quest Markers r18 (its only ImGui is its colour settings): the menu over the
 title and in a hunt, mouse (headers, tree node, buttons), typing into its hex colour fields, Save & apply (wrote
 key_quest_markers.ini to the save folder), controller navigation; the game unaffected with the menu closed. Callback
@@ -625,3 +668,21 @@ interpreter, logging every instruction that changes the word at addr),
 `MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`,
 `MHGU_NO_PROGRAM_CACHE=1`, `MHGU_SAVE_GLSL=1`.
 `python tools/disasm.py <game dir> <addr | module:symbol> [count] [before]` disassembles guest code.
+
+Plugin bug warnings (runtime/forge.c forge_guest_fault, interp.c gchk / bad_access, platform.h plat_touch_hook): the
+port backs any untouched guest page with zeros, so a plugin's null / garbage pointer that crashes on the console
+(Ryujinx) runs on here. Quiet `[forge] [WARN]` lines name it (MHGU_FORGE_LOG=error silences them):
+`[forge] [WARN] foo.nro: 4-byte read at 0x00000008 (null page) by code at +0x1A4C (pc 03212A4C) r0=0 r1=.. lr=..`.
+Detected, for code in a plugin's image (interpreted): any load / store below 0x10000 (the null page); one at
+0x3C000000-0x43FFFFFF or 0xBC000000-0xC3FFFFFF (a float bit pattern: 0x3F800000 = 1.0f) that no region maps (the game's
+heap counts as mapped); the first touch of any unmapped page, i.e. the fault that makes the port back it (size not
+known, "unmapped page"). Not detected: later accesses in an unmapped 64 KB chunk after its first touch, other
+unmapped addresses that the interpreter checks cannot see (outside the two float ranges) once their chunk is
+backed, atomics (ldrex/strex), bad accesses by the game's own code or by host (HLE) functions, branches to bad
+addresses, and a mapped but wrong pointer. Cost: one compare per interpreted load / store plus three thread-local
+stores per interpreted instruction; recompiled code and mapped accesses are untouched (the fault hook runs only
+when a page is first backed). Limits: once per (plugin, pc); at most 20 lines per plugin, then one "further memory
+warnings ... suppressed" line; 128 sites tracked per plugin. Also WARN, once per site: a code patch that lands in
+recompiled code is ignored (`foo.nro: code patch at main+0x... cannot apply to recompiled code: ignored`), and at
+load `[forge] [WARN] foo.nro: import X is not provided (calls return 0)`. Failed hooks stay ERROR lines
+(`Failed to hook ...`), as Forge's own.

@@ -591,6 +591,11 @@ void backend_present(NvnTexture *t) {
             else g_dump_active = 0;
         } else if (g_dump_request) { left = g_dump_request; g_dump_request = 0; g_dump_no = 0; g_dump_frame = 0; g_dump_active = 1; }
     }
+    {   // (debug) MHGU_CONTROL "hudtrace": the next whole frame's HUD quads (exec.c cbuf_info)
+        extern volatile int g_hudtrace_active, g_hudtrace_request;
+        if (g_hudtrace_active) { LOG("[hud] frame done\n"); g_hudtrace_active--; }  // (2: the frame recorded next may run late)
+        else if (g_hudtrace_request) { g_hudtrace_request = 0; g_hudtrace_active = 2; }
+    }
     { void vk_gpuprof_frame(void); vk_gpuprof_frame(); }  // (debug) MHGU_CONTROL "gpuprof"
     vk_unlock();
     static int fps = -1;
