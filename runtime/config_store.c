@@ -20,7 +20,7 @@ static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
-                     live_vsync = {1}, live_face, live_menu_confirm, live_background = {1};
+                     live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -41,6 +41,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->face_buttons != saved.face_buttons) SDL_SetAtomicInt(&live_face, c->face_buttons);
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
+    if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -71,6 +72,7 @@ int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
+int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_language(void) { return SDL_GetAtomicInt(&language); }
 Config config_editable(void) { return saved; }
 float config_audio_gain(void) {

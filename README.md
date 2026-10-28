@@ -152,7 +152,9 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
   340 MB)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
-  with a wiki in front of it; default On)
+  with a wiki in front of it; default On), `ComboInputWindow` (Lenient / Strict: how long the game waits for a
+  second button for inputs like the Hunting Horn's X+A; Lenient, the default, as long as at 30 fps at any frame
+  rate, Strict a fixed number of frames, shorter the higher the frame rate)
 - `[Mouse]`: `MouseSensitivity` (1 = default, 0.1 to 10)
 - `[Multiplayer]`: `Port`, `Join` (addresses of hosts outside your LAN), `SyncSmallMonsters`
 - `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the

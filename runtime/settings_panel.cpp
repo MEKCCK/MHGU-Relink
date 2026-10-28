@@ -141,6 +141,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fov);
     SAME(ui_anchor);
     SAME(background_input);
+    SAME(combo_window);
     SAME(volume);
     SAME(mute_in_background);
     SAME(button_icons);
@@ -388,6 +389,7 @@ void reset_section() {
         c.menu_confirm = f.menu_confirm;
         c.button_icons = f.button_icons;
         c.background_input = f.background_input;
+        c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         break;
     case 3:
@@ -505,6 +507,8 @@ std::vector<Row> main_rows() {
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, cold("ButtonIcons"));
         add_bool(r, "background", "Background input", &c.background_input, cold("BackgroundInput"));
+        add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
+                   [](int v) { c.combo_window = v; }, cold("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, cold("MouseSensitivity"));
         break;
     case 3:
