@@ -36,8 +36,19 @@ HLE_SDK("abort", abort) {
     exit(1);
 }
 
+// The game's fatal error (0xa3e16c(object, format, ...): vsnprintf into a 1 KB buffer at sp + 4, the object's error
+// callback, exit(1); its caller's return address at sp + 0x414). Callers: 0x9bd71c "Memory Pool Initialization Error",
+// 0xa69924 "Couldn't initialize the NVN device.", 0xb6b99c "uSerial::setup() : not found 'serial'.", 0xdd7250
+// "Shader compile failed. %s" (a shader resource that did not load), 0xdd8f00 (a resource collision)
+#define FATAL_EXIT_RET 0xa3e1c8u
+
 HLE_SDK("exit", exit) {
     LOG("[abort] exit(%d)\n", (int)ARG(0));
+    if (c->r[14] == FATAL_EXIT_RET) {
+        char msg[400];
+        LOG("[abort] the game's error: %s (called from %x)\n", guest_str(c->r[13] + 4, msg, sizeof msg),
+            LD32(c->r[13] + 0x414));
+    }
     kernel_log_guest_stack("[abort] the game", c);
     exit((int)ARG(0));
 }
