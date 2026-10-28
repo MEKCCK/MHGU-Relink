@@ -68,6 +68,9 @@ LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 -lSDL3 $(AV_LIBS) -lvulkan-1 -lsha
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
+UPDATER  := $(B)/mhgurecomp-updater.exe
+# (a window program; zlib linked in, WinHTTP is Windows')
+UPD_LDFLAGS := -fuse-ld=lld -mwindows -lSDL3 -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
@@ -81,6 +84,9 @@ GLIBC_WRAP := sqrtf acosf atan2f sinh cosh
 LDFLAGS  += $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
 GAMELIB  := $(B)/mhgugame.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld
+UPDATER  := $(B)/mhgurecomp-updater
+# (libcurl: opened at run time, updater/http.c)
+UPD_LDFLAGS := -fuse-ld=lld -lSDL3 -lz -ldl
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
@@ -91,6 +97,10 @@ GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cu
 # valid across builds until the translator changes. (Line endings ignored: the same sources hash the same everywhere.)
 SHADER_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
 SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
+# VERSION: this build's release (git describe: 0.10.3 on a release's tag, 0.10.3-4-gabc1234 after it), in the log and
+# the updater's (updater/updater.c: only a build of exactly a release updates itself). make dist VERSION=0.10.4 for a
+# release built before its tag is made.
+VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
@@ -141,7 +151,7 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(if $(filter windows,$(PLATFORM)),bundle) data licenses
+all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -168,6 +178,10 @@ $(O)/shader.id: FORCE
 	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(SHADER_ID)' ] || echo '$(SHADER_ID)' > $@
 $(O)/rt/nvn/vulkan/exec.o: $(O)/shader.id
 $(O)/rt/nvn/vulkan/exec.o: RTFLAGS += -DSHADER_ID='"$(SHADER_ID)"'
+$(O)/version.id: FORCE
+	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(VERSION)' ] || echo '$(VERSION)' > $@
+$(O)/rt/main.o: $(O)/version.id
+$(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
 $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)
@@ -203,12 +217,27 @@ $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 $(EXE): $(RT_OBJ) $(AV_DEPS)
 	@mkdir -p $(dir $@)
 	$(CXX) -o $@ $^ $(LDFLAGS)
+	$(GLIBC_CHECK)
+
+# The updater (updater/updater.c): started in place of the game, it installs the latest release and starts the game.
+UPD_OBJ  := $(patsubst updater/%.c,$(O)/updater/%.o,$(wildcard updater/*.c))
+$(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -g -Wall $(OSFLAGS) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
+$(UPDATER): $(UPD_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) -o $@ $^ $(UPD_LDFLAGS)
+	$(GLIBC_CHECK)
+
+# (Linux: a program starts with glibc GLIBC_MAX or later, see LDFLAGS; this checks the one just linked)
 ifneq ($(PLATFORM),windows)
-	@new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) 'match($$0, /GLIBC_[0-9.]+/) { \
+define GLIBC_CHECK
+@new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) 'match($$0, /GLIBC_[0-9.]+/) { \
 	  split(substr($$0, RSTART + 6, RLENGTH - 6), v, "."); split(max, m, "."); \
 	  if (v[1] * 1000 + v[2] > m[1] * 1000 + m[2]) print "  " $$NF " (glibc " v[1] "." v[2] ")" }'); \
 	if [ -n "$$new" ]; then printf '%s needs a glibc newer than $(GLIBC_MAX) for:\n%s\n(add them to GLIBC_WRAP and runtime/platform/linux.c)\n' \
 	  $@ "$$new"; rm -f $@; exit 1; fi
+endef
 endif
 
 # the bundled FFmpeg (see FFMPEG above): download, check, configure, build into $(FFMPEG_DIR)
@@ -265,8 +294,8 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # log.txt are written only when the game runs). run-game.bat runs it with those in run/ (MHGU_HOME), not here.
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
-LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools
-bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB))
+LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib
+bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
@@ -295,7 +324,7 @@ test-lift:
 runtime-objs: $(RT_OBJ)
 
 clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game ran)
-	rm -rf $(O) $(B)/*.dll $(B)/*.so $(EXE) $(B)/vkprobe.exe
+	rm -rf $(O) $(B)/*.dll $(B)/*.so $(EXE) $(UPDATER) $(B)/vkprobe.exe
 
 .PHONY: all gen test-lift runtime-objs clean bundle data licenses FORCE
 
