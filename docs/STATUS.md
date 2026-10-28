@@ -532,6 +532,10 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
    fell to 33-45 fps: this driver has no mailbox, so VSync On is FIFO, and the game paces to vi.c's own 60 Hz timer,
    not the display's, so a frame that ends a little late waits a whole vblank (a pacing problem any heavier scene
    hits, not the NPCs' cost). Not looked at: gathering spots and other map objects, Hub NPC classes.
+   Speech bubbles (reported 2026-10-28: the "new dialogue" bubble over an NPC still used the game's distance): the
+   bubble has its own copy of the check (0x8c11f8, table at 0x8c1328, then 0x938530 puts the bubble above the head);
+   its load 0x8c127c gets the same npc_fade_dist2. Checked (the user's save, MHGU_QUICKHUNT=town, Bherna arrival
+   view): 1 bubble at 1 (as the game), 5 at 0, each on its NPC.
 7. A settings launcher for players who don't edit ini files: every [section] / key of runtime/config.c (it already
    knows the names, defaults, ranges and comments) in a window, saved to mhgurecomp.ini. Cheapest: inside the exe
    with the ImGui the port already ships (a `--settings` switch, or a "Settings" shortcut), so no second program or
@@ -793,7 +797,8 @@ controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers ev
 `fnnew lo hi [learn ms]` = log only the first call of each function in [lo, hi) not seen while learning, to find what an
 event runs; `peek` / `poke` / `memsave` / `find` for guest memory), `MHGU_QUICKHUNT=<quest number>` (from start-up
 straight into that quest: A through the menus to the save's town, then the quest is ordered and departed on;
-runtime/hle/quickhunt.c has how the game departs), `MHGU_LOG_MOVES=1` (the player's actions and command table
+runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `vpad` (control file:
+attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;
 MHGU_CONTROL's `emact <group> <index>` starts an action, `emsweep <group> <first> <last>` each in turn:
