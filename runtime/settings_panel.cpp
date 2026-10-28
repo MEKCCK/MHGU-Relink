@@ -145,6 +145,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_scale);
     SAME(menu_confirm);
     SAME(confirm_exit);
+    SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
 #undef SAME
@@ -397,6 +398,7 @@ void reset_section() {
         c.language = f.language;
         c.menu_scale = f.menu_scale;
         c.confirm_exit = f.confirm_exit;
+        c.updates = f.updates;
         c.bonus_content = f.bonus_content;
         break;
     }
@@ -583,6 +585,8 @@ std::vector<Row> main_rows() {
                    [](int v) { c.language = v; }, cold("Language"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, cold("MenuScale"));
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, cold("ConfirmExit"));
+        add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
+                   [](int v) { c.updates = v; }, cold("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, cold("BonusContent"));
         action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
                []() { s.floating = !s.floating; });

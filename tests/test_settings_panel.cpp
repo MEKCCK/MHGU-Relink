@@ -259,7 +259,7 @@ int main() {
     tab();
     tab();
     selected("language");
-    down(5);
+    down(6);
     selected("restart");
     confirm();
     selected("dialog.cancel");
