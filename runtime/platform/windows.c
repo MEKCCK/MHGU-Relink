@@ -120,6 +120,15 @@ void plat_init(void) {
     timeBeginPeriod(1);
 }
 
+unsigned long plat_process_id(void) { return GetCurrentProcessId(); }
+bool plat_wait_process(unsigned long pid) {
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (!process) return GetLastError() == ERROR_INVALID_PARAMETER;
+    DWORD result = WaitForSingleObject(process, 30000);
+    CloseHandle(process);
+    return result == WAIT_OBJECT_0;
+}
+
 bool plat_exe_path(char *buf, size_t size) {
     DWORD n = GetModuleFileNameA(NULL, buf, (DWORD)size);
     return n > 0 && n < size;

@@ -1,5 +1,11 @@
 # MHGU Recomp
 
+Host options are available with **Minus + Plus** (Back + Start),
+or F1. This includes all INI settings, application volume and exit confirmation.
+See [settings UI and validation](docs/SETTINGS_UI.md). FPS, FOV, anti-aliasing, VSync,
+input and audio changes apply on save. Fields marked * require restarting; language
+and controller glyphs preview immediately.
+
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 recompiling the game's 32-bit ARM code to C and running it on a host runtime: Switch system services and the NVN
 graphics API are reimplemented on Windows, with Vulkan for rendering.

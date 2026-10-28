@@ -138,6 +138,16 @@ void plat_init(void) {
     signal(SIGPIPE, SIG_IGN);
 }
 
+unsigned long plat_process_id(void) { return (unsigned long)getpid(); }
+bool plat_wait_process(unsigned long pid) {
+    struct timespec pause = {0, 10000000};
+    for (int i = 0; i < 3000; ++i) {
+        if (kill((pid_t)pid, 0) < 0) return errno == ESRCH;
+        nanosleep(&pause, NULL);
+    }
+    return false;
+}
+
 bool plat_exe_path(char *buf, size_t size) {
     ssize_t n = readlink("/proc/self/exe", buf, size - 1);
     if (n <= 0 || (size_t)n >= size - 1) return false;

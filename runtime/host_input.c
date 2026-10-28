@@ -21,6 +21,7 @@
 #include <SDL3/SDL.h>
 
 #include "config.h"
+#include "menu_confirm.h"
 #include "forge.h"
 #include "hle/input.h"
 #include "overlay.h"
@@ -268,6 +269,10 @@ static void control_poll(void) {
                 textinput_type(t);
                 continue;
             }
+            if (!strcmp(cmd, "sdlquit")) { // Same path as the window close button / Alt+F4 (runtime tests).
+                SDL_Event event = {0}; event.type = SDL_EVENT_QUIT; SDL_PushEvent(&event);
+                continue;
+            }
             if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name>: a key pressed and released (Insert: Forge's menu)
                 bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5);
                 SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : 0));
@@ -469,7 +474,7 @@ static void mouse_update(int *rx, int *ry) {
     }
     mouse_dx = mouse_dy = 0;
     if (!mouse_captured && now >= test_until) vx = vy = 0;
-    float s = g_config.mouse_sensitivity / MOUSE_FULL_SPEED;
+    float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);
     if (m < 0.02f) return;
@@ -537,10 +542,16 @@ void host_input_update(void) {
         static const SDL_GamepadButton face[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
                                                   SDL_GAMEPAD_BUTTON_NORTH};
         static const int switch_at[4] = {BTN_B, BTN_A, BTN_Y, BTN_X}, xbox_at[4] = {BTN_A, BTN_B, BTN_X, BTN_Y};
+        static int old_face_mode = -1;
+        static bool wait_face_release;
+        int face_mode = config_live_face_buttons();
+        if (old_face_mode >= 0 && old_face_mode != face_mode) wait_face_release = true;
+        old_face_mode = face_mode;
+        bool held_face = false;
+        int menu_positions[4] = {1, 0, 3, 2};
         for (int i = 0; i < 4; i++) {
-            if (!SDL_GetGamepadButton(pad, face[i])) continue;
             int btn = switch_at[i];
-            if (g_config.face_buttons == FACE_LABEL) {
+            if (face_mode == FACE_LABEL) {
                 switch (SDL_GetGamepadButtonLabel(pad, face[i])) {
                 case SDL_GAMEPAD_BUTTON_LABEL_A: btn = BTN_A; break;
                 case SDL_GAMEPAD_BUTTON_LABEL_B: btn = BTN_B; break;
@@ -549,8 +560,14 @@ void host_input_update(void) {
                 default: btn = xbox_at[i]; break;
                 }
             }
-            b |= B(btn);
+            int semantic = btn == BTN_A ? 0 : btn == BTN_B ? 1 : btn == BTN_X ? 2 : 3;
+            menu_positions[semantic] = i;
+            bool pressed = SDL_GetGamepadButton(pad, face[i]);
+            held_face |= pressed;
+            if (pressed && !wait_face_release) b |= B(btn);
         }
+        if (!held_face) wait_face_release = false;
+        overlay_face_positions(menu_positions);
         if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000) b |= B(BTN_ZL);
         if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000) b |= B(BTN_ZR);
         // sticks: SDL's y is down; a small dead zone against drift
@@ -593,8 +610,19 @@ void host_input_update(void) {
         if (st->stick == 1) rx = st->x, ry = st->y;
     }
 
-    static bool menu;
+    // A controller can reach host settings without needing a keyboard.
+    static bool settings_chord;
+    bool chord = (b & (B(BTN_PLUS) | B(BTN_MINUS))) == (B(BTN_PLUS) | B(BTN_MINUS));
+    if (chord && !settings_chord && !typing) overlay_toggle_settings();
+    if (chord && !typing) settings_chord = true;
+    if (settings_chord) {
+        // Swallow releases as well: releasing one half must not activate the game's menu.
+        if (!(b & (B(BTN_PLUS) | B(BTN_MINUS)))) settings_chord = false;
+        b &= ~(B(BTN_PLUS) | B(BTN_MINUS));
+    }
+    static bool menu, menu_face_release;
     if (overlay_menu_open() != menu) {
+        if (menu) menu_face_release = true;
         menu = !menu;
         memset(keys, 0, sizeof keys);  // (keys held as it opened went to the menu: nothing stays pressed)
         mouse_buttons = 0;
@@ -607,6 +635,10 @@ void host_input_update(void) {
         b = 0, lx = ly = rx = ry = 0;
     }
 
+    if (!menu && menu_face_release) {
+        const uint64_t face_mask = B(BTN_A) | B(BTN_B) | B(BTN_X) | B(BTN_Y);
+        b = menu_release_buttons(b, face_mask, &menu_face_release);
+    }
     static uint64_t was;
     uint64_t down = b & ~was;
     was = b;

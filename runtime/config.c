@@ -16,7 +16,9 @@
 #include "config.h"
 #include "rt.h"
 
-Config g_config = {DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3};
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3
+Config g_config = {CONFIG_DEFAULT_VALUES};
+Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
 float g_render_aspect = 16.0f / 9.0f;
 float g_fov_scale = 1.0f;
@@ -111,6 +113,8 @@ static const char DEFAULT_INI[] =
     "; Position, Label\n"
     "; Default: Position\n"
     "FaceButtons = Position\n"
+    "; Host settings menu only: Original, South (bottom), East (right). Gameplay is unchanged.\n"
+    "MenuConfirm = Original\n"
     "\n"
     "; Controller input is also registered if the window is out of focus\n"
     "; Default: On\n"
@@ -163,7 +167,17 @@ static const char DEFAULT_INI[] =
     "; If enabled, the free online downloadable content (Event Quests, item packs, Palicoes) are automatically copied from the provided savegame inside the `bonus/` folder into your own savegame.\n"
     "; This only happens if your savegame hasn't received any downloadable content yet.\n"
     "; Default: On\n"
-    "BonusContent = On\n";
+    "BonusContent = On\n"
+    "\n[Audio]\n"
+    "; Master volume for this application, 0 (mute) to 100.\n"
+    "Volume = 100\n"
+    "\n[Application]\n"
+    "; Confirm closing the window or pressing Alt+F4. This does not save game progress.\n"
+    "ConfirmExit = On\n"
+    "Language = English\n"
+    "ButtonIcons = Xbox\n"
+    "MenuScale = 100\n";
+
 
 static void ini_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -209,7 +223,7 @@ static int parse_factors(const char *v, float f[4]) {
 // above and below instead of less to the sides. Other cameras keep their own.
 float camera_fovy(float fovy, float aspect) {
     if (aspect != g_render_aspect) return fovy;
-    fovy *= g_fov_scale;
+    fovy *= config_live_fov();
     if (aspect < 16.0f / 9.0f) fovy = 2.0f * atanf(tanf(fovy * 0.5f) * (16.0f / 9.0f) / aspect);
     return fovy;
 }
@@ -334,6 +348,31 @@ static void set_key(const char *key, char *val, int line) {
     } else if (!strcmp(k, "mousesensitivity")) {
         float f = strtof(v, NULL);
         if ((ok = f >= 0.1f && f <= 10.0f)) g_config.mouse_sensitivity = f;
+    } else if (!strcmp(k, "volume")) {
+        char *end;
+        long volume = strtol(v, &end, 10);
+        if ((ok = end != v && !*end && volume >= 0 && volume <= 100)) g_config.volume = (int)volume;
+    } else if (!strcmp(k, "menuscale")) {
+        char *end; long scale = strtol(v, &end, 10);
+        if ((ok = end != v && !*end && scale >= 100 && scale <= 200)) g_config.menu_scale = (int)scale;
+    } else if (!strcmp(k, "menuconfirm")) {
+        if (!strcmp(v, "original")) g_config.menu_confirm = MENU_CONFIRM_ORIGINAL;
+        else if (!strcmp(v, "south")) g_config.menu_confirm = MENU_CONFIRM_SOUTH;
+        else if (!strcmp(v, "east")) g_config.menu_confirm = MENU_CONFIRM_EAST;
+        else ok = false;
+    } else if (!strcmp(k, "buttonicons")) {
+        if (!strcmp(v, "xbox")) g_config.button_icons = 0;
+        else if (!strcmp(v, "switch")) g_config.button_icons = 1;
+        else if (!strcmp(v, "playstation")) g_config.button_icons = 2;
+        else ok = false;
+    } else if (!strcmp(k, "language")) {
+        if (!strcmp(v, "english") || !strcmp(v, "en")) g_config.language = 0;
+        else if (!strcmp(v, "spanish") || !strcmp(v, "es")) g_config.language = 1;
+        else ok = false;
+    } else if (!strcmp(k, "confirmexit")) {
+        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.confirm_exit = 1;
+        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.confirm_exit = 0;
+        else ok = false;
     } else if (!strcmp(k, "port")) {
         int p = atoi(v);
         if (p > 0 && p < 65536) g_config.ldn_port = p;
@@ -452,6 +491,10 @@ void config_load(void) {
         append_missing_sections(path, seen);
     }
 
+    // Keep Auto/Desktop and file values, rather than persisting temporary environment overrides.
+    Config editable = g_config;
+    if (render_auto) editable.render_w = editable.render_h = 0;
+    config_store_loaded(&editable);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
@@ -544,6 +587,8 @@ void config_load(void) {
     g_ui_size[1] = 720;
     g_ui_size[0] = (uint32_t)(720.0f * g_ui_anchor_aspect + 0.5f) & ~1u;
     if (g_ui_size[0] < 1280) g_ui_size[0] = 1280;
+
+    config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
     LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, "

@@ -16,6 +16,11 @@ extern "C" {
 void overlay_init(const char *font_path, float font_size, int menu_key);
 bool overlay_enabled(void);
 bool overlay_menu_open(void);
+bool overlay_settings_dirty(void);
+void overlay_request_close(void); // Close / Alt+F4 routes to controller confirmation inside settings.
+void overlay_face_positions(const int positions[4]);
+int overlay_face_position(int semantic); // A, B, X, Y -> physical south/east/west/north.
+void overlay_toggle_settings(void); // host main thread: F1 or Start + Back
 
 // Host main thread: an event for ImGui while the menu is open (true: taken, not for the game) - and the menu key.
 bool overlay_event(const SDL_Event *e);

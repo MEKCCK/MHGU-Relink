@@ -738,8 +738,6 @@ void forge_init(void) {
         }
         if (d) closedir(d);
     }
-    if (!nf) return;
-
     main_text = g_modules[0].base + g_modules[0].text_off;
     str_savedata = gstring("savedata");
     uint32_t at = PLUGIN_BASE;
@@ -774,6 +772,9 @@ void forge_init(void) {
         LOG("[forge] plugin %s (%s)\n", name, found[i]);
         at = (at + m->size + 0xFFFF) & ~0xFFFFu;
     }
+    // Host settings need the overlay even when no Forge mods are installed.
+    fnhook_set(text_addr(OFF_UPDATE), hle_register("forge:update", frame_update));
+    overlay_start(layers, nl);
     if (!nplugins) return;
     kernel_map_region(FORGE_TRAMP, FORGE_STUBS - FORGE_TRAMP, 3, 5);
     kernel_map_region(FORGE_STUBS, FORGE_END - FORGE_STUBS, 3, 5);
@@ -781,6 +782,4 @@ void forge_init(void) {
     fnhook_set(text_addr(OFF_SYSTEM_CTOR), hle_register("forge:cSystem::cSystem", system_ctor));
     fnhook_set(text_addr(OFF_SYSTEM_DTOR), hle_register("forge:cSystem::~cSystem", system_dtor));
     fnhook_set(text_addr(OFF_APP_RUN), hle_register("forge:sApp::run", app_run));
-    fnhook_set(text_addr(OFF_UPDATE), hle_register("forge:update", frame_update));
-    overlay_start(layers, nl);
 }
