@@ -787,6 +787,12 @@ Game folder: where the settings, caches, mods\, bonus\, shots\ and log.txt are: 
 own (build\ itself holds only what the build makes; compiler files go to obj\). MHGU_HOME=<folder> moves them there
 (run-game.bat: run\, test scripts: testsave\home); the game files are still read from data\ beside the exe.
 
+When the game quits by itself (2026-10-28, a Fedora report: "ExitProcess" right after GetService acc:u0, no
+reason): the SDK's failed checks (every AbortImpl variant ends in nn::diag::detail::VAbortImpl, 0x244a0d0), abort()
+and exit() are HLE_SDK in runtime/hle/abort.c and log the condition, function, file and line, the Result (as
+2xxx-yyyy) and the message, then the game's lr and callers (kernel_log_guest_stack, the same heuristic as
+MHGU_DUMP_THREADS); svcExitProcess logs its caller too. Look the callers up with tools/disasm.py.
+
 Debug env: `MHGU_TRACE_SVC`, `MHGU_TRACE_IPC`, `MHGU_LOG_FILES`, `MHGU_FNPROF` (hot functions every 5 s),
 `MHGU_FNTRACE=lo-hi[:n]` (calls into a guest address range, with caller and thread), `MHGU_DUMP_THREADS=<s>`
 (every guest thread's wait state after s seconds), `MHGU_HLE_SKIP`, `MHGU_AUDIO_LOG`, `MHGU_MOVIE_TRACE` (calls
