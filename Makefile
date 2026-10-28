@@ -326,7 +326,18 @@ runtime-objs: $(RT_OBJ)
 clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game ran)
 	rm -rf $(O) $(B)/*.dll $(B)/*.so $(EXE) $(UPDATER) $(B)/vkprobe.exe
 
-.PHONY: all gen test-lift runtime-objs clean bundle data licenses FORCE
+# make dist VERSION=0.10.4: the release archive of the build folder, for GitHub (tools/dist.py): in $(DIST)/,
+# Windows-MHGURecomp.<version>.zip or ArchLinux-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
+# the game code, the DLLs, licenses/, BONUS (the donor save for bonus/system, when given) and the empty folders the
+# player fills; never the game files, mods, settings or caches of $(B). It prints each archive's size and SHA-256.
+DIST  ?= dist
+BONUS ?= $(wildcard $(B)/bonus/system)
+dist: all
+	@echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
+	  { echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
+	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
+
+.PHONY: all gen test-lift runtime-objs clean bundle data licenses dist FORCE
 
 # Exercise real ImGui navigation without a game dump or graphics device.
 .PHONY: test-settings-panel
