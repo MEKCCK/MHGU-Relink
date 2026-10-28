@@ -390,6 +390,61 @@ Known gaps that remain:
 - R9 200 approximations: no custom border colours (nearest standard colour), D24S8 stored as D32F_S8 (polygon-offset
   units differ for decals).
 
+## Updater (2026-10-28)
+
+`mhgurecomp-updater(.exe)` (updater/, built by `make` beside the game) is a separate program that is started instead
+of the game. It installs GitHub's latest release over its own folder when it is newer, then starts the game. The game
+itself has no networking for this and never changes: `mhgurecomp` always just starts the game.
+- Flow (updater/updater.c):
+  - It reads `[Application] Updates` from mhgurecomp.ini. `Ask` (the default) or `Auto` checks for an update, `Off`
+    goes straight to the game. The setting is a g_settings row and is in the settings menu; the game ignores it.
+  - It asks for `GET /repos/morerokk/MHGURecomp/releases/latest`, which never returns drafts or pre-releases (the
+    `draft` / `prerelease` fields are checked as well), with a 5 s timeout and the last ETag (`update/latest.etag`,
+    `latest.json`: a 304 reuses the saved JSON).
+  - It compares the tag numerically with its own MHGU_VERSION and only installs a strictly newer one.
+  - It picks the asset by name prefix (`Windows-`, `ArchLinux-` / `Linux-`; `.tar.gz` before `.zip`), downloads it to
+    `update/<asset>.part` and checks the size and the `sha256:` digest GitHub keeps per asset. An asset without a
+    digest is not installed.
+  - It extracts to `update/new/`, dropping the archive's single top folder. Unsafe paths (`..`, absolute, `:`) are
+    refused, and the player's own files are never written (`data mods cheats bonus cache shots save update
+    mhgurecomp.ini log.txt`).
+  - It moves each file it replaces to `update/backup/` and renames the new one in. On a failure everything is put
+    back. update/backup and update/new are removed at the next start; Windows can't delete the running updater's own
+    exe and SDL3.dll, but it can rename them, which is how the updater replaces itself.
+  - Before installing it refuses if the game is running from that folder (Windows: the exe or game DLL can't be
+    opened for writing; Linux: /proc/*/exe).
+  - On Linux it sets 0755 on the programs and `.so` files, taken from the tar's modes or by name, since a zip made on
+    Windows has none.
+  - It starts the game with the arguments it was given, minus its own (`--update-force`, `--update-no-launch`).
+    Windows: CreateProcess with CREATE_NO_WINDOW, so the game logs to log.txt as it does from Explorer, then waits for
+    it and returns its exit code, so Steam sees the game run. Linux: execv, the same process.
+  - No connection, GitHub's rate limit (403/429; 60 an hour unauthenticated, and a 304 still counts), no asset or
+    digest, or "Not now": it starts the game without a word. A failed download or install shows the reason, then
+    starts the game after 10 s.
+- Version: the Makefile's `VERSION ?= git describe --tags` goes into the updater and the game's log ("MHGU Recomp
+  <version>", runtime/main.c). Only an exact tag (`0.10.4`) updates itself: a build between tags or `unknown` is left
+  alone unless `--update-force` is given. `make dist VERSION=x.y.z` packs the release (tools/dist.py): a .zip for
+  Windows, a .tar.gz for Linux (modes kept). It refuses a VERSION that isn't x.y.z and an updater built with another
+  version.
+- HTTPS: WinHTTP on Windows; on Linux the system's libcurl loaded with dlopen (libcurl.so.4 /
+  libcurl-gnutls.so.4), retried with the usual CA bundle paths when a runtime's libcurl can't find its own. Archives:
+  zlib (static on Windows, libz.so.1 on Linux). The updater needs glibc 2.34 at most and is checked like the game
+  (GLIBC_CHECK). Window: SDL3 with SDL_RenderDebugText, shown only when there is something to say (after 0.7 s of
+  checking, or a question); keyboard, mouse and controller (South: choose, East / Back: not now). Without a display it
+  installs in Auto mode and doesn't ask in Ask mode.
+- Tested 2026-10-28 on throwaway copies:
+  - A 0.9.0 updater installed GitHub's latest release on Windows (zip) and on Linux in WSL (zip on ext4: the
+    programs came out 0755). The installed files were byte-identical to the release, and the player's files were
+    unchanged.
+  - A local fake GitHub served a `make dist` 0.99.0 release (Windows zip, Linux tar.gz). The 0.9.0 updater replaced
+    itself, then reported "up to date" on the next run and removed the backup.
+  - Correctly refused or skipped: wrong digest, no digest, draft, 403, closed port, game running, newer than GitHub,
+    development build. When 0.10.3 was turned into a pre-release mid-test, the updater took 0.10.2.
+  - Arguments with spaces, quotes, trailing backslashes and empty strings reach the game unchanged, and its exit
+    code comes back. A second check got a 304 from GitHub.
+- Not covered: a release that drops a file leaves the old copy behind, and a new `bonus/system` is never installed,
+  since bonus/ belongs to the player.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

@@ -64,6 +64,28 @@ You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimat
 
 If the files are missing or the wrong version, a message box says so.
 
+### Staying up to date
+
+Releases come out often. To get them automatically, start `mhgurecomp-updater.exe` (`mhgurecomp-updater` on Linux)
+instead of `mhgurecomp.exe`: point your shortcut at it, or on a Steam Deck add it as the non-Steam game. It asks
+GitHub for the latest release and, when that is newer than yours, offers to install it, then starts the game.
+`mhgurecomp.exe` itself never checks or updates anything; starting it directly is always fine.
+
+- It only ever installs the latest proper release: never a draft, a pre-release or an older version.
+- The download is checked against the size and SHA-256 GitHub lists for it before anything is replaced.
+- Your files stay as they are: `data\`, `mods\`, `cheats\`, `bonus\`, `cache\`, `shots\`, `mhgurecomp.ini`,
+  `log.txt` and your saves. Only the program files (the exe, the updater, the DLLs / `.so`, `licenses\`) are replaced,
+  and if that fails halfway the old ones are put back.
+- Without an internet connection, or when GitHub's limit of 60 checks an hour from one address is reached, the game
+  just starts.
+- `Updates` in `[Application]` of `mhgurecomp.ini` (or the settings menu): `Ask` (default), `Auto` (install without
+  asking) or `Off` (only start the game).
+- Its window works with a mouse, keyboard or controller (A: choose, B: not now). What it did is in
+  `update\updater.log`.
+
+Older releases don't include the updater: if your folder has no `mhgurecomp-updater`, download the newest release by
+hand once.
+
 ### Where things are
 
 | What | Where |
@@ -134,7 +156,8 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Bonus Content]`: `BonusContent` (default On), see below
 - `[Audio]`: `Volume` (0 to 100: the whole game)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent)
+  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
+  Auto / Off: what `mhgurecomp-updater` does, see "Staying up to date")
 
 ### Multiplayer
 
@@ -263,9 +286,29 @@ distribution package would; that build then only runs with that FFmpeg version.
 
 ### Making a release
 
-A release is the contents of `build\` without the game files:
-- Include `mhgurecomp.exe`, `mhgugame.dll`, all other `.dll` files and `licenses\`.
-- Leave out `data\`.
+`make dist VERSION=<the release's tag>` builds everything with that version and packs it for GitHub:
+
+```bash
+git fetch --tags                          # (so builds between releases know the last one)
+make dist VERSION=0.10.4 BONUS=<path to the bonus savegame's system file>
+```
+
+On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux (or in WSL, with `B=build-linux
+O=obj-linux`) `dist/ArchLinux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
+with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the bundled DLLs, `licenses\`,
+`bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
+the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
+
+Upload both archives to a GitHub release whose tag is exactly that version (`0.10.4`, no `v`), as a normal release,
+not a pre-release. The updater only looks at GitHub's "latest" release, compares its tag with its own version as
+numbers (0.10.10 is newer than 0.10.9), and picks the asset starting with `Windows-` (`.zip`) or `ArchLinux-`
+(`.tar.gz`, else `.zip`). GitHub records each upload's SHA-256, which the updater checks. To hold a broken release
+back, make it a draft or pre-release: the updater then sees the previous one as the latest.
+
+The version comes from `git describe --tags`. A build that isn't exactly a tag (`0.10.3-4-gabc1234`) never updates
+itself, so a development build is never replaced by a release (`--update-force` overrides that). Options for testing
+the updater: `--update-no-launch` (don't start the game afterwards) and `MHGU_UPDATE_API=<url>` (another "latest
+release" address).
 
 `make` fills `licenses\` with everything a copy has to carry: this project's `LICENSE.txt`, `THIRD_PARTY_NOTICES.txt`
 (code compiled in), FFmpeg's license, and on Windows the licenses of the MSYS2 packages behind the bundled DLLs and
@@ -289,7 +332,9 @@ needs:
 - `vk_mem_alloc.h` (3.4.0) in `third_party/vk_mem_alloc/`, which the Makefile has on the include path (a
   distro package that installs the header where the compiler looks by default works just as well);
 - `zenity` or `kdialog` for the dialog on a fatal error. Without either, the message goes to the terminal and
-  to `log.txt` as usual.
+  to `log.txt` as usual;
+- for the updater: zlib's headers to build it, and `libcurl.so.4` (curl) when it runs, which SteamOS and the
+  usual desktop distributions have. It loads libcurl itself, so without it the updater just starts the game.
 
 ```bash
 python3 -m venv tools/venv && tools/venv/bin/pip install -r tools/requirements.txt
@@ -326,6 +371,7 @@ buttons), and screenshots come out black there.
 | --- | --- |
 | `tools/` | the recompiler: `lifter.py` (ARM to C), `neon.py` (NEON / VFP), `gen.py` (whole modules), `nso.py`, test and research tools |
 | `runtime/` | the host side: CPU state, kernel and threads, Switch services (`services/`, `hle/`), networking (`net/`), the NVN graphics API on Vulkan (`nvn/`), settings, input, mods |
+| `updater/` | `mhgurecomp-updater`: installs the latest GitHub release over the game folder, then starts the game |
 | `docs/` | `STATUS.md`: progress, design notes, reverse-engineering findings, debug options |
 | `extras/` | `cheats/`: cheat files players can copy into their `cheats` folder |
 
