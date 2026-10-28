@@ -727,6 +727,7 @@ static struct { float x, y; uint8_t vanchor; } ui_recent[UI_RECENT];
 static uint32_t ui_nrecent;  // (quads recorded this pass; the slot is the count modulo UI_RECENT)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
+static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
 volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every HUD quad of the next frame and its anchor (device.c)
 
 // 16:10: a window is drawn as pieces (body, edges, corners, then its text), each placed by its own centre, so one rule
@@ -1000,6 +1001,7 @@ static uint32_t pass_natt;
 void vk_end_pass(void) {
     if (!in_pass) return;
     ui_group_end();
+    if (ui_nrecent) ui_results_last = ui_results_pass;
     vkCmdEndRenderPass(vk_cmd());
     in_pass = false;
     if (gp_active) {
@@ -1247,6 +1249,7 @@ static void begin_pass(void) {
     pass_w = minw; pass_h = minh;
     ui_loading_pass = false;
     ui_title_pass = false;
+    ui_results_pass = false;
     ui_menu_pass = false;
     ui_nrecent = 0;
     pass_msaa = false;
@@ -2652,6 +2655,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // Bottom: no center band, or the line cuts through the numbers.
                         if (fabsf(pos_z - 99.0f) < 0.5f && vanchor == V_CENTER) vanchor = V_BOTTOM;
                     }
+
+                    // Quest results screen: its header and page counter at the top, the Time Left bar at the bottom (layer
+                    // 99, its ends at x 80 / 1180, y 643: what marks the screen), and in the middle the Quest Complete
+                    // stamp, the reward table, the item lists' parchment (101), its lines (99) and rows (100). The layers'
+                    // rules sent those different ways (the rows top, the parchment centre: the first row sat above the
+                    // parchment, the header went down). The bar is drawn after the stamp, so the last pass also tells.
+                    if (fabsf(pos_z - 99.0f) < 0.5f && fabsf(pos_y - 643.0f) < 0.5f && (fabsf(pos_x - 80.0f) < 0.5f || fabsf(pos_x - 1180.0f) < 0.5f))
+                        ui_results_pass = true;
+                    if ((ui_results_pass || ui_results_last) && pos_z > 98.5f && pos_z < 101.5f)
+                        vanchor = pos_y < 60.0f ? V_TOP : pos_y > 600.0f ? V_BOTTOM : V_CENTER;
 
                     if (anchor == ANCHOR_LEFT) {
                         new_pos_x = anchor_left + pos_x * s;
