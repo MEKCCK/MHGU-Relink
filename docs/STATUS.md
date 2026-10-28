@@ -351,6 +351,20 @@ stage from; the Arena's b_m09em062_00 spawn), MHGU_QUICKHUNT=404, then the hunte
 
 Buff icons and the frame rate (2026-10-28): fixed. Reported: with two or more buffs the icon beside a name on the HUD's status plates (yours, the other hunters', the Palicoes') takes turns far too fast at 240 fps. The plates (cUIOStatusPlate / cUIOStatusPlateGuests, update 0x834314) call 0x834d00 once per update for each of their two icon slots ({index, countdown, shown} at plate +0xf0 / +0xfc; tables of 54 and 36 icons at image 0x1839250 / 0x18395b0, tested against the player's buff flags +0x2840..+0x2864, rebuilt from the buff timers each update at 0x49f0xx): the countdown drops by 1 per update and is reloaded with 20, 0.67 s at 30 fps, 0.08 s at 240. Fix (runtime/hle/buffcycle.c, tools/gen.py PATCHES): the decrement (0x834d20) takes step / 2 updates (at most 1) in 1/65536 units and the reload (0x834ef4) is 20 of those. Checked at 240 fps (test save, quest 101, two buffs from their timers: player +0x287c and +0x2880 poked to 3000): the two icons change every 0.667 s, 12 times in 8 s.
 
+Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
+need both buttons almost together at high frame rates. The player's input update (0x47ca28, every weapon; called
+from the player update at 0x4a7dec) holds a new attack-button press (the key config's mask from 0x85f93c, | 0x1b0)
+to see whether another joins it: bit 0 of the player's input bits +0x1444 and a countdown +0x1448 = 2.0
+(0x47d558), less 1.0 each update (0x47ca84 `vmov.f32 s2, #-1.0`, 0x47ca90 `vadd`); at 0 the press counts alone.
+Measured (MHGU_LOG_MOVES, quest 101 with the user's HH, X then A d frames later): at 30 fps X+A (0010:006) for
+d <= 2, X alone (0010:000) 2 frames after the press otherwise; at 120 fps the same 2 frames (17 ms). The command
+tables (rPlBaseCmd: act_st / act_no / act_param, cmd_type, cmd_param0..3; cmd_type 8 = key param0 just pressed)
+read logical keys the weapon's key function (0x1360058 and its siblings, one per weapon) sets from +0x1444: held
++0x1414, pressed +0x1424 (0x485e2c / 0x485e78 test, 0x485de4 / 0x485e54 set). Fix (runtime/hle/combowin.c, tools/gen.py
+PATCHES): the constant is -step / 2 updates (at most 1). Checked: at 120 fps X+A for d <= 8 and X alone 8 frames
+(67 ms) after the press; 30 fps unchanged. A lone attack button is read 67 ms after the press at any frame rate,
+as on the Switch (it was 17 ms at 120 fps).
+
 ## Fidelity audit (2026-10-20)
 
 Silent-bug sweep after the shimmer and shadow fixes (the two classes found: a driver needing explicit barriers, and a
@@ -558,15 +572,9 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
    names, several keys per button, mouse buttons too), plus the left stick's four directions and the walk key. Today
    the layout is fixed: key_buttons in runtime/host_input.c, WASD / Shift handled beside it. The current layout stays
    the default, so existing ini files keep working; the settings launcher (item 7) can show it later.
-11. Button-combo windows at high frame rates (reported 2026-10-28). Two-button inputs such as the Hunting Horn's
-   X+A have to be pressed almost together at high frame rates, and the window shrinks as the frame rate rises: the
-   game most likely accepts the second button only within a fixed number of updates of the first (tuned for 30
-   updates a second), like the buff icon countdown (runtime/hle/buffcycle.c) and the monster jumps
-   (runtime/hle/emjump.c) were. Find the window: the player's input buffer / command check (fnnew while pressing X,
-   then A, a few frames apart; watch which counter decides), and make it count in the frame step (step / 2 updates)
-   so it lasts as long as at 30 fps. Keep what is snappier at high frame rates: only the time windows should stay
-   30 fps-long, not when a press is read. Check other weapons' combos and input buffers too (Charge Blade, Insect
-   Glaive, Hunter Arts / Styles' inputs).
+11. Button-combo windows at high frame rates: fixed (2026-10-28), see "Two-button inputs and the frame rate" above.
+   Still to check: the Lance's R+X+A in game (same code path), and other weapons' timed inputs (Charge Blade,
+   Insect Glaive, Hunter Arts / Styles') for other per-update windows.
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
