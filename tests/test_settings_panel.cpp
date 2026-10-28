@@ -328,7 +328,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("fps");
-    down(7);
+    down(8);  // (vsync, prewarm, msaa, fxaa, drawdist, volume, mutebg, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());

@@ -494,6 +494,12 @@ void host_input_event(const SDL_Event *e) {
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
         mouse_buttons = 0, mouse_grab = false;
+        config_window_focus(false);  // ([Audio] MuteInBackground)
+        if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        config_window_focus(true);
+        if (config_editable().mute_in_background) LOG("[input] window focused: sound back\n");
         break;
     case SDL_EVENT_GAMEPAD_ADDED:
         open_pad(e->gdevice.which);

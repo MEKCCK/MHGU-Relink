@@ -159,7 +159,8 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
   multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
 - `[Bonus Content]`: `BonusContent` (default On), see below
-- `[Audio]`: `Volume` (0 to 100: the whole game)
+- `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
+  game's window is in the background)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
   Auto / Off: what `mhgurecomp-updater` does, see "Staying up to date")

@@ -142,6 +142,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(ui_anchor);
     SAME(background_input);
     SAME(volume);
+    SAME(mute_in_background);
     SAME(button_icons);
     SAME(language);
     SAME(menu_scale);
@@ -380,6 +381,7 @@ void reset_section() {
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.volume = f.volume;
+        c.mute_in_background = f.mute_in_background;
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -478,6 +480,7 @@ std::vector<Row> main_rows() {
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, cold("Volume"));
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, cold("MuteInBackground"));
         add_bool(r, "fsr", "FSR", &c.fsr, cold("FSR"));
         if (c.fsr) {
             add_choice(

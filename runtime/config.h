@@ -59,6 +59,7 @@ typedef struct {
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
+    int mute_in_background;   // [Audio] MuteInBackground: no sound while the window is not focused (config_audio_gain)
 } Config;
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
@@ -122,7 +123,8 @@ int config_live_face_buttons(void);
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
-float config_audio_gain(void);  // atomic, safe on audio threads
+float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
+void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
 

@@ -102,6 +102,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"HUD anchor", "Posición del HUD"},
         {"Edges", "Bordes"},
         {"Volume (%)", "Volumen (%)"},
+        {"Mute in background", "Silenciar en segundo plano"},
         {"Position", "Posición"},
         {"Label", "Etiqueta"},
         {"Search hosts", "Buscar servidores"},

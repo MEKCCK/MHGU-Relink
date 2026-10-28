@@ -18,7 +18,7 @@
 
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
-static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0};
+static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1};
 static void set_float(SDL_AtomicInt *slot, float value) {
@@ -47,6 +47,7 @@ void config_store_loaded(const Config *c) {
     saved = *c; have_saved = true;
     SDL_SetAtomicInt(&language, c->language);
     SDL_SetAtomicInt(&volume, c->volume);
+    SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
 }
 void config_runtime_init(const Config *effective) {
@@ -72,7 +73,11 @@ int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
 int config_language(void) { return SDL_GetAtomicInt(&language); }
 Config config_editable(void) { return saved; }
-float config_audio_gain(void) { return SDL_GetAtomicInt(&volume) / 100.0f; }
+float config_audio_gain(void) {
+    if (SDL_GetAtomicInt(&mute_in_background) && !SDL_GetAtomicInt(&window_focused)) return 0.0f;
+    return SDL_GetAtomicInt(&volume) / 100.0f;
+}
+void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;
