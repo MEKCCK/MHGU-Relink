@@ -587,8 +587,13 @@ affected (its own sleep). Since the Linux port began; a 4-core machine shows it 
    the layout is fixed: key_buttons in runtime/host_input.c, WASD / Shift handled beside it. The current layout stays
    the default, so existing ini files keep working; the settings launcher (item 7) can show it later.
 11. Button-combo windows at high frame rates: fixed (2026-10-28), see "Two-button inputs and the frame rate" above.
-   Still to check: the Lance's R+X+A in game (same code path), and other weapons' timed inputs (Charge Blade,
-   Insect Glaive, Hunter Arts / Styles') for other per-update windows.
+   Hunter Arts on R+A+B (another control type, 2026-10-29): tested by the user at a high frame rate, works (R and A
+   held then B, or all three at once). The countdown starts on A, B, X, Y and R / ZR (pad bits A 0x100, B 0x80,
+   X 0x20, Y 0x10, R 0x40, ZL 0x200, ZR 0x800 at player +0x13f4 held / +0x13f8 new) and keeps each press of the
+   window (+0x1444 bits 13+, 0x47d574), so the buttons need not be held together. Left: a check elsewhere that
+   wants them held at the same moment would still miss a quick finger roll at very high frame rates (30 Hz polling
+   hid that); a 30 Hz input polling option would cover it at up to 33 ms of input latency - not needed so far.
+   Still to check: other weapons' timed inputs (Charge Blade, Insect Glaive, Styles') for other per-update windows.
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
