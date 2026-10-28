@@ -128,6 +128,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fsr_animsurf);
     SAME(vsync);
     SAME(shader_prewarm);
+    SAME(draw_distance);
     SAME(msaa);
     SAME(fxaa);
     SAME(face_buttons);
@@ -375,6 +376,7 @@ void reset_section() {
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
+        c.draw_distance = f.draw_distance;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.volume = f.volume;
@@ -471,6 +473,10 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
+        number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
+               cold("DrawDistance"));
+        if (c.draw_distance == 0)
+            r.back().value = tr("No limit");
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, cold("Volume"));
         add_bool(r, "fsr", "FSR", &c.fsr, cold("FSR"));
         if (c.fsr) {

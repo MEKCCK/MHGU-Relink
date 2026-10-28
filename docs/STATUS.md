@@ -507,11 +507,14 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
 4. Internet hubs without port forwarding (friends by code, public list) through our own relay / lobby server, and a
    security audit of the network code before strangers can join: plan in docs/research/internet-hubs.md.
 5. Android build (arm64, controller only, no touch controls): plan in docs/research/android.md.
-6. Configurable draw distance (ini). In Bherna Village NPCs vanish a few steps away, as on the Switch; in hunts
-   monsters show across the zone (they must), so start with the towns. Find what culls them: an NPC / object
-   distance or LOD constant (code, or a table in resident.arc / the stage's arcs) read per frame - fnnew around
-   walking away from an NPC, then the compare against the distance. Also check gathering spots and other map
-   objects (do they pop in late?). Watch the cost: more NPCs drawn, and the game may cap how many it updates.
+6. Draw distance ([Graphics] DrawDistance, 2026-10-28): town NPCs (uLobbyNpc, the 15 people in Bherna) fade in
+   within a distance and out beyond it (uLobbyNpc 0x8c2d9c: squared distance to the object at a global +0x54 against
+   the table at 0x8c2ef0, 2500^2, or 1800^2 with flag 0x40 of +0x186a; fade value +0x1894, copied to the model's
+   alpha +0x158). gen.py PATCHES at the load 0x8c2e34 -> config.c npc_fade_dist2: the factor squared times it, 0 =
+   no limit; live (settings menu, Graphics & Audio page). Hunts are untouched (monsters are not uLobbyNpc). Found
+   by diffing NPC objects at five player positions (+0x158 / +0x1894 1 near, 0 far). Checked with a poke of the table
+   (all NPCs stayed at alpha 1 out to 1700+ units, before 0 beyond ~1300); the built option not yet checked in game
+   (screenshots at 1 / 2 / 0, frame rate). Not looked at: gathering spots and other map objects, Hub NPC classes.
 7. A settings launcher for players who don't edit ini files: every [section] / key of runtime/config.c (it already
    knows the names, defaults, ranges and comments) in a window, saved to mhgurecomp.ini. Cheapest: inside the exe
    with the ImGui the port already ships (a `--settings` switch, or a "Settings" shortcut), so no second program or

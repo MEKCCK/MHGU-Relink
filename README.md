@@ -131,7 +131,7 @@ screenshot, F7 cycles MSAA.
 ## Settings
 
 Everything is in `mhgurecomp.ini`; each setting is explained in the file itself. The settings menu changes them in
-the game: **F1**, or **Minus + Plus** on a controller (Back + Start on an Xbox controller). Frame rate, FOV,
+the game: **F1**, or **Minus + Plus** on a controller (Back + Start on an Xbox controller). Frame rate, FOV, draw distance,
 anti-aliasing, VSync, controls and volume apply when you save; the settings marked * at the next start. Details:
 [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md). In short:
 
@@ -143,6 +143,8 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Upscaler]`: `FSR` (Off / On, default Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
   UltraPerformance), `Sharpness`, and `Upscaler` (FSR3, the default, or FSR4: needs an AMD RDNA 4 GPU and its driver, and an exe built with `make FSR4_DRIVER_PATCH=1`;
   falls back to FSR 3.1). FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`, `docs/FSR4-PORT.md`
+- `[Graphics]`: `DrawDistance` (how far away people in the villages and the Hubs are still drawn: 1 = the game's,
+  2 = twice as far, 0.5 = half, 0 = no limit; up to 10)
 - `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off), `ShaderPrewarm`
   (On / Off: translate all of the game's shaders in the background at startup, so fewer things are drawn black the
   first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about

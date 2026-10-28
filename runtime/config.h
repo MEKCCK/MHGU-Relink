@@ -58,6 +58,7 @@ typedef struct {
     int fsr_upscaler;         // [Upscaler] Upscaler: FSR_UP_3 (FSR 3.1) or FSR_UP_4 (FSR 4, runtime/nvn/vulkan/fsr4.c)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
+    float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
 } Config;
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
@@ -113,6 +114,7 @@ void config_runtime_init(const Config *effective); // After environment/Auto res
 float config_live_fps(void);
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
+float config_live_draw_distance(void);
 int config_live_fxaa(void);
 int config_live_msaa(void);
 int config_live_vsync(void);

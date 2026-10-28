@@ -5,6 +5,7 @@
 //   MHGU_WINDOW=WxH      windowed at that size, MHGU_RENDER=WxH  3D resolution, MHGU_MSAA=1|2|4|8, MHGU_FXAA=0|1,
 //                        MHGU_PAD_POSITIONAL=0|1 (test runs; override the file)
 #include <ctype.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@
 #include "config.h"
 #include "rt.h"
 
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -98,6 +99,13 @@ static const char DEFAULT_INI[] =
     "; Animated surface textures skip FSR's frame history to avoid smearing\n"
     "; Default: On\n"
     "AnimSurf = On\n"
+    "\n"
+    "[Graphics]\n"
+    "; How far away people in the villages and the Hubs are still drawn: 1 is the game's distance, 2 twice as far,\n"
+    "; 0.5 half as far, 0 no limit\n"
+    "; Between 0 and 10\n"
+    "; Default: 1.0\n"
+    "DrawDistance = 1.0\n"
     "\n"
     "[Performance]\n"
     "; Framerate cap\n"
@@ -258,6 +266,13 @@ float camera_fovy(float fovy, float aspect) {
     return fovy;
 }
 
+// Town NPCs (uLobbyNpc: villages, Hubs) fade in within a distance from the game's table (2500 units, 1800 for some)
+// and out beyond it; tools/gen.py PATCHES hands its square here. [Graphics] DrawDistance scales it, 0 is no limit.
+float npc_fade_dist2(float d2) {
+    float m = config_live_draw_distance();
+    return m > 0 ? d2 * m * m : FLT_MAX;
+}
+
 // A picture shape: "Auto" (0), "21:9" / "21/9", or a number (0.5 .. 10).
 static bool parse_aspect(const char *v, float *out) {
     float n, d, a;
@@ -290,6 +305,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_ICONS "Invalid button icon layout."
 #define ERR_LANGUAGE "Invalid menu language."
 #define ERR_UPDATES "Invalid update setting."
+#define ERR_DRAW "Draw distance must be 0-10 (0: no limit)."
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
@@ -312,6 +328,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
     {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
+    {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),

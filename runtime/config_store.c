@@ -19,7 +19,7 @@
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0};
-static SDL_AtomicInt live_fps, live_fov, live_mouse, live_fxaa = {1}, live_msaa = {1},
+static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1};
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
@@ -34,6 +34,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fps != saved.fps) set_float(&live_fps, (float)c->fps);
     if (all || c->fov != saved.fov) set_float(&live_fov, c->fov);
     if (all || c->mouse_sensitivity != saved.mouse_sensitivity) set_float(&live_mouse, c->mouse_sensitivity);
+    if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
     if (all || c->fxaa != saved.fxaa) SDL_SetAtomicInt(&live_fxaa, c->fxaa);
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
     if (all || c->vsync != saved.vsync) SDL_SetAtomicInt(&live_vsync, c->vsync);
@@ -62,6 +63,7 @@ void config_runtime_init(const Config *effective) {
 float config_live_fps(void) { return get_float(&live_fps); }
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
+float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_fxaa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_fxaa); }
 int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }

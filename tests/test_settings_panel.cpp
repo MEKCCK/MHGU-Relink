@@ -159,7 +159,7 @@ int main() {
     tab();
     selected("display.mode");
     tab();
-    down(5);  // (fps, vsync, prewarm, msaa, fxaa)
+    down(6);  // (fps, vsync, prewarm, msaa, fxaa, drawdist)
     selected("volume");
     confirm();
     selected("volume");
@@ -194,7 +194,7 @@ int main() {
     assert(!settings_panel_dirty());
     assert(config_editable().volume == 99);
     press(ImGuiKey_Home);
-    down(5);
+    down(6);
     selected("volume");
     press(ImGuiKey_GamepadDpadRight);
     back();
@@ -328,7 +328,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("fps");
-    down(6);
+    down(7);
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());
@@ -352,7 +352,7 @@ int main() {
     opened = true;
     idle();
     selected("fps");
-    down(3);
+    down(4);
     selected("volume");
     assert(!settings_panel_dirty()); // FSR-owned AA rows are disabled, not misleading live toggles.
     idle(20);

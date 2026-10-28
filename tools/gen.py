@@ -59,6 +59,10 @@ PATCHES = {
     # and its reload `mov r0, #20` count in the frame step instead of updates
     ('main', 0x834d20): (0xE2477001, '{ extern uint32_t buffcycle_tick(void); c->r[7] -= buffcycle_tick(); }'),
     ('main', 0x834ef4): (0xE3A00014, '{ extern uint32_t buffcycle_reload(void); c->r[0] = buffcycle_reload(); }'),
+    # Town NPC fade (uLobbyNpc, 0x8c2d9c): `vldr s8, [r2]` loads the squared distance within which the NPC fades in
+    # (table at 0x8c2ef0: 2500^2, or 1800^2 with flag 0x40 of +0x186a); config.c npc_fade_dist2 scales it ([Graphics]
+    # DrawDistance)
+    ('main', 0x8c2e34): (0xED924A00, '{ extern float npc_fade_dist2(float); c->v.f[8] = npc_fade_dist2(LDF(c->r[2])); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per
