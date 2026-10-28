@@ -512,9 +512,12 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
    the table at 0x8c2ef0, 2500^2, or 1800^2 with flag 0x40 of +0x186a; fade value +0x1894, copied to the model's
    alpha +0x158). gen.py PATCHES at the load 0x8c2e34 -> config.c npc_fade_dist2: the factor squared times it, 0 =
    no limit; live (settings menu, Graphics & Audio page). Hunts are untouched (monsters are not uLobbyNpc). Found
-   by diffing NPC objects at five player positions (+0x158 / +0x1894 1 near, 0 far). Checked with a poke of the table
-   (all NPCs stayed at alpha 1 out to 1700+ units, before 0 beyond ~1300); the built option not yet checked in game
-   (screenshots at 1 / 2 / 0, frame rate). Not looked at: gathering spots and other map objects, Hub NPC classes.
+   by diffing NPC objects at five player positions (+0x158 / +0x1894 1 near, 0 far). Checked in game (R9, 960x540,
+   Bherna arrival view): at 2 and 0 the people far up the path are drawn, at 1 not (as the game). Cost: uncapped
+   (VSync Off, FPS 240) ~119 fps at 1, ~113 at 0 (+0.4 ms); VSync Off at 60: a steady 60 at 0. With VSync On it
+   fell to 33-45 fps: this driver has no mailbox, so VSync On is FIFO, and the game paces to vi.c's own 60 Hz timer,
+   not the display's, so a frame that ends a little late waits a whole vblank (a pacing problem any heavier scene
+   hits, not the NPCs' cost). Not looked at: gathering spots and other map objects, Hub NPC classes.
 7. A settings launcher for players who don't edit ini files: every [section] / key of runtime/config.c (it already
    knows the names, defaults, ranges and comments) in a window, saved to mhgurecomp.ini. Cheapest: inside the exe
    with the ImGui the port already ships (a `--settings` switch, or a "Settings" shortcut), so no second program or
