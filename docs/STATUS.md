@@ -509,6 +509,16 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
 - Not covered: a release that drops a file leaves the old copy behind, and a new `bonus/system` is never installed,
   since bonus/ belongs to the player.
 
+## Fixed (2026-10-28): Linux sleeps were busy loops
+
+Reported (Fedora, Intel N100, 4 cores): all four cores saturated, 40-50% of it kernel time, not smooth at any render
+size. plat_sleep_until_ns (runtime/platform/linux.c) gave clock_nanosleep(TIMER_ABSTIME) the time left as if it were
+the absolute deadline: long past, so it returned at once and every sleep spun on syscalls until its deadline. Every
+sleeping thread did this: the 60 Hz vblank timer (hle/vi.c), svcSleepThread (every game thread that sleeps), Local
+Play. Fix: sleep until 200 us before the deadline, then yield as designed. Measured (WSL, 200 sleeps of 5 ms): before
+60% of a core (0.5 s sys a second), after 2%, still on time (1 us late on average, 42 us at worst). Windows was not
+affected (its own sleep). Since the Linux port began; a 4-core machine shows it the most.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

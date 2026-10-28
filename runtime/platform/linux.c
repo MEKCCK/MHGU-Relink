@@ -127,7 +127,10 @@ void plat_sleep_until_ns(uint64_t t) {
         if (now >= t) return;
         uint64_t left = t - now;
         if (left < 200000) { sched_yield(); continue; }  // (the last bit: spinning beats a syscall)
-        struct timespec due = {(time_t)(left / 1000000000ull), (long)(left % 1000000000ull)};
+        // Asleep until 200 us before t (an absolute time on plat_now_ns's clock). (It was given the time left as if it
+        // were absolute: long past, so it returned at once and every sleep was a busy loop of syscalls.)
+        uint64_t wake = t - 200000;
+        struct timespec due = {(time_t)(wake / 1000000000ull), (long)(wake % 1000000000ull)};
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &due, NULL);  // (EINTR: the loop re-reads the clock)
     }
 }
