@@ -30,6 +30,8 @@ class SettingsLocaleTest(unittest.TestCase):
 
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
+        # INI keys looked up in the settings table (cold("Mode"), lo("FPS")...) are not shown
+        source = re.sub(r'\b(?:cold|lo|hi)\(' + LITERAL + r'\)', '', source)
         unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
                      "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Settings##main"}
         visible = {text for text in literals(source) if text and
@@ -40,6 +42,9 @@ class SettingsLocaleTest(unittest.TestCase):
         errors = (ROOT / "runtime/config_store.c").read_text(encoding="utf-8")
         messages = [literals(value)[-1] for value in re.findall(
             r'fail\([^;]*?' + LITERAL + r'\)', errors)]
+        # the settings table's messages (runtime/config.c g_settings)
+        table = (ROOT / "runtime/config.c").read_text(encoding="utf-8")
+        messages += [literals(value)[0] for value in re.findall(r'#define ERR_\w+ +(' + LITERAL + ')', table)]
         self.assertTrue(messages)
         self.assertFalse(set(messages) - set(keys))
 

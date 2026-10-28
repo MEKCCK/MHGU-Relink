@@ -1,11 +1,5 @@
 # MHGU Recomp
 
-Host options are available with **Minus + Plus** (Back + Start),
-or F1. This includes all INI settings, application volume and exit confirmation.
-See [settings UI and validation](docs/SETTINGS_UI.md). FPS, FOV, anti-aliasing, VSync,
-input and audio changes apply on save. Fields marked * require restarting; language
-and controller glyphs preview immediately.
-
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 recompiling the game's 32-bit ARM code to C and running it on a host runtime: Switch system services and the NVN
 graphics API are reimplemented on Windows, with Vulkan for rendering.
@@ -109,11 +103,15 @@ inverted axes) apply to it too.
 
 When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes.
 
-Other keys: Alt+Enter or F11 switches between windowed and full screen, F12 takes a screenshot, F7 cycles MSAA.
+Other keys: F1 opens the settings menu, Alt+Enter or F11 switches between windowed and full screen, F12 takes a
+screenshot, F7 cycles MSAA.
 
 ## Settings
 
-Everything is in `mhgurecomp.ini`; each setting is explained in the file itself. In short:
+Everything is in `mhgurecomp.ini`; each setting is explained in the file itself. The settings menu changes them in
+the game: **F1**, or **Minus + Plus** on a controller (Back + Start on an Xbox controller). Frame rate, FOV,
+anti-aliasing, VSync, controls and volume apply when you save; the settings marked * at the next start. Details:
+[docs/SETTINGS_UI.md](docs/SETTINGS_UI.md). In short:
 
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (the 3D resolution),
   `AspectRatio` (Auto follows the window: 16:10 and anything wider fill it, narrower gets 16:10 with bars), `FOV`
@@ -124,8 +122,9 @@ Everything is in `mhgurecomp.ini`; each setting is explained in the file itself.
   UltraPerformance), `Sharpness`, and `Upscaler` (FSR3, the default, or FSR4: needs an AMD RDNA 4 GPU and its driver, and an exe built with `make FSR4_DRIVER_PATCH=1`;
   falls back to FSR 3.1). FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`, `docs/FSR4-PORT.md`
 - `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off)
-- `[Controls]`: `FaceButtons` (Position / Label), `BackgroundInput` (On / Off: the controller keeps working while
-  the game's window is in the background, such as with a wiki in front of it; default On)
+- `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
+  `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
+  with a wiki in front of it; default On)
 - `[Mouse]`: `MouseSensitivity` (1 = default, 0.1 to 10)
 - `[Multiplayer]`: `Port`, `Join` (addresses of hosts outside your LAN), `SyncSmallMonsters`
 - `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
@@ -133,6 +132,9 @@ Everything is in `mhgurecomp.ini`; each setting is explained in the file itself.
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
   multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
 - `[Bonus Content]`: `BonusContent` (default On), see below
+- `[Audio]`: `Volume` (0 to 100: the whole game)
+- `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
+  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent)
 
 ### Multiplayer
 

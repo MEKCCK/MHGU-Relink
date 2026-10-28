@@ -113,7 +113,10 @@ static const char DEFAULT_INI[] =
     "; Position, Label\n"
     "; Default: Position\n"
     "FaceButtons = Position\n"
-    "; Host settings menu only: Original, South (bottom), East (right). Gameplay is unchanged.\n"
+    "\n"
+    "; Confirm button in the settings menu (F1, or Minus + Plus on a controller). The game's own menus are unchanged.\n"
+    "; Original, South (bottom button), East (right button)\n"
+    "; Default: Original\n"
     "MenuConfirm = Original\n"
     "\n"
     "; Controller input is also registered if the window is out of focus\n"
@@ -168,18 +171,34 @@ static const char DEFAULT_INI[] =
     "; This only happens if your savegame hasn't received any downloadable content yet.\n"
     "; Default: On\n"
     "BonusContent = On\n"
-    "\n[Audio]\n"
-    "; Master volume for this application, 0 (mute) to 100.\n"
+    "\n"
+    "[Audio]\n"
+    "; Volume of the whole game\n"
+    "; Between 0 (mute) and 100\n"
+    "; Default: 100\n"
     "Volume = 100\n"
-    "\n[Application]\n"
-    "; Confirm closing the window or pressing Alt+F4. This does not save game progress.\n"
+    "\n"
+    "[Application]\n"
+    "; Ask before the game window closes (closing does not save the game)\n"
+    "; Default: On\n"
     "ConfirmExit = On\n"
+    "\n"
+    "; Language of the settings menu (F1, or Minus + Plus on a controller)\n"
+    "; English, Spanish\n"
+    "; Default: English\n"
     "Language = English\n"
+    "\n"
+    "; Button icons in the settings menu\n"
+    "; Xbox, Switch, PlayStation\n"
+    "; Default: Xbox\n"
     "ButtonIcons = Xbox\n"
+    "\n"
+    "; Size of the settings menu, in percent\n"
+    "; Between 100 and 200\n"
+    "; Default: 100\n"
     "MenuScale = 100\n";
 
-
-static void ini_path(char *buf, size_t size) {
+void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
     if (e && *e) { snprintf(buf, size, "%s", e); return; }
     snprintf(buf, size, "mhgurecomp.ini");  // (started on its own the game runs in its folder, or MHGU_HOME: main.c)
@@ -244,24 +263,250 @@ static bool parse_aspect(const char *v, float *out) {
     return true;
 }
 
-// UIAnchor: Center (also 1, 16:9), 21:9 (2), 32:9 (3) or Edges, as Config.ui_anchor's UI_*
-static bool parse_anchor(const char *v, int *out) {
-    if (!strcasecmp(v, "center") || !strcmp(v, "1") || !strcmp(v, "16:9")) *out = UI_CENTER;
-    else if (!strcmp(v, "2") || !strcmp(v, "21:9")) *out = UI_21_9;
-    else if (!strcmp(v, "3") || !strcmp(v, "32:9")) *out = UI_32_9;
-    else if (!strcasecmp(v, "edges")) *out = UI_EDGES;
+// ---- the settings of the file (config.h ConfigSetting): one row each, in the file's order
+// config_validate's messages (settings_locale.h has them in Spanish; tests/test_settings_locale.py checks)
+#define ERR_SIZE "Resolution must be Desktop/Auto or 320x180 to 16384x16384."
+#define ERR_ASPECT "Aspect ratio must be Auto or between 0.5 and 10."
+#define ERR_VIEW "FOV must be 0.5-2.0 and mouse sensitivity 0.1-10."
+#define ERR_MISC "Invalid frame cap, anti-aliasing, controller, HUD or volume setting."
+#define ERR_TOGGLE "Invalid On/Off value."
+#define ERR_FSR "Invalid FSR quality, provider, sharpness or reactive mask."
+#define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
+#define ERR_HP "HP factors must be 0.05-20."
+#define ERR_VILLAGE "Invalid village HP or quest override count."
+#define ERR_CONFIRM "Invalid menu confirmation policy."
+#define ERR_SCALE "Invalid interface scale."
+#define ERR_ICONS "Invalid button icon layout."
+#define ERR_LANGUAGE "Invalid menu language."
+#define F(x) offsetof(Config, x)
+#define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
+static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+const ConfigSetting g_settings[] = {
+    {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
+     "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
+    {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
+    {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
+    {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
+    {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
+    {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
+     ERR_MISC},
+    {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
+    ON_OFF("Anti-aliasing", "FXAA", fxaa, false),
+    ON_OFF("Upscaler", "FSR", fsr, true),
+    {"Upscaler", "Upscaler", SET_CHOICE, F(fsr_upscaler), 0, 0, 0, "FSR3|fsr3.1|3,FSR4|4", NULL, true, ERR_FSR},
+    {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
+     "NativeAA|native|aa,Quality,Balanced,Performance,UltraPerformance|ultraperf", NULL, true, ERR_FSR},
+    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
+    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
+    {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
+    ON_OFF("Performance", "VSync", vsync, false),
+    {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional|nintendo,Label|labels|xbox",
+     NULL, false, ERR_MISC},
+    {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
+    ON_OFF("Controls", "BackgroundInput", background_input, false),
+    {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
+    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
+    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, true),
+    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
+    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
+    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
+    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
+    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
+    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
+    ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
+    {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
+    ON_OFF("Application", "ConfirmExit", confirm_exit, false),
+    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
+    {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
+    {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 100, 200, NULL, NULL, false, ERR_SCALE},
+};
+#undef ON_OFF
+#undef F
+const int g_nsettings = (int)(sizeof g_settings / sizeof g_settings[0]);
+
+// Is name (squashed) one of the '|'-separated spellings in list (from list, up to its end or a ',')? With *index, the
+// number of the ','-separated item it matched.
+static bool spelled(const char *list, const char *name, int *index) {
+    int item = 0;
+    for (const char *p = list; *p;) {
+        size_t n = strcspn(p, "|,");
+        char one[64];
+        snprintf(one, sizeof one, "%.*s", (int)n, p);
+        squash(one);
+        size_t len = strlen(one);
+        bool prefix = len && one[len - 1] == '*';
+        if (prefix ? !strncmp(name, one, len - 1) : !strcmp(name, one)) {
+            if (index) *index = item;
+            return true;
+        }
+        p += n;
+        if (*p == ',') item++;
+        if (*p) p++;
+    }
+    return false;
+}
+
+const ConfigSetting *config_setting(const char *key) {
+    char k[64];
+    snprintf(k, sizeof k, "%s", key);
+    squash(k);
+    for (int i = 0; i < g_nsettings; i++)
+        if (spelled(g_settings[i].key, k, NULL)) return &g_settings[i];
+    return NULL;
+}
+
+// The first spelling of a choice (as the file writes it)
+static void choice_name(const char *list, int index, char *buf, size_t size) {
+    const char *p = list;
+    for (int i = 0; i < index && p; i++) if ((p = strchr(p, ','))) p++;
+    if (!p) p = list;
+    snprintf(buf, size, "%.*s", (int)strcspn(p, "|,"), p);
+}
+
+static int *field_int(const Config *c, size_t at) { return (int *)((char *)c + at); }
+static float *field_float(const ConfigSetting *s, const Config *c) { return (float *)((char *)c + s->field); }
+static int choice_value(const ConfigSetting *s, int index) { return s->values ? s->values[index] : index; }
+static int nchoices(const ConfigSetting *s) {
+    int n = 1;
+    for (const char *p = s->choices; *p; p++) n += *p == ',';
+    return n;
+}
+
+static bool parse_bool(const char *v, int *out) {
+    if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) *out = 1;
+    else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) *out = 0;
     else return false;
     return true;
 }
 
-// FSRQuality (squashed): NativeAA, Quality, Balanced, Performance, UltraPerformance, as Config.fsr_quality's FSR_*
-static bool parse_fsr_quality(const char *v, int *out) {
-    if (!strcmp(v, "nativeaa") || !strcmp(v, "native") || !strcmp(v, "aa")) *out = FSR_NATIVE;
-    else if (!strcmp(v, "quality")) *out = FSR_QUALITY;
-    else if (!strcmp(v, "balanced")) *out = FSR_BALANCED;
-    else if (!strcmp(v, "performance")) *out = FSR_PERFORMANCE;
-    else if (!strcmp(v, "ultraperformance") || !strcmp(v, "ultraperf")) *out = FSR_ULTRA_PERFORMANCE;
-    else return false;
+bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
+    char v[256], *end;
+    snprintf(v, sizeof v, "%s", value);
+    squash(v);
+    int index;
+    float f[4];
+    switch (s->kind) {
+    case SET_BOOL: return parse_bool(v, field_int(c, s->field));
+    case SET_INT: {
+        double d = strtod(v, &end);
+        if (end == v || *end || !(d >= s->min && d <= s->max)) return false;
+        *field_int(c, s->field) = (int)d;
+        return true;
+    }
+    case SET_FLOAT: {
+        float x = strtof(v, &end);
+        if (end == v || *end || !(x >= s->min && x <= s->max)) return false;
+        *field_float(s, c) = x;
+        return true;
+    }
+    case SET_FACTOR:
+        if (parse_factors(v, f) != 1) return false;
+        *field_float(s, c) = f[0];
+        return true;
+    case SET_CHOICE:
+        if (!spelled(s->choices, v, &index)) return false;
+        *field_int(c, s->field) = choice_value(s, index);
+        return true;
+    case SET_SIZE:
+        if (spelled(s->choices, v, NULL)) {
+            *field_int(c, s->field) = *field_int(c, s->field2) = 0;
+            return true;
+        }
+        return parse_size(v, field_int(c, s->field), field_int(c, s->field2));
+    case SET_ASPECT: return parse_aspect(v, field_float(s, c));
+    case SET_TEXT:  // (as written: host names keep their dashes)
+        snprintf((char *)c + s->field, s->field2, "%s", value);
+        return true;
+    }
+    return false;
+}
+
+void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t size) {
+    int iv = s->kind == SET_FLOAT || s->kind == SET_FACTOR || s->kind == SET_ASPECT || s->kind == SET_TEXT
+                 ? 0 : *field_int(c, s->field);
+    float fv = s->kind == SET_FLOAT || s->kind == SET_FACTOR || s->kind == SET_ASPECT ? *field_float(s, c) : 0;
+    switch (s->kind) {
+    case SET_BOOL: snprintf(buf, size, "%s", iv ? "On" : "Off"); break;
+    case SET_INT: snprintf(buf, size, "%d", iv); break;
+    case SET_FLOAT:
+    case SET_FACTOR: snprintf(buf, size, "%g", (double)fv); break;
+    case SET_CHOICE:
+        for (int i = 0, n = nchoices(s); i < n; i++)
+            if (choice_value(s, i) == iv) { choice_name(s->choices, i, buf, size); return; }
+        choice_name(s->choices, 0, buf, size);
+        break;
+    case SET_SIZE:
+        if (iv) snprintf(buf, size, "%dx%d", iv, *field_int(c, s->field2));
+        else choice_name(s->choices, 0, buf, size);
+        break;
+    case SET_ASPECT:
+        if (fv == 0) snprintf(buf, size, "Auto");
+        else snprintf(buf, size, "%g", (double)fv);
+        break;
+    case SET_TEXT: snprintf(buf, size, "%s", (const char *)c + s->field); break;
+    }
+}
+
+bool config_valid(const ConfigSetting *s, const Config *c) {
+    switch (s->kind) {
+    case SET_BOOL: {
+        int v = *field_int(c, s->field);
+        return v == 0 || v == 1;
+    }
+    case SET_INT: {
+        int v = *field_int(c, s->field);
+        return v >= s->min && v <= s->max;
+    }
+    case SET_FLOAT:
+    case SET_FACTOR: {
+        float v = *field_float(s, c);
+        return isfinite(v) && v >= s->min && v <= s->max;
+    }
+    case SET_CHOICE:
+        for (int i = 0, n = nchoices(s); i < n; i++)
+            if (choice_value(s, i) == *field_int(c, s->field)) return true;
+        return false;
+    case SET_SIZE: {
+        int w = *field_int(c, s->field), h = *field_int(c, s->field2);
+        return (!w && !h) || (w >= 320 && w <= 16384 && h >= 180 && h <= 16384);
+    }
+    case SET_ASPECT: {
+        float v = *field_float(s, c);
+        return isfinite(v) && (v == 0 || (v >= s->min && v <= s->max));
+    }
+    case SET_TEXT: {  // (one line, and no comment character: the file would read it back cut short)
+        const char *t = (const char *)c + s->field;
+        return memchr(t, 0, s->field2) && !strpbrk(t, "\r\n;#");
+    }
+    }
+    return false;
+}
+
+bool config_equal(const ConfigSetting *s, const Config *a, const Config *b) {
+    switch (s->kind) {
+    case SET_FLOAT:
+    case SET_FACTOR:
+    case SET_ASPECT: return *field_float(s, a) == *field_float(s, b);
+    case SET_SIZE:
+        return *field_int(a, s->field) == *field_int(b, s->field) &&
+               *field_int(a, s->field2) == *field_int(b, s->field2);
+    case SET_TEXT: return !strcmp((const char *)a + s->field, (const char *)b + s->field);
+    default: return *field_int(a, s->field) == *field_int(b, s->field);
+    }
+}
+
+bool config_restart_key(const char *key) {
+    const ConfigSetting *s = config_setting(key);
+    return s && s->restart;
+}
+
+bool config_range(const char *key, float *min, float *max) {
+    const ConfigSetting *s = config_setting(key);
+    if (!s || (s->kind != SET_INT && s->kind != SET_FLOAT && s->kind != SET_FACTOR && s->kind != SET_ASPECT)) return false;
+    *min = s->min, *max = s->max;
     return true;
 }
 
@@ -274,152 +519,28 @@ static void set_key(const char *key, char *val, int line) {
     snprintf(v, sizeof v, "%s", val);
     squash(k);
     squash(v);
-    bool ok = true;
-    if (!strcmp(k, "mode")) {
-        if (!strcmp(v, "fullscreen") || !strcmp(v, "exclusive") || !strcmp(v, "exclusivefullscreen"))
-            g_config.display_mode = DISPLAY_FULLSCREEN;
-        else if (!strcmp(v, "windowed") || !strcmp(v, "window")) g_config.display_mode = DISPLAY_WINDOWED;
-        else if (!strncmp(v, "borderless", 10)) g_config.display_mode = DISPLAY_BORDERLESS;
-        else ok = false;
-    } else if (!strcmp(k, "resolution")) {
-        if (!strcmp(v, "desktop") || !strcmp(v, "auto")) g_config.width = g_config.height = 0;
-        else ok = parse_size(v, &g_config.width, &g_config.height);
-    } else if (!strcmp(k, "renderresolution")) {
-        if (!strcmp(v, "auto")) render_auto = true;
-        else if ((ok = parse_size(v, &g_config.render_w, &g_config.render_h))) render_auto = false;
-    } else if (!strcmp(k, "aspectratio")) {
-        ok = parse_aspect(v, &g_config.aspect_ratio);
-    } else if (!strcmp(k, "fov")) {
-        float f = strtof(v, NULL);
-        if ((ok = f >= 0.5f && f <= 2.0f)) g_config.fov = f;
-    } else if (!strcmp(k, "uianchor")) {
-        ok = parse_anchor(v, &g_config.ui_anchor);
-    } else if (!strcmp(k, "msaa")) {
-        if (!strcmp(v, "off") || !strcmp(v, "none") || !strcmp(v, "0") || !strcmp(v, "1") || !strcmp(v, "1x"))
-            g_config.msaa = 1;
-        else if (!strcmp(v, "2x") || !strcmp(v, "2")) g_config.msaa = 2;
-        else if (!strcmp(v, "4x") || !strcmp(v, "4")) g_config.msaa = 4;
-        else if (!strcmp(v, "8x") || !strcmp(v, "8")) g_config.msaa = 8;
-        else ok = false;
-    } else if (!strcmp(k, "backgroundinput")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.background_input = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.background_input = 0;
-        else ok = false;
-    } else if (!strcmp(k, "fxaa")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.fxaa = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.fxaa = 0;
-        else ok = false;
-    } else if (!strcmp(k, "fsr")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.fsr = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.fsr = 0;
-        else ok = false;
-    } else if (!strcmp(k, "upscaler")) {
-        if (!strcmp(v, "fsr3") || !strcmp(v, "fsr3.1") || !strcmp(v, "3")) g_config.fsr_upscaler = FSR_UP_3;
-        else if (!strcmp(v, "fsr4") || !strcmp(v, "4")) g_config.fsr_upscaler = FSR_UP_4;
-        else ok = false;
-    } else if (!strcmp(k, "fsrquality")) {
-        ok = parse_fsr_quality(v, &g_config.fsr_quality);
-    } else if (!strcmp(k, "sharpness")) {
-        char *end;
-        float f = strtof(v, &end);
-        if ((ok = end != v && f >= 0.0f && f <= 1.0f)) g_config.fsr_sharpness = f;
-    } else if (!strcmp(k, "objectmotion")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.fsr_objmotion = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.fsr_objmotion = 0;
-        else ok = false;
-    } else if (!strcmp(k, "animsurf")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.fsr_animsurf = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.fsr_animsurf = 0;
-        else ok = false;
-    } else if (!strcmp(k, "reactive")) {
-        char *end;
-        float f = strtof(v, &end);
-        if ((ok = end != v && f >= 0.0f && f <= 1.0f)) g_config.fsr_reactive = f;
-    } else if (!strcmp(k, "vsync")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.vsync = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.vsync = 0;
-        else ok = false;
-    } else if (!strcmp(k, "facebuttons")) {
-        if (!strcmp(v, "position") || !strcmp(v, "positional") || !strcmp(v, "nintendo"))
-            g_config.face_buttons = FACE_POSITION;
-        else if (!strcmp(v, "label") || !strcmp(v, "labels") || !strcmp(v, "xbox"))
-            g_config.face_buttons = FACE_LABEL;
-        else ok = false;
-    } else if (!strcmp(k, "mousesensitivity")) {
-        float f = strtof(v, NULL);
-        if ((ok = f >= 0.1f && f <= 10.0f)) g_config.mouse_sensitivity = f;
-    } else if (!strcmp(k, "volume")) {
-        char *end;
-        long volume = strtol(v, &end, 10);
-        if ((ok = end != v && !*end && volume >= 0 && volume <= 100)) g_config.volume = (int)volume;
-    } else if (!strcmp(k, "menuscale")) {
-        char *end; long scale = strtol(v, &end, 10);
-        if ((ok = end != v && !*end && scale >= 100 && scale <= 200)) g_config.menu_scale = (int)scale;
-    } else if (!strcmp(k, "menuconfirm")) {
-        if (!strcmp(v, "original")) g_config.menu_confirm = MENU_CONFIRM_ORIGINAL;
-        else if (!strcmp(v, "south")) g_config.menu_confirm = MENU_CONFIRM_SOUTH;
-        else if (!strcmp(v, "east")) g_config.menu_confirm = MENU_CONFIRM_EAST;
-        else ok = false;
-    } else if (!strcmp(k, "buttonicons")) {
-        if (!strcmp(v, "xbox")) g_config.button_icons = 0;
-        else if (!strcmp(v, "switch")) g_config.button_icons = 1;
-        else if (!strcmp(v, "playstation")) g_config.button_icons = 2;
-        else ok = false;
-    } else if (!strcmp(k, "language")) {
-        if (!strcmp(v, "english") || !strcmp(v, "en")) g_config.language = 0;
-        else if (!strcmp(v, "spanish") || !strcmp(v, "es")) g_config.language = 1;
-        else ok = false;
-    } else if (!strcmp(k, "confirmexit")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.confirm_exit = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.confirm_exit = 0;
-        else ok = false;
-    } else if (!strcmp(k, "port")) {
-        int p = atoi(v);
-        if (p > 0 && p < 65536) g_config.ldn_port = p;
-        else ok = false;
-    } else if (!strcmp(k, "join")) {
-        snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", val);  // (as written: names keep their dashes)
-    } else if (!strcmp(k, "bonuscontent")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.bonus_content = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.bonus_content = 0;
-        else ok = false;
-    } else if (!strcmp(k, "villagequestsinhub")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.village_in_hub = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.village_in_hub = 0;
-        else ok = false;
-    } else if (!strcmp(k, "hubhp")) {
-        float f[4];
-        if ((ok = parse_factors(v, f) == 1)) g_config.hp.village = f[0];
-    } else if (!strcmp(k, "syncsmallmonsters")) {
-        if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true") || !strcmp(v, "yes")) g_config.sync_small_monsters = 1;
-        else if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "no")) g_config.sync_small_monsters = 0;
-        else ok = false;
-    } else if (k[0] >= '1' && k[0] <= '4' && (!strcmp(k + 1, "player") || !strcmp(k + 1, "players"))) {
-        float f[4];
-        if ((ok = parse_factors(v, f) == 1)) g_config.hp.scale[k[0] - '1'] = f[0];
-    } else if (!strncmp(k, "quest", 5) && isdigit((unsigned char)k[5])) {
+    if (!strncmp(k, "quest", 5) && isdigit((unsigned char)k[5])) {  // [Monster HP] Quest<number> = factors
         HpScale *h = &g_config.hp;
         char *end;
         unsigned long q = strtoul(k + 5, &end, 10);
         float f[4];
         int n = parse_factors(v, f);
-        if ((ok = !*end && q && (n == 1 || n == 4))) {
-            int i = 0;
-            while (i < h->quests && h->quest[i].quest != q) i++;
-            if (i == HP_QUESTS_MAX) { LOG("[config] line %d: more than %d quests set apart\n", line, HP_QUESTS_MAX); return; }
-            h->quest[i].quest = (uint32_t)q;
-            for (int j = 0; j < 4; j++) h->quest[i].scale[j] = f[n == 4 ? j : 0];
-            if (i == h->quests) h->quests++;
+        if (*end || !q || (n != 1 && n != 4)) {
+            LOG("[config] line %d: \"%s\" is not a value %s takes; using the default\n", line, val, key);
+            return;
         }
-    } else if (!strcmp(k, "fps") || !strcmp(k, "framerate")) {
-        int f = atoi(v);
-        if (f >= 30 && f <= 240) g_config.fps = f;
-        else ok = false;
-    } else {
-        LOG("[config] line %d: unknown setting \"%s\" (ignored)\n", line, key);
+        int i = 0;
+        while (i < h->quests && h->quest[i].quest != q) i++;
+        if (i == HP_QUESTS_MAX) { LOG("[config] line %d: more than %d quests set apart\n", line, HP_QUESTS_MAX); return; }
+        h->quest[i].quest = (uint32_t)q;
+        for (int j = 0; j < 4; j++) h->quest[i].scale[j] = f[n == 4 ? j : 0];
+        if (i == h->quests) h->quests++;
         return;
     }
-    if (!ok) LOG("[config] line %d: \"%s\" is not a value %s takes; using the default\n", line, val, key);
+    const ConfigSetting *s = config_setting(key);
+    if (!s) { LOG("[config] line %d: unknown setting \"%s\" (ignored)\n", line, key); return; }
+    if (!config_parse(s, val, &g_config))
+        LOG("[config] line %d: \"%s\" is not a value %s takes; using the default\n", line, val, key);
 }
 
 static char *trim(char *s) {
@@ -460,7 +581,7 @@ static void append_missing_sections(const char *path, const char *seen) {
 
 void config_load(void) {
     char path[1100];
-    ini_path(path, sizeof path);
+    config_path(path, sizeof path);
     FILE *f = fopen(path, "r");
     if (!f) {
         FILE *o = fopen(path, "w");
@@ -492,9 +613,8 @@ void config_load(void) {
     }
 
     // Keep Auto/Desktop and file values, rather than persisting temporary environment overrides.
-    Config editable = g_config;
-    if (render_auto) editable.render_w = editable.render_h = 0;
-    config_store_loaded(&editable);
+    render_auto = !g_config.render_w;
+    config_store_loaded(&g_config);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
@@ -512,17 +632,12 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_ASPECT"))) parse_aspect(e, &g_config.aspect_ratio);
     if ((e = getenv("MHGU_FOV")) && strtof(e, NULL) >= 0.5f && strtof(e, NULL) <= 2.0f) g_config.fov = strtof(e, NULL);
-    if ((e = getenv("MHGU_UI_ANCHOR"))) parse_anchor(e, &g_config.ui_anchor);
+    if ((e = getenv("MHGU_UI_ANCHOR"))) config_parse(config_setting("UIAnchor"), e, &g_config);
     e = getenv("MHGU_RENDER");
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)
     if ((e = getenv("MHGU_FSR_UPSCALER"))) g_config.fsr_upscaler = !strcmp(e, "4") || !strcasecmp(e, "fsr4") ? FSR_UP_4 : FSR_UP_3;
-    if ((e = getenv("MHGU_FSR_QUALITY"))) {
-        char q[32];
-        snprintf(q, sizeof q, "%s", e);
-        squash(q);
-        parse_fsr_quality(q, &g_config.fsr_quality);
-    }
+    if ((e = getenv("MHGU_FSR_QUALITY"))) config_parse(config_setting("FSRQuality"), e, &g_config);
     if ((e = getenv("MHGU_FSR_OBJMOTION"))) g_config.fsr_objmotion = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_ANIMSURF"))) g_config.fsr_animsurf = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_SHARPNESS")) && strtof(e, NULL) >= 0.0f && strtof(e, NULL) <= 1.0f) g_config.fsr_sharpness = strtof(e, NULL);

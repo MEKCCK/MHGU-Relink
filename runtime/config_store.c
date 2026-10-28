@@ -74,69 +74,25 @@ float config_audio_gain(void) { return SDL_GetAtomicInt(&volume) / 100.0f; }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;
-    if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX || !memchr(c->ldn_join, 0, sizeof c->ldn_join)) return true;
-    return c->fsr != startup.fsr || c->fsr_upscaler != startup.fsr_upscaler ||
-        c->fsr_quality != startup.fsr_quality || c->fsr_sharpness != startup.fsr_sharpness ||
-        c->fsr_objmotion != startup.fsr_objmotion || c->fsr_reactive != startup.fsr_reactive ||
-        c->fsr_animsurf != startup.fsr_animsurf || c->display_mode != startup.display_mode || c->width != startup.width || c->height != startup.height ||
-        c->render_w != startup.render_w || c->render_h != startup.render_h || c->aspect_ratio != startup.aspect_ratio ||
-        c->ui_anchor != startup.ui_anchor || c->ldn_port != startup.ldn_port || strcmp(c->ldn_join, startup.ldn_join) ||
-        c->sync_small_monsters != startup.sync_small_monsters || c->village_in_hub != startup.village_in_hub ||
-        c->bonus_content != startup.bonus_content || c->hp.quests != startup.hp.quests || c->hp.village != startup.hp.village ||
-        memcmp(c->hp.scale, startup.hp.scale, sizeof c->hp.scale) ||
+    if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX) return true;
+    for (int i = 0; i < g_nsettings; i++) {
+        const ConfigSetting *s = &g_settings[i];
+        if (s->restart && (!config_valid(s, c) || !config_equal(s, c, &startup))) return true;
+    }
+    return c->hp.quests != startup.hp.quests ||
         memcmp(c->hp.quest, startup.hp.quest, sizeof c->hp.quest[0] * (size_t)c->hp.quests);
-}
-bool config_field_restart(const char *field) {
-    static const char *const fields[] = {"Window mode", "Screen resolution", "Render resolution", "Automatic aspect ratio",
-        "Aspect ratio", "HUD placement", "Host port (TCP / UDP)", "Join addresses", "Synchronize small monsters",
-        "Village quests at the Hub counter", "1 / 2 / 3 / 4 hunters", "Village quest HP in Hub", "Quest ID", "Hunter factors",
-        "Add quest override", "Remove", "Import missing bonus content from donor save",
-        "FSR", "Upscaler", "FSR quality", "Sharpness", "Object motion", "Reactive mask", "Animated surfaces"};
-    for (size_t i = 0; i < sizeof fields / sizeof *fields; ++i) if (!strcmp(field, fields[i])) return true;
-    return false;
 }
 
 static bool fail(char *error, size_t size, const char *message) {
     if (size) snprintf(error, size, "%s", message);
     return false;
 }
-static bool size_valid(int w, int h) {
-    return (!w && !h) || (w >= 320 && w <= 16384 && h >= 180 && h <= 16384);
-}
 static bool factor_valid(float f) { return isfinite(f) && f >= HP_SCALE_MIN && f <= HP_SCALE_MAX; }
 bool config_validate(const Config *c, char *error, size_t size) {
-    if (c->fsr_upscaler < FSR_UP_3 || c->fsr_upscaler > FSR_UP_4 ||
-        c->fsr_quality < FSR_NATIVE || c->fsr_quality > FSR_ULTRA_PERFORMANCE ||
-        !isfinite(c->fsr_sharpness) || c->fsr_sharpness < 0 || c->fsr_sharpness > 1 ||
-        !isfinite(c->fsr_reactive) || c->fsr_reactive < 0 || c->fsr_reactive > 1)
-        return fail(error, size, "Invalid FSR quality, provider, sharpness or reactive mask.");
-    if (c->menu_confirm < MENU_CONFIRM_ORIGINAL || c->menu_confirm > MENU_CONFIRM_EAST) return fail(error, size, "Invalid menu confirmation policy.");
-    if (c->menu_scale < 100 || c->menu_scale > 200) return fail(error, size, "Invalid interface scale.");
-    if (c->button_icons < 0 || c->button_icons > 2) return fail(error, size, "Invalid button icon layout.");
-    if (c->language < 0 || c->language > 1) return fail(error, size, "Invalid menu language.");
-    if (c->display_mode < DISPLAY_WINDOWED || c->display_mode > DISPLAY_BORDERLESS ||
-        !size_valid(c->width, c->height) || !size_valid(c->render_w, c->render_h))
-        return fail(error, size, "Resolution must be Desktop/Auto or 320x180 to 16384x16384.");
-    if (!isfinite(c->aspect_ratio) || (c->aspect_ratio != 0 && (c->aspect_ratio < 0.5f || c->aspect_ratio > 10)))
-        return fail(error, size, "Aspect ratio must be Auto or between 0.5 and 10.");
-    if (!isfinite(c->fov) || c->fov < 0.5f || c->fov > 2 ||
-        !isfinite(c->mouse_sensitivity) || c->mouse_sensitivity < 0.1f || c->mouse_sensitivity > 10)
-        return fail(error, size, "FOV must be 0.5-2.0 and mouse sensitivity 0.1-10.");
-    if (c->fps < 30 || c->fps > 240 || (c->msaa != 1 && c->msaa != 2 && c->msaa != 4 && c->msaa != 8) ||
-        c->face_buttons < FACE_POSITION || c->face_buttons > FACE_LABEL ||
-        c->ui_anchor < UI_CENTER || c->ui_anchor > UI_EDGES || c->volume < 0 || c->volume > 100)
-        return fail(error, size, "Invalid frame cap, anti-aliasing, controller, HUD or volume setting.");
-    const int toggles[] = {c->vsync, c->fxaa, c->background_input, c->sync_small_monsters,
-                          c->village_in_hub, c->bonus_content, c->confirm_exit, c->fsr, c->fsr_objmotion, c->fsr_animsurf};
-    for (size_t i = 0; i < sizeof toggles / sizeof *toggles; i++)
-        if (toggles[i] != 0 && toggles[i] != 1) return fail(error, size, "Invalid On/Off value.");
-    if (c->ldn_port < 1 || c->ldn_port > 65535 || !memchr(c->ldn_join, 0, sizeof c->ldn_join) ||
-        strpbrk(c->ldn_join, "\r\n;#"))
-        return fail(error, size, "Invalid port or Join address list (no newlines, ';' or '#').");
-    if (!factor_valid(c->hp.village) || c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX)
+    for (int i = 0; i < g_nsettings; i++)
+        if (!config_valid(&g_settings[i], c)) return fail(error, size, g_settings[i].error);
+    if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX)
         return fail(error, size, "Invalid village HP or quest override count.");
-    for (int j = 0; j < 4; j++)
-        if (!factor_valid(c->hp.scale[j])) return fail(error, size, "HP factors must be 0.05-20.");
     for (int i = 0; i < c->hp.quests; i++) {
         if (!c->hp.quest[i].quest) return fail(error, size, "Quest IDs must be greater than zero.");
         for (int j = 0; j < i; j++)
@@ -148,24 +104,9 @@ bool config_validate(const Config *c, char *error, size_t size) {
     return true;
 }
 
-typedef struct { const char *section; char key[64], value[256]; bool seen; } Entry;
-#define ENTRY_MAX (HP_QUESTS_MAX + 48)
-static void add(Entry *entries, int *n, const char *section, const char *key, const char *value) {
-    Entry *e = &entries[(*n)++];
-    e->section = section;
-    snprintf(e->key, sizeof e->key, "%s", key);
-    snprintf(e->value, sizeof e->value, "%s", value);
-    e->seen = false;
-}
-static void add_int(Entry *e, int *n, const char *s, const char *k, int v) {
-    char b[64]; snprintf(b, sizeof b, "%d", v); add(e, n, s, k, b);
-}
-static void add_float(Entry *e, int *n, const char *s, const char *k, float v) {
-    char b[64]; snprintf(b, sizeof b, "%.9g", (double)v); add(e, n, s, k, b);
-}
-static void add_size(Entry *e, int *n, const char *k, int w, int h, const char *automatic) {
-    char b[64]; snprintf(b, sizeof b, "%dx%d", w, h); add(e, n, "Display", k, w ? b : automatic);
-}
+// What config_save writes: a setting of the table (setting) or a Quest<number> entry (setting NULL)
+typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
+#define ENTRY_MAX (HP_QUESTS_MAX + 64)
 static void normalize(const char *s, char *out, size_t size) {
     size_t n = 0;
     for (; *s && n + 1 < size; s++)
@@ -179,62 +120,48 @@ static void flush_section(FILE *out, Entry *entries, int n, const char *section,
             entries[i].seen = true;
         }
 }
+// The entry a "key = value" line is for (NULL: none of them)
+static Entry *entry_of(Entry *entries, int n, const char *key) {
+    const ConfigSetting *s = config_setting(key);
+    char normalized[128], other[128];
+    normalize(key, normalized, sizeof normalized);
+    for (int i = 0; i < n; i++) {
+        if (s ? entries[i].setting == s : !entries[i].setting && (normalize(entries[i].key, other, sizeof other),
+                                                                   !strcmp(normalized, other)))
+            return &entries[i];
+    }
+    return NULL;
+}
+// A line that already says what c has (in its own spelling: "21:9", "1.0", "Borderless Window") stays as it is.
+static bool line_says(const Entry *e, const char *eq, const Config *c) {
+    if (!e->setting) return false;
+    char value[256];
+    snprintf(value, sizeof value, "%.*s", (int)strcspn(eq + 1, ";#\r\n"), eq + 1);
+    char *v = value, *end = value + strlen(value);
+    while (isspace((unsigned char)*v)) v++;
+    while (end > v && isspace((unsigned char)end[-1])) *--end = 0;
+    Config read = *c;
+    return config_parse(e->setting, v, &read) && config_equal(e->setting, &read, c);
+}
 bool config_save(const Config *c, char *error, size_t error_size) {
     if (!config_validate(c, error, error_size)) return false;
-    Entry entries[ENTRY_MAX]; int n = 0;
-    static const char *const modes[] = {"Windowed", "Fullscreen", "Borderless"};
-    static const char *const anchors[] = {"", "Center", "21:9", "32:9", "Edges"};
-    add(entries, &n, "Display", "Mode", modes[c->display_mode]);
-    add_size(entries, &n, "Resolution", c->width, c->height, "Desktop");
-    add_size(entries, &n, "RenderResolution", c->render_w, c->render_h, "Auto");
-    if (c->aspect_ratio == 0) add(entries, &n, "Display", "AspectRatio", "Auto");
-    else add_float(entries, &n, "Display", "AspectRatio", c->aspect_ratio);
-    add_float(entries, &n, "Display", "FOV", c->fov);
-    add(entries, &n, "Display", "UIAnchor", anchors[c->ui_anchor]);
-    char msaa[8]; snprintf(msaa, sizeof msaa, "%dx", c->msaa);
-    add(entries, &n, "Anti-aliasing", "MSAA", c->msaa == 1 ? "Off" : msaa);
-#define TOGGLE(section, key, field) add(entries, &n, section, key, c->field ? "On" : "Off")
-    TOGGLE("Anti-aliasing", "FXAA", fxaa);
-    TOGGLE("Upscaler", "FSR", fsr);
-    add(entries, &n, "Upscaler", "Upscaler", c->fsr_upscaler == FSR_UP_4 ? "FSR4" : "FSR3");
-    static const char *const quality[] = {"NativeAA", "Quality", "Balanced", "Performance", "UltraPerformance"};
-    add(entries, &n, "Upscaler", "FSRQuality", quality[c->fsr_quality]);
-    add_float(entries, &n, "Upscaler", "Sharpness", c->fsr_sharpness);
-    TOGGLE("Upscaler", "ObjectMotion", fsr_objmotion);
-    add_float(entries, &n, "Upscaler", "Reactive", c->fsr_reactive);
-    TOGGLE("Upscaler", "AnimSurf", fsr_animsurf);
-    add_int(entries, &n, "Performance", "FPS", c->fps);
-    TOGGLE("Performance", "VSync", vsync);
-    add(entries, &n, "Controls", "FaceButtons", c->face_buttons == FACE_POSITION ? "Position" : "Label");
-    TOGGLE("Controls", "BackgroundInput", background_input);
-    add_float(entries, &n, "Mouse", "MouseSensitivity", c->mouse_sensitivity);
-    add_int(entries, &n, "Multiplayer", "Port", c->ldn_port);
-    add(entries, &n, "Multiplayer", "Join", c->ldn_join);
-    TOGGLE("Multiplayer", "SyncSmallMonsters", sync_small_monsters);
-    for (int i = 0; i < 4; i++) {
-        char key[24]; snprintf(key, sizeof key, "%dPlayer%s", i + 1, i ? "s" : "");
-        add_float(entries, &n, "Monster HP", key, c->hp.scale[i]);
+    static Entry entries[ENTRY_MAX];  // (big: off the stack)
+    int n = 0;
+    for (int i = 0; i < g_nsettings; i++) {
+        Entry *e = &entries[n++];
+        e->setting = &g_settings[i], e->section = g_settings[i].section, e->seen = false;
+        snprintf(e->key, sizeof e->key, "%.*s", (int)strcspn(g_settings[i].key, "|"), g_settings[i].key);
+        config_format(&g_settings[i], c, e->value, sizeof e->value);
     }
     for (int i = 0; i < c->hp.quests; i++) {
-        char key[64], value[256]; snprintf(key, sizeof key, "Quest%u", c->hp.quest[i].quest);
+        Entry *e = &entries[n++];
         const float *v = c->hp.quest[i].scale;
-        snprintf(value, sizeof value, "%.9g, %.9g, %.9g, %.9g", (double)v[0], (double)v[1], (double)v[2], (double)v[3]);
-        add(entries, &n, "Monster HP", key, value);
+        e->setting = NULL, e->section = "Monster HP", e->seen = false;
+        snprintf(e->key, sizeof e->key, "Quest%u", c->hp.quest[i].quest);
+        snprintf(e->value, sizeof e->value, "%g, %g, %g, %g", (double)v[0], (double)v[1], (double)v[2], (double)v[3]);
     }
-    TOGGLE("Village Quests", "VillageQuestsInHub", village_in_hub);
-    add_float(entries, &n, "Village Quests", "HubHP", c->hp.village);
-    TOGGLE("Bonus Content", "BonusContent", bonus_content);
-    add_int(entries, &n, "Audio", "Volume", c->volume);
-    TOGGLE("Application", "ConfirmExit", confirm_exit);
-    static const char *const icons[] = {"Xbox", "Switch", "PlayStation"};
-    static const char *const confirm[] = {"Original", "South", "East"};
-    add(entries, &n, "Controls", "MenuConfirm", confirm[c->menu_confirm]);
-    add_int(entries, &n, "Application", "MenuScale", c->menu_scale);
-    add(entries, &n, "Application", "ButtonIcons", icons[c->button_icons]);
-    add(entries, &n, "Application", "Language", c->language ? "Spanish" : "English");
-#undef TOGGLE
-    const char *path = getenv("MHGU_CONFIG");
-    if (!path || !*path) path = "mhgurecomp.ini";
+    char path[1100];
+    config_path(path, sizeof path);
     char temp[1200];
     if (snprintf(temp, sizeof temp, "%s.settings-%llu.tmp", path, (unsigned long long)SDL_GetTicksNS()) >= (int)sizeof temp)
         return fail(error, error_size, "Settings path is too long.");
@@ -257,19 +184,23 @@ bool config_save(const Config *c, char *error, size_t error_size) {
         char *eq = (*s && *s != ';' && *s != '#' && *s != '[') ? strchr(s, '=') : NULL;
         bool handled = false;
         if (eq) {
-            char key[128], normalized[128];
-            snprintf(key, sizeof key, "%.*s", (int)(eq - s), s); normalize(key, normalized, sizeof normalized);
-            if (!strcmp(normalized, "framerate")) strcpy(normalized, "fps");
-            for (int i = 0; i < n; i++) {
-                char other[128]; normalize(entries[i].key, other, sizeof other);
-                if (strcmp(normalized, other)) continue;
+            char key[128];
+            snprintf(key, sizeof key, "%.*s", (int)(eq - s), s);
+            char *k = key + strlen(key);
+            while (k > key && isspace((unsigned char)k[-1])) *--k = 0;
+            Entry *e = entry_of(entries, n, key);
+            if (e) {
                 const char *comment = strpbrk(eq + 1, ";#");
-                if (comment) fprintf(out, "%.*s %s %s", (int)(eq - line + 1), line, entries[i].value, comment);
-                else fprintf(out, "%.*s %s%s", (int)(eq - line + 1), line, entries[i].value, newline);
-                entries[i].seen = true; handled = true; ended_line = true; break;
+                if (line_says(e, eq, c)) fputs(line, out);
+                else if (comment) fprintf(out, "%.*s %s %s", (int)(eq - line + 1), line, e->value, comment);
+                else fprintf(out, "%.*s %s%s", (int)(eq - line + 1), line, e->value, newline);
+                e->seen = true; handled = true; ended_line = true;
+            } else {
+                // Removing an override must remove its old value, including duplicate entries.
+                char normalized[128];
+                normalize(key, normalized, sizeof normalized);
+                if (!strncmp(normalized, "quest", 5) && isdigit((unsigned char)normalized[5])) handled = true;
             }
-            // Removing an override must remove its old value, including duplicate entries.
-            if (!handled && !strncmp(normalized, "quest", 5) && isdigit((unsigned char)normalized[5])) handled = true;
         }
         if (!handled) { fputs(line, out); ended_line = len && line[len - 1] == '\n'; }
     }

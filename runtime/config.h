@@ -72,6 +72,33 @@ extern float g_fsr_lod_bias;       // FSR on: texture LOD bias for the lower ren
 float camera_fovy(float fovy, float aspect);  // a 3D camera's vertical field of view for its aspect (gen.py PATCHES)
 
 void config_load(void);  // before the window and the guest start
+void config_path(char *buf, size_t size);  // the settings file (MHGU_CONFIG, else mhgurecomp.ini)
+
+// The settings of the file, one row each (config.c g_settings): what reads, writes and checks them, and what the
+// settings menu (settings_panel.cpp) marks as needing a restart. Quest<number> entries ([Monster HP]) are apart: hp.quest.
+enum { SET_BOOL, SET_INT, SET_FLOAT, SET_FACTOR, SET_CHOICE, SET_SIZE, SET_ASPECT, SET_TEXT };
+typedef struct {
+    const char *section, *key;  // [section] and key; "FPS|FrameRate": other spellings of the key it reads too
+    int kind;                   // SET_*
+    size_t field, field2;       // offsetof(Config, ...): the value (SET_SIZE: width; field2 its height)
+    float min, max;             // SET_INT, SET_FLOAT, SET_FACTOR: the range
+    // SET_CHOICE: the values as the file writes them, ',' between them, each with other spellings it reads after '|'
+    // ('*' at the end: anything starting so); SET_SIZE: the spelling of 0x0 ("Desktop|Auto")
+    const char *choices;
+    const int *values;          // SET_CHOICE: each choice's value (NULL: 0, 1, 2...)
+    bool restart;               // takes effect at the next start, not at once
+    const char *error;          // config_validate's message for a bad value (English: settings_locale.h translates)
+} ConfigSetting;
+extern const ConfigSetting g_settings[];
+extern const int g_nsettings;
+const ConfigSetting *config_setting(const char *key);  // by key or another spelling of it; NULL: none
+bool config_parse(const ConfigSetting *s, const char *value, Config *c);  // a value as the file has it into *c
+void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t size);  // as the file writes it
+bool config_valid(const ConfigSetting *s, const Config *c);
+bool config_equal(const ConfigSetting *s, const Config *a, const Config *b);
+bool config_restart_key(const char *key);  // the setting takes effect at the next start
+bool config_range(const char *key, float *min, float *max);  // a number setting's range
+
 // File values, before environment overrides and automatic resolution are resolved.
 void config_store_loaded(const Config *config);
 Config config_editable(void);
@@ -90,7 +117,6 @@ int config_live_face_buttons(void);
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
-bool config_field_restart(const char *field);       // Compact per-field UI marker.
 float config_audio_gain(void);  // atomic, safe on audio threads
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread

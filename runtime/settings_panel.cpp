@@ -274,6 +274,10 @@ void choices(const Row &row, std::vector<std::string> names, int selected, std::
     s.choice = {std::move(names), selected, std::move(set), row.title};
     push(View::Choices, "choice." + std::to_string(selected));
 }
+// What the settings table (config.c g_settings) says of a setting: does it need a restart, a number's range
+bool cold(const char *key) { return config_restart_key(key); }
+float lo(const char *key) { float a = 0, b = 0; config_range(key, &a, &b); return a; }
+float hi(const char *key) { float a = 0, b = 0; config_range(key, &a, &b); return b; }
 void add_bool(std::vector<Row> &rows, const char *id, const char *name, int *value, bool cold = false) {
     Row r;
     r.id = id;
@@ -405,17 +409,17 @@ std::vector<Row> main_rows() {
     case 0:
         add_choice(
             r, "display.mode", "Window mode", c.display_mode,
-            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, true);
+            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, cold("Mode"));
         add_choice(
             r, "display.auto", "Screen resolution", !c.width ? 0 : 1, {tr("Desktop"), tr("Custom")},
             [](int v) {
                 s.draft.width = v ? 1920 : 0;
                 s.draft.height = v ? 1080 : 0;
             },
-            true);
+            cold("Resolution"));
         if (c.width) {
-            number(r, "display.width", "Width", &c.width, 320, 16384, 80, true);
-            number(r, "display.height", "Height", &c.height, 180, 16384, 45, true);
+            number(r, "display.width", "Width", &c.width, 320, 16384, 80, cold("Resolution"));
+            number(r, "display.height", "Height", &c.height, 180, 16384, 45, cold("Resolution"));
         }
         add_choice(
             r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
@@ -423,24 +427,24 @@ std::vector<Row> main_rows() {
                 s.draft.render_w = v ? 1920 : 0;
                 s.draft.render_h = v ? 1080 : 0;
             },
-            true);
+            cold("RenderResolution"));
         if (c.render_w) {
-            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, true);
-            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, true);
+            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, cold("RenderResolution"));
+            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, cold("RenderResolution"));
         }
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
-            {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, true);
+            {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, cold("AspectRatio"));
         if (c.aspect_ratio)
-            number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, .5f, 10, .05f, true);
-        number(r, "fov", tr("Field of view"), &c.fov, .5f, 2, .05f);
+            number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, cold("AspectRatio"));
+        number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, cold("FOV"));
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
-            [](int v) { c.ui_anchor = v + 1; }, true);
+            [](int v) { c.ui_anchor = v + 1; }, cold("UIAnchor"));
         break;
     case 1:
-        number(r, "fps", "Frame rate limit", &c.fps, 30, 240, 1);
-        add_bool(r, "vsync", "VSync", &c.vsync);
+        number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, cold("FPS"));
+        add_bool(r, "vsync", "VSync", &c.vsync, cold("VSync"));
         add_choice(r, "msaa", "MSAA",
                    c.msaa == 8   ? 3
                    : c.msaa == 4 ? 2
@@ -462,41 +466,41 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        number(r, "volume", "Volume (%)", &c.volume, 0, 100);
-        add_bool(r, "fsr", "FSR", &c.fsr, true);
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, cold("Volume"));
+        add_bool(r, "fsr", "FSR", &c.fsr, cold("FSR"));
         if (c.fsr) {
             add_choice(
                 r, "fsr.provider", "Upscaler", c.fsr_upscaler, {"FSR 3.1", "FSR 4"},
-                [](int v) { s.draft.fsr_upscaler = v; }, true);
+                [](int v) { s.draft.fsr_upscaler = v; }, cold("Upscaler"));
             add_choice(
                 r, "fsr.quality", "FSR quality", c.fsr_quality,
                 {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},
-                [](int v) { s.draft.fsr_quality = v; }, true);
-            number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, 0, 1, .05f, true);
-            add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, true);
-            number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, 0, 1, .05f, true);
-            add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, true);
+                [](int v) { s.draft.fsr_quality = v; }, cold("FSRQuality"));
+            number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, lo("Sharpness"), hi("Sharpness"), .05f, cold("Sharpness"));
+            add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, cold("ObjectMotion"));
+            number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, cold("Reactive"));
+            add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, cold("AnimSurf"));
         }
         break;
     case 2:
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
-                   [](int v) { c.face_buttons = v; });
+                   [](int v) { c.face_buttons = v; }, cold("FaceButtons"));
         add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
                    {tr("Original"), tr("Bottom button"), tr("Right button")},
-                   [](int v) { s.draft.menu_confirm = v; });
+                   [](int v) { s.draft.menu_confirm = v; }, cold("MenuConfirm"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
-                   [](int v) { c.button_icons = v; });
-        add_bool(r, "background", "Background input", &c.background_input);
-        number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, .1f, 10, .05f);
+                   [](int v) { c.button_icons = v; }, cold("ButtonIcons"));
+        add_bool(r, "background", "Background input", &c.background_input, cold("BackgroundInput"));
+        number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, cold("MouseSensitivity"));
         break;
     case 3:
-        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, 1, 65535, 1, true);
+        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, cold("Port"));
         {
             Row row;
             row.id = "hosts";
             row.title = tr("Search hosts");
             row.value = *c.ldn_join ? c.ldn_join : tr("LAN");
-            row.cold = true;
+            row.cold = cold("Join");
             row.activate = []() {
                 keyboard(tr("Search hosts"), c.ldn_join, 255,
                          [](const std::string &text, std::string &error) {
@@ -513,15 +517,15 @@ std::vector<Row> main_rows() {
             };
             r.push_back(std::move(row));
         }
-        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, true);
-        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, true);
+        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, cold("SyncSmallMonsters"));
+        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, cold("VillageQuestsInHub"));
         break;
     case 4:
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
-                   HP_SCALE_MIN, HP_SCALE_MAX, .05f, true);
-        number(r, "hp.village", tr("Village HP multiplier"), &c.hp.village, HP_SCALE_MIN, HP_SCALE_MAX, .05f,
-               true);
+                   lo("1Player"), hi("1Player"), .05f, cold("1Player"));
+        number(r, "hp.village", tr("Village HP multiplier"), &c.hp.village, lo("HubHP"), hi("HubHP"), .05f,
+               cold("HubHP"));
         action(r, "hp.advanced", tr("Per-quest overrides"), []() { s.advanced = !s.advanced; });
         if (s.advanced) {
             for (int i = 0; i < c.hp.quests; i++) {
@@ -576,10 +580,10 @@ std::vector<Row> main_rows() {
         break;
     case 5:
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
-                   [](int v) { c.language = v; });
-        number(r, "scale", "Interface scale (%)", &c.menu_scale, 100, 200, 10);
-        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit);
-        add_bool(r, "bonus", "Bonus content", &c.bonus_content, true);
+                   [](int v) { c.language = v; }, cold("Language"));
+        number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, cold("MenuScale"));
+        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, cold("ConfirmExit"));
+        add_bool(r, "bonus", "Bonus content", &c.bonus_content, cold("BonusContent"));
         action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
                []() { s.floating = !s.floating; });
         if (s.floating)
@@ -997,10 +1001,16 @@ void settings_panel(bool *open) {
             if (ImGui::Button("###tab", ImVec2(tabw, tabh)))
                 first_page(i);
             ImGui::PopItemFlag();
-            auto label = ImGui::CalcTextSize(tr(pages[i]), nullptr, false, tabw - fw * .5f);
-            ImGui::GetWindowDrawList()->AddText(
-                ImGui::GetFont(), fw, ImVec2(p.x + fw * .25f, p.y + (tabh - label.y) * .5f),
-                IM_COL32(244, 247, 252, 255), tr(pages[i]), nullptr, tabw - fw * .5f);
+            // A label wraps at its spaces; one word wider than the tab ("Miscellaneous") is drawn smaller instead of
+            // being cut in two
+            const char *name = tr(pages[i]);
+            float room = tabw - fw * .5f, size = fw;
+            float word = ImGui::CalcTextSize(name).x;
+            if (!strchr(name, ' ') && word > room) size = fw * room / word;
+            auto label = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, room, name);
+            ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), size,
+                                                ImVec2(p.x + fw * .25f, p.y + (tabh - label.y) * .5f),
+                                                IM_COL32(244, 247, 252, 255), name, nullptr, room);
             if (active)
                 ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + tabh - 3),
                                                           ImVec2(p.x + tabw, p.y + tabh),

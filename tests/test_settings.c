@@ -26,7 +26,8 @@ int main(int argc, char **argv) {
     assert(argc == 2);
     const char *path = argv[1];
     FILE *f = fopen(path, "wb"); assert(f);
-    fputs("; Keep this comment\r\n[Display]\r\nResolution = Desktop\r\nRenderResolution = Auto\r\nFOV = 1.1 ; camera comment\r\n"
+    fputs("; Keep this comment\r\n[Display]\r\nMode = Borderless Window\r\nResolution = Desktop\r\nRenderResolution = Auto\r\n"
+          "AspectRatio = 21:9\r\nFOV = 1.1 ; camera comment\r\n"
           "[Performance]\r\nFPS = 60\r\nFrameRate = 60\r\n[Monster HP]\r\nQuest101 = 0.6\r\nQuest102 = 1, 2, 3, 4\r\n"
           "[Future section]\r\nFutureOption = preserve-me", f);
     fclose(f);
@@ -74,6 +75,9 @@ int main(int argc, char **argv) {
     assert(strstr(text, "; camera comment"));
     assert(strstr(text, "FutureOption = preserve-me"));
     assert(strstr(text, "Resolution = Desktop") && strstr(text, "RenderResolution = Auto"));
+    // Unchanged values keep the player's spelling; changed numbers are written short.
+    assert(strstr(text, "Mode = Borderless Window\r\n") && strstr(text, "AspectRatio = 21:9\r\n"));
+    assert(strstr(text, "FOV = 1.2 ; camera comment") && strstr(text, "MouseSensitivity = 2.5\r\n"));
     assert(!strstr(text, "Quest101 ="));
     assert(strstr(text, "Quest102 = 1, 2, 3, 4"));
     assert(strstr(text, "FPS = 120") && strstr(text, "FrameRate = 120"));
@@ -115,8 +119,9 @@ int main(int argc, char **argv) {
     assert(!loaded.confirm_exit && fabsf(loaded.fov - 1.2f) < 0.001f);
     assert(!config_restart_required(&loaded));
     assert(config_live_fps()==120 && config_live_msaa()==4 && config_live_face_buttons()==FACE_LABEL);
-    assert(config_field_restart("Render resolution") && !config_field_restart("FOV multiplier"));
-    assert(!config_field_restart("MSAA") && !config_field_restart("VSync") && !config_field_restart("Face buttons"));
+    assert(config_restart_key("RenderResolution") && !config_restart_key("FOV"));
+    assert(!config_restart_key("MSAA") && !config_restart_key("VSync") && !config_restart_key("FaceButtons"));
+    assert(config_restart_key("framerate") == config_restart_key("FPS") && !config_restart_key("NoSuchKey"));
     // A second save must not append duplicate sections or change resolved Auto settings.
     assert(config_save(&loaded, error, sizeof error));
     after = read_file(path); assert(!strcmp(text, after)); free(text); free(after);
@@ -142,6 +147,9 @@ int main(int argc, char **argv) {
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.msaa=8;fsr_config.fxaa=1;
     assert(config_save(&fsr_config,error,sizeof error));assert(config_restart_required(&fsr_config));
+    text = read_file(path);
+    assert(strstr(text, "Sharpness = 0.65\r\n") && strstr(text, "Reactive = 0.35\r\n") && strstr(text, "Upscaler = FSR4\r\n"));
+    free(text);
     g_config=initial;config_load();Config fsr_saved=config_editable();
     assert(fsr_saved.fsr && fsr_saved.fsr_upscaler==FSR_UP_4 && fsr_saved.fsr_quality==FSR_BALANCED);
     assert(fabsf(fsr_saved.fsr_sharpness-.65f)<.001f && fabsf(fsr_saved.fsr_reactive-.35f)<.001f);

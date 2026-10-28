@@ -58,7 +58,11 @@ are consumed at render boundaries. Language, symbols and interface scale preview
 immediately and persist on Save. Cold fields carry an asterisk; the saved status
 indicates a pending restart only when cold settings differ from startup values.
 Raw Auto/Desktop values and unchanged environment overrides are preserved.
-Comments, unknown INI keys and existing aliases survive atomic saves.
+Comments, unknown INI keys and existing aliases survive atomic saves, and a line whose value did not change stays
+as the player wrote it ("21:9", "Borderless Window"). Every setting is one row of the table in `runtime/config.c`
+(`g_settings`: section, key and other spellings, type, range or choices, restart needed, error message): reading,
+writing and checking the file, and the asterisks and number ranges here, all come from it. A new setting is a row
+there, a line in the default file text (`DEFAULT_INI`) and a row in this menu.
 
 App offers English/Spanish and interface scale 100–200% (`MenuScale` under
 `[Application]`). The root scales with font/DPI, is bounded by the viewport and
