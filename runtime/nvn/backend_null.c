@@ -14,6 +14,7 @@ void backend_present(NvnTexture *tex) {
 }
 void backend_texture_destroyed(NvnTexture *tex) { (void)tex; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
+void backend_program_created(const NvnProgram *p) { (void)p; }
 void renderer_sync(void) {}
 uint64_t renderer_fence_seq(void) { return 0; }
 void renderer_wait_seq(uint64_t seq) { (void)seq; }

@@ -59,7 +59,6 @@ typedef struct NvnTexture {
     NvnPool *pool;
     uint64_t pool_offset;
     void *backend;  // renderer-side texture
-    bool drawn;     // (renderer) a draw has been recorded into it as a colour target
     uint64_t debug_id;
     char label[64];
 } NvnTexture;
@@ -172,6 +171,7 @@ void backend_execute(uint64_t handle);            // run a recorded command list
 void backend_present(NvnTexture *tex);            // show a texture in the window
 void backend_texture_destroyed(NvnTexture *tex);
 void backend_pool_written(uint64_t addr, uint64_t size);
+void backend_program_created(const NvnProgram *p);  // nvnProgramSetShaders (the renderer may prepare it ahead of use)
 void renderer_sync(void);
 uint64_t renderer_fence_seq(void);
 void renderer_wait_seq(uint64_t seq);

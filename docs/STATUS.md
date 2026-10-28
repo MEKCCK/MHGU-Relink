@@ -386,11 +386,11 @@ logo frames), slowest frame 56-62 ms (was 83, the load hitch itself), steady 57 
 caches): 761 skipped over 9 frames (was 1230 over 13): translation throughput bound, waits cap at 6 ms a frame.
 Known gaps that remain:
 - A program never seen before (first run, or after the translator changed) can still be missing for a few frames when many arrive
-  at once. A draw into a colour target's first draw is never skipped for this (next section).
+  at once (fewer since the start-up prewarm: next section).
 - R9 200 approximations: no custom border colours (nearest standard colour), D24S8 stored as D32F_S8 (polygon-offset
   units differ for decals).
 
-## Fixed (2026-10-28): black quest-end photo (reward screen background)
+## Fixed (2026-10-28): black quest-end photo; shader prewarm at start-up
 
 The Quest Rewards / Reward Box screen shows a photo of the moment the quest was cleared. A player saw it fully black
 on a first run, with the user's screenshot also showing junk blocks. How the game does it: sScreenShot (cSystem,
@@ -402,19 +402,42 @@ delivering the Paw Pass Ticket from the camp's supply box): with empty caches th
 into a 960x540 RGBA8 target) was skipped two frames after the delivery, its program needed 9 ms and the per-frame
 wait budget is 6 ms; the buffer was never drawn, and a texture never drawn is read from its guest memory (zeros or
 whatever the pool held before: black, or junk). With that program and its pipeline in cache/ (the next run) the photo
-was right. Fix (exec.c first_draw): a draw into a colour target no draw has been recorded into yet waits for its
-program and pipeline (up to 2 s, like a movie frame) instead of being skipped; targets drawn every frame keep the
-6 ms budget. Same cold run with the fix: 0 skipped at the clear, two waits costing 11 ms, photo right. Cost: these
-waits happen when targets get their first draws (start-up 11 waits / 18 ms, a cold area load 4-8 waits / 37-136 ms,
-inside frames that are load hitches anyway: slowest load frames 499 / 765 ms vs 889 / 826 ms before); none with warm
-caches. Not covered: draws of the scene itself skipped in the very frame the photo is taken stay missing from it (a
-"half black" photo on a second run may be that; not reproduced). Options not taken: prebuilding programs from a shipped
-or collected list (pipelines.bin already prebuilds everything a player has seen; a shipped list would be derived from
-game code), and blocking every build (MHGU_SYNC_SHADERS=1: hitches on every new effect). Debug aids:
-MHGU_SKIP_LOG=1 (each skipped draw with its shaders and colour target), "first-draw / movie waits" in MHGU_VK_STATS's
-2 s builds line. MHGU_QUICKHUNT from the airship (an HR save in the Hub) crashes (null function in the town's depart
-path), so the test route walks: scratchpad scripts hstart.ps1 (scratch MHGU_HOME / save), to_pub_quest.ps1,
-to_depart.ps1, to_box.ps1.
+was right.
+
+Fix: prewarm every program at start-up (exec.c "prewarm", backend_program_created). The game makes all its programs
+before its first frame (nvnProgramSetShaders: ~6300 vertex / fragment pairs, 5589 distinct; the shader code is in GPU
+memory by then, so nothing is read from AppShaderPackage.mfx). Each one not in cache/programs.bin is translated with
+the keys most draws use (float vertex inputs and colour targets, no alpha test, the game's window origin / depth mode)
+on the translate thread and its SPIR-V compiled into cache/spirv on the workers, all behind any build a draw asked for
+(low-priority job lists; a draw waiting for one promotes it), recorded in programs.bin (the sources in programs.src)
+and left dormant (state 3): the first draw that needs one loads its sources back and makes its modules from the
+SPIR-V cache in ~1-3 ms. At start-up only the programs earlier runs drew (those with pipelines in pipelines.bin) are
+built; the rest stay dormant. Draws never wait past the 6 ms per-frame budget (942d7ee's 2 s wait for a target's first
+draw is gone): a program the prewarm has not reached yet is skipped as before. Measured on the R9 (960x540 window, hidden):
+- Cold (empty cache/): the prewarm takes 16-18 s from the first program (5581 translated, 730 duplicates, 0 failed),
+  done ~29 s after launch, about when the opening movie starts (the health notice is up from ~18 s). Opening movie at
+  27.9 s vs 26.4 s without the prewarm; 48-58 fps while it runs (the no-prewarm start ran 36-46 fps over the same
+  stretch: this machine's fps is noisy), slowest frames 135 / 124 / 91 ms in the first seconds.
+- Warm: programs.bin (the index, 20 MB) read in 42-47 ms at the first frame (with the sources in the same file it took
+  650-1140 ms when the OS file cache was cold: hence programs.src), the prewarm's check of all 6311 programs 0.8 s in
+  the background, 5-6 skipped draws in the first frames; opening movie 26.0 s vs 26.3 s without the prewarm (this
+  machine varies 22-28 s between runs).
+- Disk: programs.bin 20 MB, programs.src 164 MB (GLSL), cache/spirv 157 MB (2388 shaders). Memory: +28 MB working
+  set (609 vs 581 MB). Building the modules of every program at start-up instead was measured and rejected: 2.0 GB
+  working set.
+- Photo on a cold cache: the capture program came from the prewarm (dormant), ready 1 ms after the draw asked, 0
+  skipped draws at the clear, photo right.
+- Skipped draws over the whole test route (boot, Pub, quest in Jurassic Frontier, reward) on a cold cache: 379-385 in
+  21 frames (was 476 in 36). What remains: the first frames of the boot while the prewarm runs; area loads, where ~70
+  dormant programs and ~100 pipelines are needed in the same frame (1-4 frames of skips, need -> ready 1-4 ms average
+  instead of 35-200 ms); variants with other keys (integer vertex inputs: skinned models; alpha-tested materials, ~15%
+  of the programs draws use) are translated on first use as before; new pipelines on a cold driver cache.
+Not covered: draws of the scene itself skipped in the very frame the photo is taken stay missing from it (a "half
+black" photo may be that; not reproduced). Debug aids: MHGU_SKIP_LOG=1 (each skipped draw with its shaders and colour
+target), MHGU_NO_PREWARM=1, the prewarm's progress in MHGU_VK_STATS's 2 s builds line ("prewarm N new, N cached, N
+queued") and a "[shader] prewarm:" line when it is done. MHGU_QUICKHUNT from the airship (an HR save in the Hub)
+crashes (null function in the town's depart path), so the test route walks: scratchpad scripts hstart.ps1 (scratch
+MHGU_HOME / save), to_pub_quest.ps1, to_depart.ps1, to_box.ps1.
 
 ## Updater (2026-10-28)
 
@@ -750,7 +773,7 @@ MHGU_CONTROL's `emact <group> <index>` starts an action, `emsweep <group> <first
 runtime/hle/emtrace.c), MHGU_CONTROL's `fntrace lo hi n r0lo r0hi` (only calls with r0 in that range: one object's
 methods) and `interpwatch <addr> <file of function entries>` (runs those functions and all game code they call in the
 interpreter, logging every instruction that changes the word at addr),
-`MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`, `MHGU_SKIP_LOG=1`,
+`MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`, `MHGU_SKIP_LOG=1`, `MHGU_NO_PREWARM=1`,
 `MHGU_NO_PROGRAM_CACHE=1`, `MHGU_SAVE_GLSL=1`.
 `python tools/disasm.py <game dir> <addr | module:symbol> [count] [before]` disassembles guest code.
 

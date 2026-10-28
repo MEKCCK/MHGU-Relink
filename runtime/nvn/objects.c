@@ -610,6 +610,7 @@ static void set_shaders(Cpu *c, NvnArgs *na_, int stride) {
         p->stages[stage].const_size = *(const uint32_t *)(control + 0x6FC);
         p->stage_mask |= 1u << stage;
     }
+    backend_program_created(p);
     RET(1);
 }
 NVN(nvnProgramSetShaders) { set_shaders(c, na_, 16); }     // NVNshaderData {data, control}
