@@ -39,6 +39,12 @@ class SettingsLocaleTest(unittest.TestCase):
         self.assertFalse(visible - set(keys) - unchanged,
                          f"Untranslated UI labels: {sorted(visible - set(keys) - unchanged)}")
 
+        # notices on screen (runtime/net/ldn.c: UI_TEXT("..."))
+        notices = literals(" ".join(re.findall(r'UI_TEXT\((' + LITERAL + r')\)',
+                                               (ROOT / "runtime/net/ldn.c").read_text(encoding="utf-8"))))
+        self.assertTrue(notices)
+        self.assertFalse(set(notices) - set(keys), f"Untranslated notices: {sorted(set(notices) - set(keys))}")
+
         errors = (ROOT / "runtime/config_store.c").read_text(encoding="utf-8")
         messages = [literals(value)[-1] for value in re.findall(
             r'fail\([^;]*?' + LITERAL + r'\)', errors)]

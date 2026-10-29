@@ -12,8 +12,10 @@
 // The menu opens and closes with the key of Forge's config (nativeNX/forge/config.ini [menu] key; Insert by default).
 #include <algorithm>
 #include <atomic>
+#include <cfloat>
 #include <cstdio>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "imgui.h"
@@ -386,6 +388,55 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
         SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
 }
 
+// ------------------------------------------------------------------ notices (any thread -> game thread)
+// A few seconds at the top of the screen, menus open or not (runtime/net/ldn.c: the hub server's failures). Drawn on
+// the foreground draw list: over every window, taking no input or focus.
+static std::mutex g_notice_lock;
+static std::string g_notice_title, g_notice_text;
+static uint64_t g_notice_ns;  // when it came (SDL_GetTicksNS); 0: none
+static const uint64_t NOTICE_NS = 7000000000ull;
+
+void overlay_notice(const char *title, const char *text) {
+    std::lock_guard<std::mutex> l(g_notice_lock);
+    g_notice_title = title ? title : "";
+    g_notice_text = text ? text : "";
+    g_notice_ns = std::max<uint64_t>(SDL_GetTicksNS(), 1);
+}
+
+static bool notice_due(uint64_t now) {
+    std::lock_guard<std::mutex> l(g_notice_lock);
+    if (g_notice_ns && now - g_notice_ns >= NOTICE_NS) g_notice_ns = 0;
+    return g_notice_ns != 0;
+}
+
+static void draw_notice(uint64_t now, float scale) {
+    std::string title, text;
+    uint64_t at;
+    {
+        std::lock_guard<std::mutex> l(g_notice_lock);
+        if (!g_notice_ns) return;
+        title = g_notice_title, text = g_notice_text, at = g_notice_ns;
+    }
+    float age = (now - at) / 1e9f, alpha = std::clamp(std::min(age / .15f, (NOTICE_NS / 1e9f - age) / .5f), 0.f, 1.f);
+    auto color = [alpha](float r, float g, float b, float a) {
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * alpha));
+    };
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImFont *font = ImGui::GetFont();
+    float size = ImGui::GetFontSize() * 1.25f, pad = 10 * scale, bar = 4 * scale, gap = 3 * scale;
+    float wrap = std::min(vp->WorkSize.x * .6f, 620 * scale);
+    ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, wrap, title.c_str());
+    ImVec2 xs = font->CalcTextSizeA(size, FLT_MAX, wrap, text.c_str());
+    float w = std::max(ts.x, xs.x) + bar + 2 * pad, h = ts.y + gap + xs.y + 2 * pad;
+    ImVec2 p0(vp->WorkPos.x + (vp->WorkSize.x - w) * .5f, vp->WorkPos.y + 20 * scale), p1(p0.x + w, p0.y + h);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(p0, p1, color(.025f, .04f, .065f, .92f), 6 * scale);
+    dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), color(1, .72f, .3f, 1), 6 * scale, ImDrawFlags_RoundCornersLeft);
+    ImVec2 at_text(p0.x + bar + pad, p0.y + pad);
+    dl->AddText(font, size, at_text, color(1, .8f, .45f, 1), title.c_str(), nullptr, wrap);
+    dl->AddText(font, size, ImVec2(at_text.x, at_text.y + ts.y + gap), color(.96f, .97f, 1, 1), text.c_str(), nullptr, wrap);
+}
+
 // ------------------------------------------------------------------ frames (game thread)
 static std::mutex g_snap_lock;  // the copy the render thread draws
 static ImDrawData g_snap;
@@ -404,8 +455,10 @@ void overlay_frame(void *cpu) {
     if (!g_ready) return;
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
     bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
+    uint64_t now = SDL_GetTicksNS();
+    bool notice = notice_due(now);
     ImGuiIO &io = ImGui::GetIO();
-    if (!open && !free_render) {  // (nothing to draw)
+    if (!open && !free_render && !notice) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -424,7 +477,6 @@ void overlay_frame(void *cpu) {
         style.FontScaleDpi = scale;
         g_scale = scale;
     }
-    uint64_t now = SDL_GetTicksNS();
     io.DeltaTime = g_last_ns ? std::clamp((now - g_last_ns) / 1e9f, 1e-4f, 0.1f) : 1.0f / 30;
     g_last_ns = now;
     apply_input(io);
@@ -469,6 +521,7 @@ void overlay_frame(void *cpu) {
         if (!keep) set_open(false);
     }
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (notice) draw_notice(now, scale);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();

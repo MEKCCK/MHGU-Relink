@@ -31,6 +31,8 @@
 #include "../config.h"
 #include "../hle.h"
 #include "../kernel.h"
+#include "../overlay.h"
+#include "../settings_locale.h"
 #include "net.h"
 
 #ifdef _WIN32
@@ -641,23 +643,33 @@ static void *host_thread(void *arg) {
 }
 
 // ---- the hub server (internet hubs)
-// ini Server: empty = the default server (LDN_DEFAULT_SERVER, config.h), "Off" = none; NULL: no internet hubs
-static const char *lobby_server(void) {
-    const char *s = g_config.ldn_server;
-    if ((s[0] | 0x20) == 'o' && (s[1] | 0x20) == 'f' && (s[2] | 0x20) == 'f' && !s[3]) return NULL;
-    if (!*s) s = LDN_DEFAULT_SERVER;
-    return *s ? s : NULL;
+// ini Server: empty = the default server (LDN_DEFAULT_SERVER, config.h), "Off" = none. Its name into out
+// (LOBBY_NAME bytes); false: no internet hubs. Server and Key are live settings (config_live_ldn): a change applies
+// from the next search, join or connection to the server on.
+#define LOBBY_NAME sizeof g_config.ldn_server
+static bool lobby_server_of(const char *s, char *out) {
+    if ((s[0] | 0x20) == 'o' && (s[1] | 0x20) == 'f' && (s[2] | 0x20) == 'f' && !s[3]) s = "";
+    else if (!*s) s = LDN_DEFAULT_SERVER;
+    snprintf(out, LOBBY_NAME, "%s", s);
+    return *out;
+}
+static bool lobby_server(char *out) {
+    char s[LOBBY_NAME];
+    config_live_ldn(s, sizeof s, NULL, 0);
+    return lobby_server_of(s, out);
 }
 
-// A request's header. The room is a hash of the matchmaking key (ini Key, spaces around it ignored): hubs are
-// listed only for players whose key matches, all of them without one. The server never sees the key itself.
-static bool lobby_header(uint8_t *h) {
+// A request's header. The room is a hash of the matchmaking key (key NULL: ini Key; spaces around it ignored): hubs
+// are listed only for players whose key matches, all of them without one. The server never sees the key itself.
+static bool lobby_header(uint8_t *h, const char *key) {
     static const char salt[] = "MHGURecomp matchmaking key:";
+    char live[sizeof g_config.ldn_key];
+    if (!key) config_live_ldn(NULL, 0, live, sizeof live), key = live;
     memcpy(h, "MHGS", 4);
     wr16(h + 4, LOBBY_PROTO);
     wr16(h + 6, PROTO_VERSION);
     memset(h + 8, 0, 16);
-    const char *k = g_config.ldn_key;
+    const char *k = key;
     while (*k == ' ') k++;
     size_t n = strlen(k);
     while (n && k[n - 1] == ' ') n--;
@@ -685,6 +697,59 @@ static const char *lobby_error(uint32_t code) {
     default: return "refused";
     }
 }
+static int lobby_state(uint32_t code) {  // a server's error as a HUB_* state (net.h)
+    return code == SE_VERSION ? HUB_VERSION : code == SE_BUSY ? HUB_BUSY : HUB_REFUSED;
+}
+
+// What the player sees of the hub server: its last known state, for the settings menu (ldn_hub_status), and a notice
+// on screen (overlay_notice) when it fails: hosting (the hub is not listed online), searching (only the LAN's hubs
+// are found) or joining. Hosting notices come when the state changes; a search's every time, but not twice within
+// 10 s. Texts in UI_TEXT are translated as the settings menu's (settings_locale.h,
+// tests/test_settings_locale.py).
+#define UI_TEXT(s) s
+enum { NOTE_HOST, NOTE_SEARCH, NOTE_JOIN };
+static pthread_mutex_t hub_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct { int state, ms, hubs; char server[LOBBY_NAME], key[sizeof g_config.ldn_key]; uint32_t check; } hub_now;
+static int note_last[3];  // HUB_*: HUB_UNKNOWN and HUB_ONLINE are fine
+static uint64_t note_at[3];
+
+static void hub_set_locked(const char *srv, const char *key, int state, int ms, int hubs) {
+    hub_now.state = state, hub_now.ms = ms, hub_now.hubs = hubs;
+    snprintf(hub_now.server, sizeof hub_now.server, "%s", srv);
+    snprintf(hub_now.key, sizeof hub_now.key, "%s", key);
+}
+
+static void hub_report(int what, const char *srv, int state, int ms, int hubs) {
+    char key[sizeof g_config.ldn_key];
+    config_live_ldn(NULL, 0, key, sizeof key);
+    uint64_t now = plat_now_ns();
+    pthread_mutex_lock(&hub_mu);
+    if (hub_now.state != HUB_CHECKING && what != NOTE_JOIN) hub_set_locked(srv, key, state, ms, hubs);
+    bool show = state == HUB_ONLINE ? what == NOTE_HOST && note_last[what] > HUB_ONLINE
+                                    : what == NOTE_JOIN || note_last[what] != state || now - note_at[what] > 10000000000ull;
+    note_last[what] = state;
+    if (show) note_at[what] = now;
+    pthread_mutex_unlock(&hub_mu);
+    if (!show) return;
+    const char *title;
+    switch (state) {
+    case HUB_ONLINE: title = UI_TEXT("Connected to the hub server %s"); break;
+    case HUB_NOT_FOUND: title = UI_TEXT("Hub server %s not found"); break;
+    case HUB_UNREACHABLE: title = UI_TEXT("Can't reach the hub server %s"); break;
+    case HUB_LOST: title = UI_TEXT("Lost the connection to the hub server %s"); break;
+    case HUB_BUSY: title = UI_TEXT("The hub server %s is busy"); break;
+    case HUB_VERSION: title = UI_TEXT("The hub server %s runs another version"); break;
+    case HUB_REFUSED: title = UI_TEXT("The hub server %s refused the request"); break;
+    default: title = UI_TEXT("The hub server %s did not answer"); break;
+    }
+    static const char *const next[] = {UI_TEXT("Your hub is not listed online. Trying again..."),
+                                       UI_TEXT("Only hubs on your local network are shown."),
+                                       UI_TEXT("Could not join the hub.")};
+    int lang = config_language();
+    char line[LOBBY_NAME + 128];
+    snprintf(line, sizeof line, settings_text(lang, title), srv);
+    overlay_notice(line, settings_text(lang, state == HUB_ONLINE ? UI_TEXT("Your hub is listed online again.") : next[what]));
+}
 
 // Host: one thread per created network keeps it listed and opens a connection for each player the server announces.
 // Threads of a network that is gone (lobby_gen moved on) end by themselves; nobody waits for them.
@@ -704,7 +769,7 @@ static void *lobby_attach_thread(void *arg) {
     hsock s = connect_to(&t.addr, 3000);
     if (s == BADSOCK) return NULL;
     uint8_t req[LOBBY_HEADER + 8], type;
-    lobby_header(req);
+    lobby_header(req, NULL);
     memcpy(req + LOBBY_HEADER, &t.ticket, 8);
     hset_timeout(s, 5000);
     int n;
@@ -724,33 +789,40 @@ static void *lobby_thread(void *arg) {
     static __thread uint8_t buf[MAX_FRAME];
     uint8_t req[LOBBY_HEADER + NETINFO_SIZE], type;
     while (lobby_gen == gen) {
-        const char *srv = lobby_server();
+        char srv[LOBBY_NAME];
         struct sockaddr_in addr;
         hsock s = BADSOCK;
-        if (!srv) break;
-        if (resolve_host(srv, LOBBY_PORT, &addr)) s = connect_to(&addr, 3000);
+        if (!lobby_server(srv)) break;
+        bool named = resolve_host(srv, LOBBY_PORT, &addr);
+        if (named) s = connect_to(&addr, 3000);
         if (s == BADSOCK) {
-            LOG("[ldn] hub server %s unreachable: this hub is not listed online (trying again in 30 s)\n", srv);
+            LOG("[ldn] hub server %s %s: this hub is not listed online (trying again in 30 s)\n", srv,
+                named ? "unreachable" : "not found");
+            if (lobby_gen == gen) hub_report(NOTE_HOST, srv, named ? HUB_UNREACHABLE : HUB_NOT_FOUND, -1, -1);
             if (!lobby_wait(gen, 30000)) break;
             continue;
         }
-        bool keyed = lobby_header(req);
+        bool keyed = lobby_header(req, NULL);
         pthread_mutex_lock(&L.mu);
         memcpy(req + LOBBY_HEADER, L.info, NETINFO_SIZE);
         L.lobby_dirty = false;
         pthread_mutex_unlock(&L.mu);
         hset_timeout(s, 5000);
         int n = -1;
+        uint64_t asked = plat_now_ns();
         if (frame_send(s, S_HOST, req, sizeof req, NULL, 0)) n = frame_recv(s, &type, buf);
         if (n < 8 || type != S_HOSTED) {
+            bool error = n >= 4 && type == S_ERROR;
             LOG("[ldn] hub server %s: can't list this hub (%s); trying again in 30 s\n", srv,
-                n >= 4 && type == S_ERROR ? lobby_error(rd32(buf)) : "no answer");
+                error ? lobby_error(rd32(buf)) : "no answer");
             hclose(s);
+            if (lobby_gen == gen) hub_report(NOTE_HOST, srv, error ? lobby_state(rd32(buf)) : HUB_NO_ANSWER, -1, -1);
             if (!lobby_wait(gen, 30000)) break;
             continue;
         }
         LOG("[ldn] hub listed on the hub server %s: %s\n", srv,
             keyed ? "players with the same matchmaking key see it" : "public, every player sees it");
+        hub_report(NOTE_HOST, srv, HUB_ONLINE, (int)((plat_now_ns() - asked) / 1000000), -1);
         uint64_t now = plat_now_ns(), last_rx = now, next_ping = now + LOBBY_PING_NS;
         while (lobby_gen == gen) {
             now = plat_now_ns();
@@ -785,6 +857,7 @@ static void *lobby_thread(void *arg) {
         hclose(s);
         if (lobby_gen != gen) break;
         LOG("[ldn] lost the hub server: this hub is not listed online (trying again in 10 s)\n");
+        hub_report(NOTE_HOST, srv, HUB_LOST, -1, -1);
         if (!lobby_wait(gen, 10000)) break;
     }
     return NULL;
@@ -793,48 +866,125 @@ static void *lobby_thread(void *arg) {
 static void lobby_host_start(void) {
     uint32_t gen = ++lobby_gen;
     pthread_t th;
-    if (lobby_server() && !pthread_create(&th, NULL, lobby_thread, (void *)(uintptr_t)gen)) pthread_detach(th);
+    char srv[LOBBY_NAME];
+    pthread_mutex_lock(&hub_mu);
+    note_last[NOTE_HOST] = HUB_ONLINE;  // (each hub tells of its own first failure)
+    pthread_mutex_unlock(&hub_mu);
+    if (lobby_server(srv) && !pthread_create(&th, NULL, lobby_thread, (void *)(uintptr_t)gen)) pthread_detach(th);
 }
 static void lobby_host_stop(void) { lobby_gen++; }
 
-// Station: the hubs the server lists for our key (in a thread while the LAN is searched).
+// Station: the hubs the server lists for a key (NULL: ini Key). A HUB_* state; ms: the request's round trip.
 #define LOBBY_LIST_MAX 24
-typedef struct { uint8_t infos[LOBBY_LIST_MAX][NETINFO_SIZE]; uint64_t ids[LOBBY_LIST_MAX]; int n; struct sockaddr_in addr; } LobbyList;
+typedef struct {
+    uint8_t infos[LOBBY_LIST_MAX][NETINFO_SIZE];
+    uint64_t ids[LOBBY_LIST_MAX];
+    int n, state, ms;
+    struct sockaddr_in addr;
+    char server[LOBBY_NAME];
+} LobbyList;
 
-static void *lobby_list_thread(void *arg) {
-    LobbyList *r = arg;
+static int lobby_list(const char *srv, const char *key, int connect_ms, LobbyList *r) {
     static __thread uint8_t buf[MAX_FRAME];
-    r->n = 0;
-    const char *srv = lobby_server();
-    if (!srv) return NULL;
-    if (!resolve_host(srv, LOBBY_PORT, &r->addr)) { ONCE("[ldn] hub server %s not found\n", srv); return NULL; }
-    hsock s = connect_to(&r->addr, 1500);
-    if (s == BADSOCK) { ONCE("[ldn] hub server %s unreachable: only LAN / Join hubs are searched\n", srv); return NULL; }
+    r->n = 0, r->ms = -1;
+    if (!resolve_host(srv, LOBBY_PORT, &r->addr)) return HUB_NOT_FOUND;
+    hsock s = connect_to(&r->addr, connect_ms);
+    if (s == BADSOCK) return HUB_UNREACHABLE;
     uint8_t req[LOBBY_HEADER], type;
-    lobby_header(req);
+    lobby_header(req, key);
     hset_timeout(s, 2000);
+    uint64_t asked = plat_now_ns();
     int n = frame_send(s, S_LIST, req, sizeof req, NULL, 0) ? frame_recv(s, &type, buf) : -1;
+    r->ms = (int)((plat_now_ns() - asked) / 1000000);
     hclose(s);
-    if (n < 4 || type != S_HUBS) {
-        if (n >= 4 && type == S_ERROR) ONCE("[ldn] hub server %s: %s\n", srv, lobby_error(rd32(buf)));
-        return NULL;
-    }
+    if (n >= 4 && type == S_ERROR) return lobby_state(rd32(buf));
+    if (n < 4 || type != S_HUBS) return HUB_NO_ANSWER;
     uint32_t count = rd32(buf);
     for (uint32_t i = 0; i < count && r->n < LOBBY_LIST_MAX && 4 + (i + 1) * (8 + NETINFO_SIZE) <= (uint32_t)n; i++) {
         const uint8_t *e = buf + 4 + i * (8 + NETINFO_SIZE);
         r->ids[r->n] = rd64(e);
         memcpy(r->infos[r->n++], e + 8, NETINFO_SIZE);
     }
+    return HUB_ONLINE;
+}
+
+static void *lobby_list_thread(void *arg) {  // (while the LAN is searched; r->server set)
+    LobbyList *r = arg;
+    static int last = HUB_ONLINE;
+    r->state = lobby_list(r->server, NULL, 1500, r);
+    if (r->state != last && r->state != HUB_ONLINE)
+        LOG("[ldn] hub server %s: %s: only LAN / Join hubs are searched\n", r->server,
+            r->state == HUB_NOT_FOUND ? "not found" : r->state == HUB_UNREACHABLE ? "unreachable" : "no list");
+    last = r->state;
+    hub_report(NOTE_SEARCH, r->server, r->state, r->ms, r->state == HUB_ONLINE ? r->n : -1);
     return NULL;
+}
+
+// The settings menu's check (net.h): the server and key being edited, in a thread of its own.
+typedef struct { uint32_t check; char server[LOBBY_NAME], key[sizeof g_config.ldn_key]; } HubCheck;
+
+static void *hub_check_thread(void *arg) {
+    HubCheck *c = arg;
+    LobbyList *r = malloc(sizeof *r);
+    int state = r ? lobby_list(c->server, c->key, 3000, r) : HUB_UNKNOWN;
+    int ms = r ? r->ms : -1, hubs = state == HUB_ONLINE ? r->n : -1;
+    pthread_mutex_lock(&hub_mu);
+    if (hub_now.check == c->check) hub_set_locked(c->server, c->key, state, ms, hubs);
+    pthread_mutex_unlock(&hub_mu);
+    LOG("[ldn] hub server check: %s: state %d, %d ms, %d hub(s) for this key\n", c->server, state, ms, hubs);
+    free(r);
+    free(c);
+    return NULL;
+}
+
+void ldn_hub_check(const char *server, const char *key) {
+    HubCheck *c = calloc(1, sizeof *c);
+    pthread_t th;
+    if (!c) return;
+    hnet_init();
+    bool on = lobby_server_of(server, c->server);
+    snprintf(c->key, sizeof c->key, "%s", key);
+    pthread_mutex_lock(&hub_mu);
+    c->check = ++hub_now.check;
+    hub_set_locked(c->server, c->key, on ? HUB_CHECKING : HUB_OFF, -1, -1);
+    pthread_mutex_unlock(&hub_mu);
+    if (on && !pthread_create(&th, NULL, hub_check_thread, c)) {
+        pthread_detach(th);
+        return;
+    }
+    if (on) {
+        pthread_mutex_lock(&hub_mu);
+        hub_set_locked(c->server, c->key, HUB_UNKNOWN, -1, -1);
+        pthread_mutex_unlock(&hub_mu);
+    }
+    free(c);
+}
+
+int ldn_hub_status(const char *server, const char *key, int *ms, int *hubs) {
+    char name[LOBBY_NAME];
+    if (!lobby_server_of(server, name)) return HUB_OFF;
+    pthread_mutex_lock(&hub_mu);
+    // (the server's state holds whatever the key; the hub count only for the key it was for)
+    int state = strcmp(hub_now.server, name) ? HUB_UNKNOWN : hub_now.state;
+    if (ms) *ms = hub_now.ms;
+    if (hubs) *hubs = strcmp(hub_now.key, key) ? -1 : hub_now.hubs;
+    pthread_mutex_unlock(&hub_mu);
+    return state;
 }
 
 // Joining a listed hub: the server asks its host to connect and splices the two. 0, else an nn::ldn result.
 static uint32_t lobby_join(const struct sockaddr_in *addr, uint64_t hub, hsock *out, uint32_t *pair, uint64_t *secret) {
     static uint8_t buf[MAX_FRAME];
+    char srv[LOBBY_NAME];
+    if (!lobby_server(srv)) snprintf(srv, sizeof srv, "%s", inet_ntoa(addr->sin_addr));
     hsock s = connect_to(addr, 3000);
-    if (s == BADSOCK) { LOG("[ldn] can't reach the hub server\n"); return R_CONNECT_TIMEOUT; }
+    if (s == BADSOCK) {
+        LOG("[ldn] can't reach the hub server\n");
+        hub_report(NOTE_JOIN, srv, HUB_UNREACHABLE, -1, -1);
+        return R_CONNECT_TIMEOUT;
+    }
     uint8_t req[LOBBY_HEADER + 8], type;
-    lobby_header(req);
+    lobby_header(req, NULL);
     memcpy(req + LOBBY_HEADER, &hub, 8);
     hset_timeout(s, 12000);  // (the server waits up to 10 s for the host)
     int n = frame_send(s, S_JOIN, req, sizeof req, NULL, 0) ? frame_recv(s, &type, buf) : -1;
@@ -845,6 +995,13 @@ static uint32_t lobby_join(const struct sockaddr_in *addr, uint64_t hub, hsock *
     hclose(s);
     uint32_t code = n >= 4 && type == S_ERROR ? rd32(buf) : 0;
     LOG("[ldn] joining through the hub server failed: %s\n", code ? lobby_error(code) : "no answer");
+    if (code == SE_NO_ANSWER) {  // (a hub that is gone: the game says so itself)
+        int lang = config_language();
+        overlay_notice(settings_text(lang, UI_TEXT("Could not join the hub.")),
+                       settings_text(lang, UI_TEXT("The host did not answer through the hub server.")));
+    } else if (code != SE_NOT_FOUND) {
+        hub_report(NOTE_JOIN, srv, code ? lobby_state(code) : HUB_NO_ANSWER, -1, -1);
+    }
     return code == SE_NOT_FOUND ? R_CONNECT_NOT_FOUND : code == SE_BUSY ? R_CONNECT_REJECTED : R_CONNECT_TIMEOUT;
 }
 
@@ -857,7 +1014,9 @@ static bool host_start(void) {
     hsock ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     bool bound = ls != BADSOCK && !bind(ls, (struct sockaddr *)&a, sizeof a);
     bool any_port = false;  // the port is taken: still hosting through the hub server, on a port of the system's choice
-    if (ls != BADSOCK && !bound && lobby_server()) {
+    char srv[LOBBY_NAME];
+    bool online = lobby_server(srv);
+    if (ls != BADSOCK && !bound && online) {
         a.sin_port = 0;
         any_port = bound = !bind(ls, (struct sockaddr *)&a, sizeof a);
     }
@@ -869,7 +1028,7 @@ static bool host_start(void) {
     hsock ds = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (ds != BADSOCK && bind(ds, (struct sockaddr *)&a, sizeof a)) {
         a.sin_port = 0;  // (for the hub server's relay; LAN search needs the port)
-        if (!lobby_server() || bind(ds, (struct sockaddr *)&a, sizeof a)) { hclose(ds); ds = BADSOCK; }
+        if (!online || bind(ds, (struct sockaddr *)&a, sizeof a)) { hclose(ds); ds = BADSOCK; }
         if (!any_port) LOG("[ldn] UDP port %d is in use: no LAN search (only Join addresses)\n", g_config.ldn_port);
     }
     L.listen_s = ls, L.disc_s = ds, L.hosting = true;
@@ -1287,7 +1446,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     uint64_t hubs[MAX_FOUND] = {0};
     pthread_t lt;
     hnet_init();  // (before the thread's first socket call)
-    bool asked = lobby_server() && !pthread_create(&lt, NULL, lobby_list_thread, &online);
+    bool asked = lobby_server(online.server) && !pthread_create(&lt, NULL, lobby_list_thread, &online);
     int n = discover(infos, addrs, 16), k = 0;
     if (asked) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
         pthread_join(lt, NULL);
@@ -1311,7 +1470,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     }
     if (pcount) ST32(pcount, k);
     static int last = -1, last_online = -1;
-    int listed = asked ? online.n : 0;
+    int listed = asked && online.state == HUB_ONLINE ? online.n : 0;
     if (k != last || listed != last_online) {
         LOG("[ldn] scan: %d network(s) found (%d listed on the hub server)\n", k, listed);
         last = k, last_online = listed;

@@ -130,6 +130,7 @@ int config_live_face_buttons(void);
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);
+void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)

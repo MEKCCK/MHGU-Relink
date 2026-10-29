@@ -21,6 +21,8 @@ void overlay_request_close(void); // Close / Alt+F4 routes to controller confirm
 void overlay_face_positions(const int positions[4]);
 int overlay_face_position(int semantic); // A, B, X, Y -> physical south/east/west/north.
 void overlay_toggle_settings(void); // host main thread: F1 or Start + Back
+// Any thread: a notice shown over the game for a few seconds (title on its own line; the latest replaces any other).
+void overlay_notice(const char *title, const char *text);
 
 // Host main thread: an event for ImGui while the menu is open (true: taken, not for the game) - and the menu key.
 bool overlay_event(const SDL_Event *e);

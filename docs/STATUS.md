@@ -177,8 +177,17 @@ our own lobby / relay server (server/, Go, stdlib only; server/README.md: build,
 Plan and security notes: docs/research/internet-hubs.md.
 - ini [Multiplayer] Server (empty: LDN_DEFAULT_SERVER in config.h, the public server below;
   Off: none; host[:port], default port 39510) and Key (matchmaking key; empty: public). Both in the settings menu
-  (Multiplayer page) and live: Scan reads them each time, a hub takes them when it is created. MHGU_LDN_SERVER /
+  (Multiplayer page) and live (config_live_ldn; until 2026-10-29 the menu saved them but the game kept the start-up
+  values): Scan / Join read them each time, a hub at each (re)connection to the server. MHGU_LDN_SERVER /
   MHGU_LDN_KEY env overrides for tests.
+- What the player sees of the server (ldn.c hub_report): a notice at the top of the screen for 7 s (overlay_notice,
+  drawn on ImGui's foreground draw list, so it shows with or without a menu open and takes no input) when the server
+  is not found / unreachable / lost / busy / another version / refuses: hosting ("your hub is not listed online",
+  once per failure, and "listed online again" when it comes back), searching ("only hubs on your local network",
+  every search, but not twice within 10 s), joining (every failure; "the host did not answer" too). Texts are in
+  settings_locale.h (UI_TEXT in ldn.c; tests/test_settings_locale.py checks them). The Multiplayer page has a
+  "Check hub server" row: LIST with the server / key being edited (ldn_hub_check, a thread), showing "Online, N ms,
+  N hub(s)" or the failure; before a check it shows the last state the game's own searches / hub saw for that server.
 - Key -> room: first 16 bytes of SHA-256("MHGURecomp matchmaking key:" + key, spaces around it trimmed), all zero
   without a key (updater/sha256.c is linked into the game for it). The server lists a hub only for requests with the
   same room and link PROTO_VERSION; JOIN with another room answers "not found".

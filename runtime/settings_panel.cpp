@@ -6,6 +6,7 @@
 #include "app_actions.h"
 #include "overlay.h"
 #include "modorder.h"
+#include "net/net.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -450,6 +451,33 @@ void text(std::vector<Row> &rows, const char *id, const char *name, char *field,
     };
     rows.push_back(std::move(r));
 }
+// The hub server and key being edited, checked on request (runtime/net/ldn.c); the value: the server's last known
+// state, from the check or from the game's own searches and hubs
+void hub_check(std::vector<Row> &rows) {
+    int ms = -1, hubs = -1;
+    std::string state;
+    switch (ldn_hub_status(s.draft.ldn_server, s.draft.ldn_key, &ms, &hubs)) {
+    case HUB_CHECKING: state = tr("Checking..."); break;
+    case HUB_OFF: state = tr("Off"); break;
+    case HUB_ONLINE:
+        state = hubs >= 0 ? fmt("Online, %d ms, %d hub(s)", ms, hubs) : ms >= 0 ? fmt("Online, %d ms", ms) : tr("Online");
+        break;
+    case HUB_NOT_FOUND: state = tr("Not found"); break;
+    case HUB_UNREACHABLE: state = tr("Unreachable"); break;
+    case HUB_LOST: state = tr("Connection lost"); break;
+    case HUB_NO_ANSWER: state = tr("No answer"); break;
+    case HUB_BUSY: state = tr("Busy"); break;
+    case HUB_VERSION: state = tr("Other version"); break;
+    case HUB_REFUSED: state = tr("Refused"); break;
+    default: state = tr("Not checked"); break;
+    }
+    Row r;
+    r.id = "server.check";
+    r.title = tr("Check hub server");
+    r.value = state;
+    r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
+    rows.push_back(std::move(r));
+}
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
     switch (s.page) {
@@ -784,6 +812,7 @@ std::vector<Row> main_rows() {
                             : c.ldn_server,
              cold("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), cold("Key"));
+        hub_check(r);
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, cold("SyncSmallMonsters"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, cold("VillageQuestsInHub"));
         break;

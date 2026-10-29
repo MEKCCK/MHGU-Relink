@@ -7,6 +7,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // A packet of the virtual network (fields in host byte order, as sent inside the link after the frame header).
 enum { VPROTO_UDP = 0, VPROTO_TCP = 1 };
 enum { VTCP_DATA = 0, VTCP_SYN, VTCP_SYNACK, VTCP_FIN, VTCP_RST };
@@ -33,6 +37,12 @@ uint32_t ldn_own_ip(void);        // 0 without a network
 uint32_t ldn_broadcast_ip(void);
 void ldn_send(const VPacket *p, const void *data, uint32_t len);  // from a local socket: into the network
 void ldn_send_aux(const void *data, uint32_t len);  // the port's own message to every other game (reliable)
+// The hub server (internet hubs) for the settings menu: its last known state for these settings (ini Server, Key),
+// from a search, a hosted hub or a check; ms: the answer's round trip, hubs: listed for the key (-1: not known).
+enum { HUB_UNKNOWN, HUB_CHECKING, HUB_OFF, HUB_ONLINE, HUB_NOT_FOUND, HUB_UNREACHABLE, HUB_LOST, HUB_NO_ANSWER,
+       HUB_BUSY, HUB_VERSION, HUB_REFUSED };
+int ldn_hub_status(const char *server, const char *key, int *ms, int *hubs);  // HUB_*
+void ldn_hub_check(const char *server, const char *key);  // asks the server for its hubs, in a thread
 
 // vsock.c
 void vsock_deliver(const VPacket *p, const void *data, uint32_t len);  // from the network to the local sockets
@@ -46,3 +56,7 @@ void emsync_aux_received(const void *data, uint32_t len);  // an F_AUX message f
 // hle/hpscale.c: large monster HP by the number of hunters; the host's settings go to the others
 void hpscale_tick(void);            // each frame, from the game's input polling
 void hpscale_aux_received(const void *data, uint32_t len);
+
+#ifdef __cplusplus
+}
+#endif

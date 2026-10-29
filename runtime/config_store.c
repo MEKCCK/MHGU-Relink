@@ -28,6 +28,8 @@ static void set_float(SDL_AtomicInt *slot, float value) {
 static float get_float(SDL_AtomicInt *slot) {
     int bits = SDL_GetAtomicInt(slot); float value; memcpy(&value, &bits, sizeof value); return value;
 }
+static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key: read by the network threads (runtime/net/ldn.c)
+static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key];
 // A save updates changed hot fields only. Saving the volume must not silently
 // remove an unchanged FOV/FPS override supplied by the development environment.
 static void publish_live(const Config *c, bool all) {
@@ -42,6 +44,12 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
+    if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key)) {
+        SDL_LockSpinlock(&live_ldn_lock);
+        if (all || strcmp(c->ldn_server, saved.ldn_server)) memcpy(live_ldn_server, c->ldn_server, sizeof live_ldn_server);
+        if (all || strcmp(c->ldn_key, saved.ldn_key)) memcpy(live_ldn_key, c->ldn_key, sizeof live_ldn_key);
+        SDL_UnlockSpinlock(&live_ldn_lock);
+    }
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -73,6 +81,12 @@ int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm)
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
 int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
+void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size) {
+    SDL_LockSpinlock(&live_ldn_lock);
+    if (server) SDL_strlcpy(server, live_ldn_server, server_size);
+    if (key) SDL_strlcpy(key, live_ldn_key, key_size);
+    SDL_UnlockSpinlock(&live_ldn_lock);
+}
 int config_language(void) { return SDL_GetAtomicInt(&language); }
 Config config_editable(void) { return saved; }
 float config_audio_gain(void) {
