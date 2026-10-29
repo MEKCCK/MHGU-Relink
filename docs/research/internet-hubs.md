@@ -3,7 +3,7 @@
 Status: the relay / lobby server (server/) and its client in runtime/net/ldn.c work (docs/STATUS.md "Internet hubs
 through a hub server"). Friends are grouped by a matchmaking key ([Multiplayer] Key) rather than a room code: same
 key, same hub list; no key, the public list. Still open: step 1 (traffic), step 4 (hole punching), the players'
-side of the audit below, and a public server for LDN_DEFAULT_SERVER.
+side of the audit below. The public server runs (docs/STATUS.md).
 
 Goal: Local Play hubs over the internet that nobody has to forward a port for, for friends (private, by code) and
 for public play (a hub list), through a relay / lobby server of our own. Not Ryujinx's servers and no crossplay:

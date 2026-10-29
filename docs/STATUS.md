@@ -175,7 +175,7 @@ APIs are HLE'd at the function level, so no Switch service (ldn:u, bsd:u) is inv
 Local Play over the internet without port forwarding, for friends (matchmaking key) and strangers (public), through
 our own lobby / relay server (server/, Go, stdlib only; server/README.md: build, run, self-host, Docker, systemd).
 Plan and security notes: docs/research/internet-hubs.md.
-- ini [Multiplayer] Server (empty: LDN_DEFAULT_SERVER in config.h, still "" = none until a public server exists;
+- ini [Multiplayer] Server (empty: LDN_DEFAULT_SERVER in config.h, the public server below;
   Off: none; host[:port], default port 39510) and Key (matchmaking key; empty: public). Both in the settings menu
   (Multiplayer page) and live: Scan reads them each time, a hub takes them when it is created. MHGU_LDN_SERVER /
   MHGU_LDN_KEY env overrides for tests.
@@ -201,6 +201,11 @@ Plan and security notes: docs/research/internet-hubs.md.
   versions, splice, UDP relay incl. a forged secret, rate and per-IP limits, a host that never attaches). Not tested
   yet: two PCs / real NAT, a hunt through the relay, more than 2 players. Note the joiner needs the host's hub type
   unlocked (Hunters' Pub = G Rank).
+- Public server (2026-10-29): morerokk-mhgurecomp-ldnserver.duckdns.org (DuckDNS name -> the VM's public IP), an Oracle
+  Cloud Always Free VM (AMD micro, Oracle Linux 9). /usr/local/bin/mhgurecomp-hubserver (GOOS=linux GOARCH=amd64
+  build), systemd unit mhgurecomp-hubserver (-v, DynamicUser, sandboxed), firewalld + VCN security list open 39510
+  TCP / UDP. Log: `sudo journalctl -u mhgurecomp-hubserver`. Update: copy the new binary in, restorecon, restart.
+  Checked from outside: list, join, splice, UDP relay (scratchpad hubcheck.py <host>), ~4 MB RAM.
 - Two-instance test: scratchpad mp_start.ps1 (-port / -server / -key), hub_route.ps1 (loads the save; -mode host
   stops at Create Hub settings: A on "Hunters Hub", LEFT to "Wycademy Hub", A, X; -mode join opens Search Hubs),
   hublist.py <key> (what the server lists). The run\ save starts on the airship: ZL = Multiplayer menu.
@@ -563,8 +568,8 @@ affected (its own sleep). Since the Linux port began; a 4-core machine shows it 
    memory if some effect needs it.
 3. A README with build instructions; Linux platform layer (runtime/platform/linux.c). It must also give
    plat_user_dir a home for save data: $XDG_DATA_HOME/MHGURecomp, else ~/.local/share/MHGURecomp (see "Save data").
-4. Internet hubs: the hub server and client exist (see "Internet hubs through a hub server"). Left: host a public
-   server and set LDN_DEFAULT_SERVER (config.h); test across two PCs and real NATs, a hunt, 3-4 players; measure the
+4. Internet hubs: the hub server and client exist, and the public server runs (see "Internet hubs through a hub
+   server"). Left: test across two PCs and real NATs, a hunt, 3-4 players; measure the
    relay's traffic per player; direct UDP by hole punching (relay as fallback); the rest of the security audit
    (vsock.c, emsync.c, hpscale / villagehub aux messages, IPC / fs boundary) before public hubs are advertised:
    docs/research/internet-hubs.md.

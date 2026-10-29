@@ -65,8 +65,9 @@ typedef struct {
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
 } Config;
-// The hub server used when ini Server is empty (runtime/net/ldn.c, server/): "" none yet.
-#define LDN_DEFAULT_SERVER ""
+// The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
+// Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
+#define LDN_DEFAULT_SERVER "morerokk-mhgurecomp-ldnserver.duckdns.org"
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_UP_3, FSR_UP_4 };  // [Upscaler] Upscaler
