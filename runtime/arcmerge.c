@@ -88,7 +88,7 @@ bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, s
     h = fnv_file(fnv_file(fnv_file(h, orig), prev), mod);
     snprintf(out, outsz, "cache/arcmerge/%016llx.arc", (unsigned long long)h);
     struct stat st;
-    if (!stat(out, &st) && st.st_size > 0) return true;  // (the same files merged on an earlier start)
+    bool cached = !stat(out, &st) && st.st_size > 0;  // (the same files merged on an earlier start)
 
     Arc o = {0}, p = {0}, m = {0};
     bool ok = false;
@@ -107,10 +107,14 @@ bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, s
         Ent *r = NULL;
         for (int k = 0; k < n && !r; k++)
             if (!strcmp(res[k].name, m.e[i].name)) r = &res[k];
+        if (r && base && !same(base, r) && !same(r, &m.e[i]))  // (an earlier mod changed it as well)
+            LOG("[mods] %s changes %s, which an earlier mod changed too: this one is used. The order the mods "
+                "load in (alphabetical) can be set in mods/load_order.txt\n", mod, m.e[i].name);
         if (!r) r = &res[n++];
         *r = m.e[i];
         changed++;
     }
+    if (cached) { ok = true; goto done; }
 
     uint64_t data = ((uint64_t)HEAD + (uint64_t)n * ENTRY + ALIGN - 1) / ALIGN * ALIGN, total = data;
     for (int i = 0; i < n; i++) total += res[i].csize;

@@ -189,8 +189,9 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   `atmosphere\contents\0100770008DD8000\romfs` layout.
 - When several mods ship the same game archive (such as `resident_eng.arc`), only the entries each mod changed from the
   game's are applied, so mods that change different files in it work together. If two mods change the same entry,
-  the one later in load order wins; mods load in alphabetical order, or in the order of `mods\load_order.txt` (one
-  folder name per line). The merged archives are kept in `cache\arcmerge\`.
+  the one later in load order wins, and the log says so ("changes ..., which an earlier mod changed too"). Mods load in
+  alphabetical order. To choose the order, make `mods\load_order.txt` with one mod folder name per line: then only
+  the mods listed load, in that order. The merged archives are kept in `cache\arcmerge\`.
 - exefs patches (`.pchtxt`, `.ips`) are applied when they change data. Patches to game code can't be applied, because
   the code is precompiled; the log lists them.
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with
