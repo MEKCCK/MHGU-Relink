@@ -3,6 +3,7 @@
 #include "config.h"
 #include "app_actions.h"
 #include "overlay.h"
+#include "modorder.h"
 #include "imgui_internal.h"
 #include <cassert>
 #include <cstdio>
@@ -218,6 +219,36 @@ int main() {
         assert(list.find("\nCcc\n") == std::string::npos && list.find("# off: Ccc\n") != std::string::npos);
         assert(list.find("\n_Ddd\n") == std::string::npos);
     }
+    // Choosing which of two conflicting mods is used moves it below the other
+    press(ImGuiKey_Home);
+    down(4);  // (Aaa, Bbb, then the off ones _Ddd and Ccc)
+    selected("mods.conflict.0");
+    confirm();
+    selected("choice.1");  // (Use Bbb, the one used now)
+    press(ImGuiKey_GamepadDpadUp);
+    selected("choice.0");  // Use Aaa
+    confirm();
+    assert(settings_panel_dirty());
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    {
+        std::ifstream in("obj/settings-test/mods/load_order.txt");
+        std::string list((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        assert(list.find("\nBbb\nAaa\n") != std::string::npos);
+    }
+    // A mod folder added after the Mods tab saved loads (on), after the listed ones; the ones turned off stay off
+    put("obj/settings-test/mods/Eee/romfs/e.bin", "5");
+    {
+        ModEntry list[MODS_MAX];
+        int n = mods_installed(list, MODS_MAX);
+        assert(n == 5);
+        const char *want[] = {"Bbb", "Aaa", "Eee", "_Ddd", "Ccc"};
+        for (int i = 0; i < n; i++)
+            assert(!strcmp(list[i].name, want[i]) && list[i].on == (i < 3));
+    }
+    fs::remove_all("obj/settings-test/mods/Eee");
     tab();
     selected("language");
     tab();

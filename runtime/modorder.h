@@ -15,6 +15,7 @@ bool mods_find_dir(const char *dir, const char *want, int depth, char *out, size
 bool mods_romfs_of(const char *name, char *out, size_t n);
 
 #define MODS_MAX 256
+#define MODS_LIST_MARK "# Written by the Mods tab"  // first line of a load_order.txt the Mods tab saved
 typedef struct {
     char name[128];
     bool on;

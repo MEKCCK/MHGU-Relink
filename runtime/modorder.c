@@ -101,12 +101,16 @@ int mods_installed(ModEntry *out, int max) {
         return n;
     }
     ModEntry *ordered = calloc((size_t)n + 1, sizeof *ordered);
-    int k = 0;
+    char (*off)[128] = calloc((size_t)n + 1, sizeof *off);  // names the Mods tab wrote as "# off: name"
+    int k = 0, noff = 0;
+    bool ours = false;  // a list the Mods tab wrote: a folder it doesn't mention is a new mod, and loads
     char line[512];
-    while (ordered && fgets(line, sizeof line, f)) {
+    for (int ln = 0; ordered && off && fgets(line, sizeof line, f); ln++) {
         line[strcspn(line, "\r\n")] = 0;
         char *s = line;
         while (*s == ' ' || *s == '\t') s++;
+        if (!ln && !strncmp(s, MODS_LIST_MARK, strlen(MODS_LIST_MARK))) ours = true;
+        if (ours && !strncmp(s, "# off: ", 7) && noff < n) snprintf(off[noff++], sizeof *off, "%s", s + 7);
         if (!*s || *s == '#') continue;
         for (int i = 0; i < n; i++)
             if (!out[i].on && !strcmp(out[i].name, s)) {
@@ -118,10 +122,19 @@ int mods_installed(ModEntry *out, int max) {
     }
     fclose(f);
     int rest = k;
-    for (int i = 0; i < n && ordered; i++)
-        if (out[i].name[0]) ordered[rest++] = out[i];
+    for (int pass = 0; pass < 2 && ordered; pass++)  // new mods (on), then the ones left off
+        for (int i = 0; i < n; i++) {
+            if (!out[i].name[0]) continue;
+            bool known = false;
+            for (int j = 0; j < noff; j++) known |= !strcmp(off[j], out[i].name);
+            bool fresh = ours && !known;
+            if (fresh != !pass) continue;
+            ordered[rest] = out[i];
+            ordered[rest++].on = fresh;
+            out[i].name[0] = 0;
+        }
     if (ordered) memcpy(out, ordered, sizeof *out * (size_t)n);
-    free(ordered);
+    free(ordered), free(off);
     return n;
 }
 
@@ -134,9 +147,9 @@ bool mods_save_order(const ModEntry *e, int n, char *err, size_t errsz) {
         snprintf(err, errsz, "Could not write mods/load_order.txt");
         return false;
     }
-    fputs("# Written by the Mods tab of the settings menu (also fine to edit by hand).\n"
+    fputs(MODS_LIST_MARK " of the settings menu (also fine to edit by hand).\n"
           "# One mod folder per line, first to last: a file in a later mod wins.\n"
-          "# Mods that are not listed do not load.\n",
+          "# A folder added later, that is neither listed nor marked off, loads after the listed ones.\n",
           f);
     for (int i = 0; i < n; i++)
         if (e[i].on) fprintf(f, "%s\n", e[i].name);

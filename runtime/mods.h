@@ -9,7 +9,8 @@
 // These folders are found up to three levels down, so a mod unpacked as Mod/Mod/romfs or with an emulator or
 // Atmosphere layout (atmosphere/contents/0100770008DD8000/romfs) works as it is.
 // Mods load in name order; a file in a later mod wins. mods/load_order.txt (one folder name per line, '#'
-// comments) picks and orders them instead; a folder whose name starts with '_' is skipped.
+// comments) picks and orders them instead; a folder whose name starts with '_' is skipped. A list the Mods tab of the
+// settings menu wrote also loads a folder it doesn't mention (a mod added since), after the listed ones.
 #pragma once
 #include <stdint.h>
 

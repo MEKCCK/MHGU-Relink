@@ -20,8 +20,6 @@ void mods_make_dir(void) {
     if (!is_dir(mods_dir())) mkdir(mods_dir(), 0755);
 }
 
-static int cmp(const void *a, const void *b) { return strcasecmp(*(char *const *)a, *(char *const *)b); }
-
 #define MAX_MODS 256
 static char *g_names[MAX_MODS];
 static int g_nmods = -1;
@@ -29,32 +27,14 @@ static int g_nmods = -1;
 static void list_mods(void) {
     if (g_nmods >= 0) return;
     g_nmods = 0;
+    ModEntry all[MODS_MAX];
+    int n = mods_installed(all, MODS_MAX);
+    for (int i = 0; i < n; i++)
+        if (all[i].on) g_names[g_nmods++] = strdup(all[i].name);
     char path[1100];
     snprintf(path, sizeof path, "%s/load_order.txt", mods_dir());
-    FILE *f = fopen(path, "r");
-    if (f) {
-        char line[512];
-        while (g_nmods < MAX_MODS && fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            char *s = line;
-            while (*s == ' ' || *s == '\t') s++;
-            if (!*s || *s == '#') continue;
-            g_names[g_nmods++] = strdup(s);
-        }
-        fclose(f);
-        LOG("[mods] %d mod(s) listed in %s\n", g_nmods, path);
-        return;
-    }
-    DIR *d = opendir(mods_dir());
-    if (!d) return;
-    struct dirent *e;
-    while (g_nmods < MAX_MODS && (e = readdir(d))) {
-        if (e->d_name[0] == '.' || e->d_name[0] == '_') continue;
-        snprintf(path, sizeof path, "%s/%s", mods_dir(), e->d_name);
-        if (is_dir(path)) g_names[g_nmods++] = strdup(e->d_name);
-    }
-    closedir(d);
-    qsort(g_names, g_nmods, sizeof *g_names, cmp);
+    struct stat st;
+    if (!stat(path, &st)) LOG("[mods] %d mod(s) loading, in the order of %s\n", g_nmods, path);
 }
 
 int mods_romfs_layers(const char **out, int max) {

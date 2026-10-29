@@ -590,7 +590,24 @@ void mods_rows(std::vector<Row> &r) {
                 c.replaced ? fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second)
                            : fmt("%s and %s change different parts of %d archive(s): combined", first, second,
                                  c.merged);
+            std::string a = first, b = second;
             action(r, "mods.conflict." + std::to_string(k), text, []() {});
+            if (c.replaced) {  // select it to choose which of the two is used: that one moves below the other
+                Row &row = r.back();
+                Row copy = row;
+                copy.title = tr("Which mod is used?");
+                row.activate = [copy, a, b]() {
+                    choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+                        int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
+                        if (ia < 0 || ib < 0 || win > lose)
+                            return;
+                        ModEntry moved = mods.draft[win];
+                        mods.draft.erase(mods.draft.begin() + win);
+                        mods.draft.insert(mods.draft.begin() + lose, moved);  // (the loser is now one place earlier)
+                        s.saved_notice = false;
+                    });
+                };
+            }
             ++shown;
         }
         if (!shown)
@@ -607,7 +624,7 @@ void mods_rows(std::vector<Row> &r) {
     action(r, "mods.rescan", tr("Rescan mods"), []() {
         std::vector<ModEntry> now(MODS_MAX);
         int n = mods_installed(now.data(), MODS_MAX);
-        // new folders join the end, gone ones leave; the order and the switches of the rest stay
+        // new folders join the end (on), gone ones leave; the order and the switches of the rest stay
         std::vector<ModEntry> next;
         for (const auto &m : mods.draft)
             for (int i = 0; i < n; ++i)
@@ -618,7 +635,7 @@ void mods_rows(std::vector<Row> &r) {
         mods.draft = next;
         for (int i = 0; i < n; ++i)
             if (mod_index(now[i].name) < 0) {
-                now[i].on = false;
+                now[i].on = true;  // (as at start: a mod added later loads)
                 mods.draft.push_back(now[i]);
             }
         mods.scan.reset();
@@ -1350,7 +1367,7 @@ void settings_panel(bool *open) {
         if (s.page == 1 && (s.draft.fsr || g_config.fsr))
             ImGui::TextWrapped("%s", tr("FSR overrides MSAA and FXAA while active."));
         if (s.page == MODS_PAGE)
-            ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Mods that are off do not load."));
+            ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Select a conflict to choose which mod is used. Press Save, then restart."));
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
         ImGui::Dummy(ImVec2(1, guides.height + ImGui::GetStyle().ItemSpacing.y));
