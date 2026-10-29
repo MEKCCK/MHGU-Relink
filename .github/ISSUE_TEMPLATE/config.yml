@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Problem with a mod
+    url: https://github.com/Oddity-git/MHGURecomp-mods/issues/new?template=report-mod-issue.yml
+    about: Issues that only happen with mods installed go to the mod directory, where they can be matched to the mod.

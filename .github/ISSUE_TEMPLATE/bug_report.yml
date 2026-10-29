@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in MHGU Recomp doesn't work as it should.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Mods can cause problems that look like recomp bugs, so please say whether you were using any.
+        If the problem only happens **with mods installed**, report it in the [mod directory](https://github.com/Oddity-git/MHGURecomp-mods/issues/new?template=report-mod-issue.yml) instead, where it can be matched to the mod.
+  - type: dropdown
+    id: mods
+    attributes:
+      label: Does the problem happen with no mods installed?
+      description: Empty your `mods` folder (or move it away) and try again before answering.
+      options:
+        - "Yes, it happens with no mods installed"
+        - "No, it only happens with mods installed (please use the mod directory form instead)"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong?
+      description: What you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: MHGU Recomp version
+      placeholder: "0.10.7"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - Steam Deck
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: Paste the relevant part of `log.txt` from the `run` folder.
+      render: shell
+    validations:
+      required: false
