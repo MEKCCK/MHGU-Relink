@@ -705,8 +705,8 @@ bool g_fsr_objvel;
 #define STATIC_HOLD 240       // .. for that many frames (unless its uniform data changes: static_hash)
 #define VEL_MAX_PX 128.0f     // object motion beyond this (render px a frame) is not trusted: camera vectors
 
-static VkBuffer cap_buf, idx_buf, flag_buf;
-static VmaAllocation cap_mem, idx_mem, flag_mem;
+static VkBuffer cap_buf, idx_buf, flag_buf, flag_rb;  // flag_rb: flag_buf's copy for the CPU (flag_map)
+static VmaAllocation cap_mem, idx_mem, flag_mem, flag_rb_mem;
 static uint8_t *idx_map;
 static uint32_t *flag_map;
 typedef struct {
@@ -822,8 +822,14 @@ static bool objvel_init(void) {
     bi.size = (VkDeviceSize)IDX_SLOT * 4, bi.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     if (vmaCreateBuffer(g_vk.vma, &bi, &host, &idx_buf, &idx_mem, &info) != VK_SUCCESS) return false;
     idx_map = info.pMappedData;
-    bi.size = (VkDeviceSize)MAX_TRACK * 4 * 4, bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (vmaCreateBuffer(g_vk.vma, &bi, &host, &flag_buf, &flag_mem, &info) != VK_SUCCESS) return false;
+    // the per-draw notes (static draws): the velocity pass's atomics go to device memory, then a copy brings them to
+    // flag_rb for the CPU. (In host memory each atomic crosses the bus: in town, 225 draws, 12 ms of a 15 ms frame on
+    // an RTX 3090, against 0.2 ms here.)
+    bi.size = (VkDeviceSize)MAX_TRACK * 4 * 4;
+    bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (vmaCreateBuffer(g_vk.vma, &bi, &dev, &flag_buf, &flag_mem, NULL) != VK_SUCCESS) return false;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (vmaCreateBuffer(g_vk.vma, &bi, &host, &flag_rb, &flag_rb_mem, &info) != VK_SUCCESS) return false;
     flag_map = info.pMappedData;
     VkDescriptorSetLayoutBinding b[4] = {
         {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, NULL},
@@ -1224,7 +1230,14 @@ static uint32_t objvel_pass(VkCommandBuffer cb, const CamRecord *cam, const CamR
     }
     vkCmdEndRenderPass(cb);
     vk_full_barrier(cb);
-    if (record && n) flag_ring[fr].n = n, flag_ring[fr].seq = vk_pending_seq();
+    if (record && n) {  // the notes to flag_rb, read once the GPU is done (objvel_static_update)
+        VkBufferCopy c = {(VkDeviceSize)fr * MAX_TRACK * 4, (VkDeviceSize)fr * MAX_TRACK * 4, (VkDeviceSize)n * 4};
+        vkCmdCopyBuffer(cb, flag_buf, flag_rb, 1, &c);
+        VkMemoryBarrier hb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                              .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &hb, 0, NULL, 0, NULL);
+        flag_ring[fr].n = n, flag_ring[fr].seq = vk_pending_seq();
+    }
     n_pair += n;
     return n;
 }
@@ -1233,7 +1246,7 @@ static uint32_t objvel_pass(VkCommandBuffer cb, const CamRecord *cam, const CamR
 static void objvel_static_update(void) {
     for (int fr = 0; fr < 4; fr++) {
         if (!flag_ring[fr].seq || vk_completed_seq() < flag_ring[fr].seq) continue;
-        vmaInvalidateAllocation(g_vk.vma, flag_mem, (VkDeviceSize)fr * MAX_TRACK * 4, MAX_TRACK * 4);
+        vmaInvalidateAllocation(g_vk.vma, flag_rb_mem, (VkDeviceSize)fr * MAX_TRACK * 4, MAX_TRACK * 4);
         const uint32_t *f = flag_map + (size_t)fr * MAX_TRACK;
         for (uint32_t i = 0; i < flag_ring[fr].n; i++) {
             if (!(f[i] & 2)) continue;  // not seen (on the sampled texels)
