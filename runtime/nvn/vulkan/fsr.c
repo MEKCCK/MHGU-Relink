@@ -1573,6 +1573,8 @@ void vk_fsr_draw(const FsrDraw *d) {
     }
 }
 
+bool vk_fsr_hud(void) { return redirect; }
+
 NvnTexture *vk_fsr_map(NvnTexture *t, bool depth) {
     if (!redirect || !t) return t;
     if (t == g_h) return &st_h.fake;

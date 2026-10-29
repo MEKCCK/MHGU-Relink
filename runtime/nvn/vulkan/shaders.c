@@ -395,6 +395,13 @@ static const char *builtin_src(const char *name, int *stage) {
                "layout(set = 0, binding = 0) uniform sampler2DMS d;\n"
                "void main() { gl_FragDepth = texelFetch(d, ivec2(gl_FragCoord.xy), 0).r; }\n";
     }
+    if (!strcmp(name, "expand.frag")) {  // (MSAA: a picture into every sample of a multisampled image, exec.c ms_expand)
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D c;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "void main() { o = texelFetch(c, ivec2(gl_FragCoord.xy), 0); }\n";
+    }
     return NULL;
 }
 

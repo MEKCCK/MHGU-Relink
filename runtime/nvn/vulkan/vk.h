@@ -122,6 +122,8 @@ typedef struct TexBackend {
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
     VkFormat ms_fmt;        // the format ms is rendered as
     bool wide;              // RGBA16 UNORM standing in for the game's RGBA8 render target (textures.c vk_rt_widen)
+    uint64_t ms_models;     // (colour) the frame 3D models (depth-writing draws) were last drawn into this image, once
+                            // a pass without MSAA did (g_present_count; menus: exec.c ms_expand), 0 none lately
 } TexBackend;
 
 bool vk_wide_rt_on(void);  // (textures.c) RGBA8 render targets as RGBA16 UNORM ([Graphics] SmoothGradients)

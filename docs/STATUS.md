@@ -92,6 +92,16 @@ Fixed on the way (2026-10-20):
   with MHGU_CONTROL "gpuprof" (GPU timestamps per pass): the multisampled passes cost ~3 ms more at 4x, a colour
   resolve ~1.6 ms, the depth / stencil resolve ~9 ms (the driver decompressing it; Vulkan 1.2 render pass resolves
   were as slow, and a sampleable multisampled image loses its compression: passes several times slower).
+  Menus that show the hunter and Palicoes (Character Select, Guild Card) draw them straight into the finished picture,
+  after the game's FXAA, in the same pass as the menu's 2D draws, so they had no anti-aliasing. A full-size colour
+  target that gets depth-writing draws outside the scene's MSAA passes is marked (TexBackend.ms_models) and from the
+  next frame on, while models keep being drawn into it, its depth-testing draws (and depth clears) go through its
+  multisampled companion: the picture is copied into every sample first (ms_expand), and the 2D draws stay without
+  MSAA (with it, the seams between their quads show). With MSAA off the models get 4x all the same (every other
+  anti-aliasing has run by then: FXAA in the game's FXAA pass, FSR at its start of the HUD); then only a picture past
+  the game's FXAA pass counts (exec.c full_picture), with FSR on its output from the start of the HUD on. A pass
+  without MSAA that writes neither depth nor stencil now leaves its depth target's companion valid. RTX 3090, 1080p,
+  MSAA 4x: the copy 0.03 ms, the models' pass 0.05 ms; the in-game HUD (no depth writes) is unchanged.
 - FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
   FXAAMode = 3_11 draws FXAA 3.11 Quality there instead (exec.c fxaa_311, shaders.c "fxaa.frag": preset 39, no
