@@ -154,7 +154,7 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses
+all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -270,6 +270,13 @@ endif
 # THIRD_PARTY_NOTICES (code compiled in: LAS Recomp, Dear ImGui, cimgui, VulkanMemoryAllocator), FFmpeg's LGPL (in the
 # executable), and on Windows those of the MSYS2 packages behind the DLLs bundled and the libraries linked in
 # (bundle: tools/bundle_dlls.py, which lists them all with their versions and sources in licenses/README.txt).
+# The pipelines recorded in the common areas (extras/pipelines.list: the game's shader code hashes and render state,
+# nothing of the game itself), built in the background on a first run: runtime/nvn/vulkan/exec.c "pipeline list"
+pipelist: $(B)/pipelines.list
+$(B)/pipelines.list: extras/pipelines.list
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
@@ -340,7 +347,7 @@ dist: all
 	  { echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
 	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
 
-.PHONY: all gen test-lift runtime-objs clean bundle data licenses dist FORCE
+.PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
 
 # Exercise real ImGui navigation without a game dump or graphics device.
 .PHONY: test-settings-panel

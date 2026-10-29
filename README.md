@@ -150,7 +150,9 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off), `ShaderPrewarm`
   (On / Off: translate all of the game's shaders in the background at startup, so fewer things are drawn black the
   first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about
-  340 MB)
+  340 MB). `pipelines.list` next to the exe lists the shader combinations the common areas use; with the prewarm on,
+  they are prepared in the background as well, so entering those areas for the first time no longer shows surfaces
+  briefly black. Only made with MSAA Off; the rest is still prepared the first time it is needed.
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
   with a wiki in front of it; default On), `ComboInputWindow` (Lenient / Strict: how long the game waits for a

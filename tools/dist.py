@@ -4,7 +4,7 @@ usage: python tools/dist.py <build dir> <out dir> <windows|linux> <version> [--b
 
 Windows: <out>/Windows-MHGURecomp.<version>.zip; Linux: <out>/ArchLinux-MHGURecomp.<version>.tar.gz (the programs
 keep their executable permission). Inside, one folder of the same name holds what a player copies: the game, its code
-library, the updater, the DLLs (Windows), licenses/, bonus/system (--bonus: the donor save of the free downloads) and
+library, the updater, the DLLs (Windows), pipelines.list, licenses/, bonus/system (--bonus: the donor save of the free downloads) and
 the empty data/, mods/ and cheats/ folders, with a note in data/ of what goes there. Nothing else of the build folder:
 not its game files, mods, settings, caches or log. The updater (updater/updater.c) installs the same archive, leaving
 data/, mods/, cheats/ and bonus/ alone. Prints the archive's size and SHA-256: GitHub shows that digest for the upload.
@@ -35,6 +35,10 @@ def files(build, platform):
         if not os.path.isfile(p):
             sys.exit(f'dist: {p} is missing (make first)')
         out.append((n, p, n in programs))
+    pl = os.path.join(build, 'pipelines.list')  # (the recorded pipelines a first run builds: make's pipelist)
+    if not os.path.isfile(pl):
+        sys.exit(f'dist: {pl} is missing (make first)')
+    out.append(('pipelines.list', pl, False))
     lic = os.path.join(build, 'licenses')
     if not os.path.isdir(lic):
         sys.exit(f'dist: {lic} is missing (make first)')

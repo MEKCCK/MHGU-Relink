@@ -97,6 +97,7 @@ VkDescriptorSet vk_alloc_set(VkDescriptorSetLayout layout);
 // Render passes / framebuffers (exec.c): all attachments LOAD / STORE in GENERAL layout (samples > 1, MSAA: in the
 // attachment layouts). depth: the depth/stencil format (UNDEFINED: none).
 VkRenderPass vk_render_pass(const VkFormat *color, uint32_t ncolor, VkFormat depth, uint32_t samples);
+VkFormat vk_depth24_stencil8(void);  // the format DEPTH24_STENCIL8 is made as (D32_SFLOAT_S8_UINT on AMD)
 VkFramebuffer vk_framebuffer(VkRenderPass rp, const VkImageView *views, uint32_t n, uint32_t w, uint32_t h);
 void vk_framebuffers_forget_view(VkImageView v);  // (textures.c: a view is going away)
 

@@ -1826,6 +1826,7 @@ static bool translate_core(Prog *p, bool quiet) {
         else if (!p->vi->msl) LOG("[shader] VS translate failed: %s (code %llx)\n", p->vi->error, (unsigned long long)p->code[0]);
         else LOG("[shader] FS translate failed: %s (code %llx)\n", p->fi->error, (unsigned long long)p->code[1]);
         set_state(&p->state, 2, p->t_req);
+        prewarm_pipelines(p);  // (a pipeline list's, waiting for it: failed too)
         return false;
     }
     if (!quiet && (p->vi->uses_gmem || p->fi->uses_gmem)) {
@@ -1874,6 +1875,8 @@ static bool progcache_on;
 typedef struct { char magic[8]; uint64_t stamp; } CacheHeader;
 #define CACHE_FORMAT 1  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
 static void pipecache_init(const CacheHeader *hdr);
+static void plist_load(void);
+static void plist_export_finish(void);
 static uint64_t stat_prog_cached;
 static struct { uint64_t ck; Prog *prog; } progcache_tab[PROG_TAB];
 
@@ -2009,6 +2012,8 @@ static void progcache_open(void) {
     progcache_rf = fopen(PROGSRC_PATH, "rb");
     progcache_on = true;
     pipecache_init(&hdr);  // (attaches the recorded pipelines to their programs before these are built)
+    plist_load();          // (and the shipped list's whose programs are in programs.bin)
+    plist_export_finish();
     // Programs a draw has used (each has recorded pipelines) are built now; the others (the prewarm's) stay dormant
     // until a draw wants one (prog_want)
     for (int i = 0; i < PROG_TAB; i++) {
@@ -2086,6 +2091,7 @@ static void prog_want(Prog *p) {
 // other keys (integer vertex inputs: skinned models; alpha-tested materials) are still made on first use.
 // MHGU_NO_PREWARM=1: off.
 typedef struct { uint64_t code[2], cmax[2]; } PrewarmReq;
+static void plist_seen(const uint64_t code[2], const uint64_t cmax[2], const uint64_t chash[2]);  // (pipelines.list)
 static uint64_t pw_t0;
 static _Atomic uint64_t pw_total_new, pw_total_known;
 
@@ -2131,6 +2137,7 @@ static void prewarm_translate(void *arg) {
         uint64_t chash[2];
         for (int i = 0; i < 2; i++) chash[i] = code_hash(r->code[i], r->cmax[i], i);
         uint64_t ck = prog_content_key(chash, &vkey, &fkey);
+        plist_seen(r->code, r->cmax, chash);  // (the pipeline list's variants of this code: made on the render thread)
         pthread_mutex_lock(&progcache_lock);
         Prog **c = progcache_slot(ck, true);
         if (c && !*c) {
@@ -2280,13 +2287,17 @@ static FILE *pipecache_f;
 
 static void build_pipeline(void *arg);
 static void prewarm_pipelines(Prog *p) {
-    for (Pipe *q = p->prewarm, *next; q; q = next) {
+    pthread_mutex_lock(&ready_lock);  // (the render thread adds to the list too: plist_attach)
+    Pipe *q = p->prewarm;
+    p->prewarm = NULL;
+    pthread_mutex_unlock(&ready_lock);
+    for (Pipe *next; q; q = next) {
         next = q->next;
         if (atomic_load(&p->state) == 1) run_job(build_pipeline, q);
         else set_state(&q->state, 2, 0);
     }
-    p->prewarm = NULL;
 }
+static void plist_export_add(const Prog *p, const PipeRec *r);
 
 static void pipecache_init(const CacheHeader *hdr) {
     CacheHeader fh;
@@ -2301,6 +2312,7 @@ static void pipecache_init(const CacheHeader *hdr) {
             good = ftell(f);
             Prog **c = progcache_slot(r.ck, false);
             if (!c || !*c) continue;
+            plist_export_add(*c, &r);
             r.k.prog = *c;
             r.k.rp = vk_render_pass(r.color, r.k.ncolor, r.depth, r.k.samples);
             bool created;
@@ -2336,6 +2348,211 @@ static void pipecache_store(const Pipe *pp) {
     r.k.rp = VK_NULL_HANDLE;
     fwrite(&r, sizeof r, 1, pipecache_f);
     fflush(pipecache_f);
+}
+
+// ---- shipped pipeline list: pipelines.list beside the executable, the pipelines recorded while playing the common
+// areas, so a first run builds them in the background before an area needs them (cache/pipelines.bin only knows the
+// ones this computer drew). Unlike pipelines.bin it outlives translator changes and other GPUs: a record names its
+// program by the game's own shader code (code_hash) and shader keys, not by a translated program, and the formats
+// the GPU decides are made again here (DEPTH24_STENCIL8's: D32S8 on AMD; vertex formats it lacks: widened). A record
+// whose program is in programs.bin is attached at start-up like pipelines.bin's; the others wait until the prewarm
+// meets their shader code (plist_seen, translate thread), then the render thread (plist_drain) makes the program
+// variant and its pipelines. Recording: MHGU_PIPELIST_EXPORT=<file> writes the list (pipelines.bin's records and the
+// shipped list's, without duplicates) at the first draw. MHGU_PIPELIST=<file> reads another list; MHGU_NO_PIPELIST=1:
+// none.
+typedef struct {
+    uint32_t magic, pad;
+    uint64_t chash[2];
+    ShaderKey vkey, fkey;
+    VkFormat color[8], depth;
+    PipeKey k;  // (prog, rp: NULL)
+} ListRec;
+typedef struct { char magic[8]; uint32_t key_size, pipe_size, rec_size, count; } ListHeader;
+#define LISTREC_MAGIC 0x314c5050u  // "PPL1"
+static ListRec *plist;
+static int plist_n, plist_left;
+static uint8_t *plist_done;
+static struct { uint64_t code[2], cmax[2], chash[2]; } plist_q[256];  // shader code the prewarm met (plist_seen)
+static int plist_qn;
+static _Atomic int plist_qpending;
+static pthread_mutex_t plist_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// (translate thread, prewarm) the game made a program with this code: the render thread looks for list records
+static void plist_seen(const uint64_t code[2], const uint64_t cmax[2], const uint64_t chash[2]) {
+    if (!plist_left) return;
+    bool any = false;
+    for (int i = 0; i < plist_n && !any; i++)
+        any = !plist_done[i] && plist[i].chash[0] == chash[0] && plist[i].chash[1] == chash[1];
+    if (!any) return;
+    for (;;) {
+        pthread_mutex_lock(&plist_lock);
+        if (plist_qn < (int)(sizeof plist_q / sizeof *plist_q)) {
+            memcpy(plist_q[plist_qn].code, code, 16);
+            memcpy(plist_q[plist_qn].cmax, cmax, 16);
+            memcpy(plist_q[plist_qn].chash, chash, 16);
+            plist_qn++;
+            atomic_store(&plist_qpending, 1);
+            pthread_mutex_unlock(&plist_lock);
+            return;
+        }
+        pthread_mutex_unlock(&plist_lock);
+        struct timespec ts = {0, 2000000};  // (full: the render thread empties it at its next command list)
+        nanosleep(&ts, NULL);
+    }
+}
+
+// (render thread) r's pipeline for program p, built once p is (as pipelines.bin's)
+static int plist_attach(Prog *p, const ListRec *r) {
+    PipeKey k = r->k;
+    k.prog = p;
+    for (int i = 0; i < 32; i++)
+        if (k.attr_mask & (1u << i)) k.attr_fmt[i] = vertex_format_supported(k.attr_fmt[i]);
+    VkFormat depth = r->depth;
+    if (depth == VK_FORMAT_D24_UNORM_S8_UINT || depth == VK_FORMAT_D32_SFLOAT_S8_UINT) depth = vk_depth24_stencil8();
+    k.rp = vk_render_pass(r->color, k.ncolor, depth, k.samples);
+    bool created;
+    Pipe *pp = pipe_slot(&k, &created);
+    if (!pp || !created) return 0;
+    pthread_mutex_lock(&ready_lock);
+    int s = atomic_load(&p->state);
+    if (s != 1 && s != 2) pp->next = p->prewarm, p->prewarm = pp;
+    pthread_mutex_unlock(&ready_lock);
+    if (s == 1) run_job(build_pipeline, pp);
+    else if (s == 2) set_state(&pp->state, 2, 0);
+    return 1;
+}
+
+static void plist_load(void) {
+    if (getenv("MHGU_NO_PIPELIST")) return;
+    char path[1100];
+    const char *e = getenv("MHGU_PIPELIST");
+    if (e && *e) {
+        snprintf(path, sizeof path, "%s", e);
+    } else {
+        char exe[1024];
+        if (!plat_exe_path(exe, sizeof exe)) return;
+        char *s = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
+        if (bs > s) s = bs;
+        if (s) s[1] = 0; else exe[0] = 0;
+        snprintf(path, sizeof path, "%spipelines.list", exe);
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    ListHeader h;
+    if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "MHGUPL1", 8) || h.key_size != sizeof(ShaderKey) ||
+        h.pipe_size != sizeof(PipeKey) || h.rec_size != sizeof(ListRec) || h.count > 1000000) {
+        LOG("[vk] %s: not a pipeline list of this version, not used\n", path);
+        fclose(f);
+        return;
+    }
+    plist = calloc(h.count ? h.count : 1, sizeof *plist);
+    plist_done = calloc(h.count ? h.count : 1, 1);
+    plist_n = plist ? (int)fread(plist, sizeof *plist, h.count, f) : 0;
+    fclose(f);
+    int now = 0, built = 0;
+    for (int i = 0; i < plist_n; i++) {
+        if (plist[i].magic != LISTREC_MAGIC || plist[i].k.ncolor > 8) { plist_done[i] = 1; continue; }
+        uint64_t ck = prog_content_key(plist[i].chash, &plist[i].vkey, &plist[i].fkey);
+        Prog **c = progcache_slot(ck, false);
+        if (!c || !*c) continue;  // (its program waits for the prewarm: plist_seen)
+        plist_done[i] = 1;
+        now++;
+        built += plist_attach(*c, &plist[i]);
+    }
+    for (int i = 0; i < plist_n; i++) plist_left += !plist_done[i];
+    LOG("[vk] pipeline list %s: %d pipelines, %d new to build now, %d when the prewarm meets their programs\n", path,
+        plist_n, built, plist_left);
+    (void)now;
+}
+
+// (render thread) the programs of the records whose shader code the prewarm met, then their pipelines
+static void plist_drain(void) {
+    if (!atomic_load(&plist_qpending)) return;
+    pthread_mutex_lock(&plist_lock);
+    int n = plist_qn;
+    static struct { uint64_t code[2], cmax[2], chash[2]; } q[256];
+    memcpy(q, plist_q, sizeof *q * (size_t)n);
+    plist_qn = 0;
+    atomic_store(&plist_qpending, 0);
+    pthread_mutex_unlock(&plist_lock);
+    for (int j = 0; j < n; j++)
+        for (int i = 0; i < plist_n; i++) {
+            ListRec *r = &plist[i];
+            if (plist_done[i] || r->chash[0] != q[j].chash[0] || r->chash[1] != q[j].chash[1]) continue;
+            plist_done[i] = 1;
+            plist_left--;
+            uint64_t ck = prog_content_key(r->chash, &r->vkey, &r->fkey);
+            Prog *p = NULL, *have = NULL;
+            pthread_mutex_lock(&progcache_lock);
+            Prog **c = progcache_slot(ck, true);
+            if (c) { have = *c; if (!have) *c = p = calloc(1, sizeof *p); }
+            pthread_mutex_unlock(&progcache_lock);
+            if (have) {
+                prog_want(have);  // (a dormant one is loaded)
+                plist_attach(have, r);
+                continue;
+            }
+            if (!p) continue;
+            memcpy(p->code, q[j].code, sizeof p->code);
+            memcpy(p->cmax, q[j].cmax, sizeof p->cmax);
+            memcpy(p->chash, r->chash, sizeof p->chash);
+            p->ck = ck;
+            p->vkey = r->vkey;
+            p->fkey = r->fkey;
+            p->wanted = true;
+            plist_attach(p, r);  // (before it is translated: its pipelines follow it)
+            run_translate(translate_program, p);
+        }
+    if (!plist_left) LOG("[vk] pipeline list: every program met\n");
+}
+
+// MHGU_PIPELIST_EXPORT: pipelines.bin's records (as pipecache_init reads them) and the shipped list's
+static FILE *plist_ex;
+static uint64_t *plist_ex_seen;
+static int plist_ex_n, plist_ex_cap;
+static void plist_export_rec(const ListRec *r) {
+    uint64_t h = hash_words(0xcbf29ce484222325ull, r, sizeof *r);
+    for (int i = 0; i < plist_ex_n; i++)
+        if (plist_ex_seen[i] == h) return;
+    if (plist_ex_n == plist_ex_cap) plist_ex_seen = realloc(plist_ex_seen, sizeof *plist_ex_seen * (size_t)(plist_ex_cap = plist_ex_cap ? plist_ex_cap * 2 : 4096));
+    plist_ex_seen[plist_ex_n++] = h;
+    fwrite(r, sizeof *r, 1, plist_ex);
+}
+static void plist_export_add(const Prog *p, const PipeRec *pr) {
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        const char *e = getenv("MHGU_PIPELIST_EXPORT");
+        if (e && *e && (plist_ex = fopen(e, "wb"))) {
+            ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), 0};
+            fwrite(&h, sizeof h, 1, plist_ex);
+        }
+    }
+    if (!plist_ex || !p) return;
+    ListRec r;
+    memset(&r, 0, sizeof r);
+    r.magic = LISTREC_MAGIC;
+    memcpy(r.chash, p->chash, sizeof r.chash);
+    r.vkey = p->vkey;
+    r.fkey = p->fkey;
+    memcpy(r.color, pr->color, sizeof r.color);
+    r.depth = pr->depth;
+    r.k = pr->k;
+    r.k.prog = NULL;
+    r.k.rp = VK_NULL_HANDLE;
+    plist_export_rec(&r);
+}
+static void plist_export_finish(void) {
+    plist_export_add(NULL, NULL);  // (opens the file when pipelines.bin had nothing)
+    if (!plist_ex) return;
+    for (int i = 0; i < plist_n; i++)
+        if (plist[i].magic == LISTREC_MAGIC) plist_export_rec(&plist[i]);
+    ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), (uint32_t)plist_ex_n};
+    fseek(plist_ex, 0, SEEK_SET);
+    fwrite(&h, sizeof h, 1, plist_ex);
+    fclose(plist_ex);
+    plist_ex = NULL;
+    LOG("[vk] pipeline list exported: %s (%d pipelines)\n", getenv("MHGU_PIPELIST_EXPORT"), plist_ex_n);
 }
 
 static void build_pipeline(void *arg) {
@@ -3726,6 +3943,7 @@ static void exec_list(uint64_t handle, int depth) {
 
 void backend_execute(uint64_t handle) {
     vk_lock();
+    plist_drain();  // (the pipeline list's programs the prewarm met)
     uint64_t t0 = plat_now_ns();
     exec_list(handle, 0);
     stat_exec_ns += plat_now_ns() - t0;

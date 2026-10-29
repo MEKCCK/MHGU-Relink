@@ -483,6 +483,23 @@ the scene it copies are complete (also covers the "half black" case above). Same
 photo requested" line, 2 waits (2 ms) at the clear, 0 skips, photo right. The reward screen's own draw of the buffer
 still skips its first frame (redrawn every frame: unseen).
 
+Shipped pipeline list (2026-10-29). Surfaces black for a moment on entering an area the first time, with the prewarm
+done: not programs missing but pipelines (a program with the draw's blend / depth / vertex layout / target formats:
+Vulkan 1.2 bakes all of it in; NVN has it as state) and dormant programs loading, past the 6 ms budget. The game
+never lists its combinations, so they are recorded: extras/pipelines.list (make copies it beside the executable,
+dist ships it) holds the pipelines recorded while playing the common areas (first: the user's town and three hunts,
+904). A record names its program by the game's shader code hashes (code_hash) and shader keys, not by a translated
+program, so it outlives translator changes (unlike pipelines.bin, tied to SHADER_ID) and other GPUs: DEPTH24_STENCIL8
+and vertex formats are made again for the GPU at load (D32S8 on AMD; widened vertex formats). Records whose program is
+in programs.bin are attached at start-up like pipelines.bin's; the others when the prewarm meets their shader code
+(plist_seen on the translate thread, plist_drain on the render thread makes the variant and its pipelines). The
+header checks sizeof ShaderKey / PipeKey / ListRec: a change there needs a new recording. Matches only the settings
+it was recorded with for MSAA (Off) and anything else in PipeKey. Measured (R9, empty cache\, quick start into quest
+101 with the user's save, skipped draws over the same 40 s): 1398 without, 163 with (the quest area's load 1225 -> 51;
+what is left is the town's first frames while the prewarm still runs); the next start 6. Recording more:
+MHGU_PIPELIST_EXPORT=<file> writes pipelines.bin's records plus the loaded list's at the first draw, then copy it
+over extras/pipelines.list (MHGU_PIPELIST=<file>: read another list; MHGU_NO_PIPELIST=1: none).
+
 ## Updater (2026-10-28)
 
 `mhgurecomp-updater(.exe)` (updater/, built by `make` beside the game) is a separate program that is started instead
