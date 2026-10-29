@@ -192,6 +192,10 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   the one later in load order wins, and the log says so ("changes ..., which an earlier mod changed too"). Mods load in
   alphabetical order. To choose the order, make `mods\load_order.txt` with one mod folder name per line: then only
   the mods listed load, in that order. The merged archives are kept in `cache\arcmerge\`.
+- The **Mods** tab of the settings menu does this without editing files: it lists the mod folders, turns each on or
+  off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
+  later show up as off). It also compares the mods and lists the ones that change the same game files (and which of
+  the two is used), and can apply a suggested order, with the mods that change the most files first.
 - exefs patches (`.pchtxt`, `.ips`) are applied when they change data. Patches to game code can't be applied, because
   the code is precompiled; the log lists them.
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with

@@ -6,8 +6,15 @@
 #include "imgui_internal.h"
 #include <cassert>
 #include <cstdio>
+#include <chrono>
 #include <cstdlib>
+#include <iterator>
+#include <thread>
+#include <filesystem>
+#include <fstream>
+#include <string>
 static int requested;
+extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c compares archives with the game's)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
 extern "C" int overlay_face_position(int semantic) {
@@ -78,6 +85,23 @@ int main() {
     _putenv_s("MHGU_CONFIG", "obj/settings-test/panel-settings.ini");
 #else
     setenv("MHGU_CONFIG", "obj/settings-test/panel-settings.ini", 1);
+#endif
+    // Mods tab fixtures: Aaa (two files) and Bbb (one) both replace a.bin, Ccc stands alone, Ddd is off ('_')
+    namespace fs = std::filesystem;
+    fs::remove_all("obj/settings-test/mods");
+    auto put = [](const char *path, const char *text) {
+        fs::create_directories(fs::path(path).parent_path());
+        std::ofstream(path, std::ios::binary) << text;
+    };
+    put("obj/settings-test/mods/Aaa/romfs/a.bin", "1");
+    put("obj/settings-test/mods/Aaa/romfs/b.bin", "bb");
+    put("obj/settings-test/mods/Bbb/romfs/a.bin", "22");
+    put("obj/settings-test/mods/Ccc/romfs/c.bin", "3");
+    put("obj/settings-test/mods/_Ddd/romfs/d.bin", "4");
+#ifdef _WIN32
+    _putenv_s("MHGU_MODS_DIR", "obj/settings-test/mods");
+#else
+    setenv("MHGU_MODS_DIR", "obj/settings-test/mods", 1);
 #endif
     ImGui::CreateContext();
     auto &io = ImGui::GetIO();
@@ -154,6 +178,46 @@ int main() {
     tab();
     tab();
     selected("hp.0");
+    tab();
+    selected("mod.Aaa");
+    // The Mods tab: the conflict scan runs on another thread; Aaa and Bbb both replace a.bin
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    idle();
+    down(4);  // (Aaa, Bbb, Ccc, then _Ddd that is off)
+    selected("mods.conflict.0");
+    down();
+    selected("mods.rescan");  // (the suggested order is the one it has: Aaa changes more files, so Bbb comes after)
+    press(ImGuiKey_Home);
+    down();
+    selected("mod.Bbb");
+    confirm();
+    down();  // Move up
+    confirm();
+    selected("mod.Bbb");
+    assert(settings_panel_dirty());
+    press(ImGuiKey_Home);
+    selected("mod.Bbb");
+    down(5);  // (Bbb, Aaa, Ccc, _Ddd, the conflict)
+    selected("mods.suggest");  // Bbb now wins over the bigger Aaa: the order is suggested back
+    confirm();
+    press(ImGuiKey_Home);
+    selected("mod.Aaa");
+    down(2);
+    selected("mod.Ccc");
+    press(ImGuiKey_GamepadDpadLeft);  // off
+    assert(settings_panel_dirty());
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    assert(!settings_panel_dirty());
+    {
+        std::ifstream in("obj/settings-test/mods/load_order.txt");
+        std::string list((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        assert(list.find("\nAaa\nBbb\n") != std::string::npos);
+        assert(list.find("\nCcc\n") == std::string::npos && list.find("# off: Ccc\n") != std::string::npos);
+        assert(list.find("\n_Ddd\n") == std::string::npos);
+    }
     tab();
     selected("language");
     tab();
@@ -265,6 +329,7 @@ int main() {
     requested = 0;
     tab();
     tab();
+    tab();
     selected("language");
     down(6);
     selected("restart");
@@ -291,6 +356,7 @@ int main() {
     assert(w->Size.x <= io.DisplaySize.x);
     assert(w->ContentSize.x <= w->InnerRect.GetWidth() + 1);
     float top = w->Pos.y;
+    press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("hp.0");
     down(5);

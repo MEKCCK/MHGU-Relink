@@ -7,3 +7,7 @@
 // cache file (path in `out`) `prev` with the entries `mod` changed against `orig` (or added); entries `mod` left as in
 // `orig` keep `prev`'s. False when a file isn't an archive of the same format: the caller then replaces `prev`.
 bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, size_t outsz);
+
+// How many entries `a` and `b` (two mods' copies of the archive `orig`) both changed, differently: those can't be
+// both kept. `name` gets the first one. -1 when a file isn't an archive of the same format.
+int arc_overlap(const char *orig, const char *a, const char *b, char *name, size_t namesz);

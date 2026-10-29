@@ -146,3 +146,19 @@ done:
     arc_free(&o), arc_free(&p), arc_free(&m);
     return ok;
 }
+
+int arc_overlap(const char *orig, const char *a, const char *b, char *name, size_t namesz) {
+    Arc o = {0}, x = {0}, y = {0};
+    int n = -1;
+    if (arc_open(&o, orig) && arc_open(&x, a) && arc_open(&y, b) && o.version == x.version && o.version == y.version) {
+        n = 0;
+        for (int i = 0; i < x.n; i++) {
+            Ent *base = arc_find(&o, x.e[i].name), *other = arc_find(&y, x.e[i].name);
+            if (!other || (base && same(base, &x.e[i])) || (base && same(base, other)) || same(&x.e[i], other)) continue;
+            if (!n && name) snprintf(name, namesz, "%s", x.e[i].name);
+            n++;
+        }
+    }
+    arc_free(&o), arc_free(&x), arc_free(&y);
+    return n;
+}

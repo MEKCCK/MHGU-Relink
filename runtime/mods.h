@@ -15,7 +15,8 @@
 
 struct Module;
 
-const char *mods_dir(void);
+#include "modorder.h"
+
 void mods_make_dir(void);  // creates an empty mods/ (standalone: shows players where mods go)
 int mods_romfs_layers(const char **out, int max);  // host folders to layer over the RomFS, in order
 void mods_patch_module(struct Module *m, const uint8_t build_id[32]);  // exefs patches for a loaded module
