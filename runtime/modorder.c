@@ -9,6 +9,9 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "arcmerge.h"
 
@@ -156,7 +159,11 @@ bool mods_save_order(const ModEntry *e, int n, char *err, size_t errsz) {
     for (int i = 0; i < n; i++)
         if (!e[i].on) fprintf(f, "# off: %s\n", e[i].name);
     bool ok = fclose(f) == 0;
+#ifdef _WIN32
+    if (ok) ok = MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) != 0;  // (Windows' rename won't replace a file)
+#else
     if (ok) ok = rename(tmp, path) == 0;
+#endif
     if (!ok) {
         remove(tmp);
         snprintf(err, errsz, "Could not write mods/load_order.txt");
