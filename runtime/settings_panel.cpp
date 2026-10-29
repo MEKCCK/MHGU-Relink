@@ -24,7 +24,7 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move };
+enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -525,6 +525,42 @@ std::vector<ModEntry> suggested_mods() {
         snprintf(order[slots[k]].name, sizeof order[slots[k]].name, "%s", involved[k].c_str());
     return order;
 }
+// One row per pair of mods that are on and change the same file or archive entry; selecting it picks the one used
+void conflict_rows(std::vector<Row> &r) {
+    auto result = mods.scan;
+    if (!result || !result->done)
+        return;
+    for (int k = 0; k < result->scan.nconflicts; ++k) {
+        const ModConflict &c = result->scan.conflicts[k];
+        if (!c.replaced)  // (archives whose changes are combined are not a problem)
+            continue;
+        int ia = mod_index(result->names[c.a]), ib = mod_index(result->names[c.b]);
+        if (ia < 0 || ib < 0 || !mods.draft[ia].on || !mods.draft[ib].on)
+            continue;
+        if (ia > ib)
+            std::swap(ia, ib);
+        const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
+        std::string text = fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second);
+        std::string a = first, b = second;
+        action(r, "mods.conflict." + std::to_string(k), text, []() {});
+        {  // select it to choose which of the two is used: that one moves below the other
+            Row &row = r.back();
+            Row copy = row;
+            copy.title = tr("Which mod is used?");
+            row.activate = [copy, a, b]() {
+                choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+                    int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
+                    if (ia < 0 || ib < 0 || win > lose)
+                        return;
+                    ModEntry moved = mods.draft[win];
+                    mods.draft.erase(mods.draft.begin() + win);
+                    mods.draft.insert(mods.draft.begin() + lose, moved);  // (the loser is now one place earlier)
+                    s.saved_notice = false;
+                });
+            };
+        }
+    }
+}
 void mods_rows(std::vector<Row> &r) {
     if (!mods.scan)
         start_scan();
@@ -577,41 +613,15 @@ void mods_rows(std::vector<Row> &r) {
     if (!result->done) {
         action(r, "mods.scanning", tr("Checking for conflicts..."), []() {});
     } else {
-        int shown = 0;
-        for (int k = 0; k < result->scan.nconflicts; ++k) {
-            const ModConflict &c = result->scan.conflicts[k];
-            int ia = mod_index(result->names[c.a]), ib = mod_index(result->names[c.b]);
-            if (ia < 0 || ib < 0 || !mods.draft[ia].on || !mods.draft[ib].on)
-                continue;
-            if (ia > ib)
-                std::swap(ia, ib);
-            const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
-            std::string text =
-                c.replaced ? fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second)
-                           : fmt("%s and %s change different parts of %d archive(s): combined", first, second,
-                                 c.merged);
-            std::string a = first, b = second;
-            action(r, "mods.conflict." + std::to_string(k), text, []() {});
-            if (c.replaced) {  // select it to choose which of the two is used: that one moves below the other
-                Row &row = r.back();
-                Row copy = row;
-                copy.title = tr("Which mod is used?");
-                row.activate = [copy, a, b]() {
-                    choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
-                        int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
-                        if (ia < 0 || ib < 0 || win > lose)
-                            return;
-                        ModEntry moved = mods.draft[win];
-                        mods.draft.erase(mods.draft.begin() + win);
-                        mods.draft.insert(mods.draft.begin() + lose, moved);  // (the loser is now one place earlier)
-                        s.saved_notice = false;
-                    });
-                };
-            }
-            ++shown;
-        }
-        if (!shown)
+        std::vector<Row> found;
+        conflict_rows(found);
+        if (found.empty())
             action(r, "mods.clear", tr("No conflicts found"), []() {});
+        else {
+            action(r, "mods.conflicts", fmt("Mods change the same files (%d): select to review", (int)found.size()),
+                   []() { push(View::Conflicts, ""); });
+            r.back().value = "!";
+        }
     }
     auto order = suggested_mods();
     action(
@@ -909,6 +919,9 @@ std::vector<Row> rows_for_view(bool *open) {
         action(r, "key.case", tr("Case"), []() { s.keyboard.upper = !s.keyboard.upper; });
         action(r, "key.accept", tr("Accept"), []() { accept_keyboard(); });
         action(r, "key.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Conflicts) {
+        conflict_rows(r);
+        action(r, "conflicts.back", tr("Back"), []() { pop(); });
     } else if (s.view == View::Move) {
         action(r, "move.accept", tr("Accept"), []() { pop(); });
         action(r, "move.cancel", tr("Cancel"), []() {
@@ -1292,6 +1305,7 @@ void settings_panel(bool *open) {
                                                             : s.view == View::Restart ? "Restart game?"
                                                             : s.view == View::Reset   ? "Reset this tab?"
                                                             : s.view == View::Move    ? "Move menu"
+                                                            : s.view == View::Conflicts ? "Mod conflicts"
                                                                                       : "Unsaved changes");
         ImGui::TextWrapped("%s", title);
     }

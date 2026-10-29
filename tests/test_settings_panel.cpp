@@ -185,7 +185,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     idle();
     down(4);  // (Aaa, Bbb, Ccc, then _Ddd that is off)
-    selected("mods.conflict.0");
+    selected("mods.conflicts");  // one row for them all
     down();
     selected("mods.rescan");  // (the suggested order is the one it has: Aaa changes more files, so Bbb comes after)
     press(ImGuiKey_Home);
@@ -222,12 +222,19 @@ int main() {
     // Choosing which of two conflicting mods is used moves it below the other
     press(ImGuiKey_Home);
     down(4);  // (Aaa, Bbb, then the off ones _Ddd and Ccc)
+    selected("mods.conflicts");
+    confirm();
     selected("mods.conflict.0");
     confirm();
     selected("choice.1");  // (Use Bbb, the one used now)
     press(ImGuiKey_GamepadDpadUp);
     selected("choice.0");  // Use Aaa
     confirm();
+    selected("mods.conflict.0");
+    down();
+    selected("conflicts.back");
+    confirm();
+    selected("mods.conflicts");
     assert(settings_panel_dirty());
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
