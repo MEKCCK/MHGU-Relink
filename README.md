@@ -61,10 +61,11 @@ You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimat
    ```
 
    `exefs` must come from the 1.4.0 update, and `romfs` must be the base game's romfs with the update's files
-   merged over it.
+   merged over it: about 35,500 files, 12.3 GB.
 3. Start `mhgurecomp.exe`.
 
-If the files are missing or the wrong version, a message box says so.
+If the files are missing, the wrong version or incomplete (for example the base game's romfs without the update's
+files, or the update's alone), a message box says so.
 
 ### Staying up to date
 

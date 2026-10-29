@@ -185,6 +185,24 @@ bool plat_user_dir(char *buf, size_t size) {
     return len > 0 && !lossy;
 }
 
+static int count_files(const char *dir, int depth) {
+    char pat[MAX_PATH * 2];
+    if (depth > 32 || snprintf(pat, sizeof pat, "%s\\*", dir) >= (int)sizeof pat) return 0;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileExA(pat, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int n = 0;
+    do {
+        if (fd.cFileName[0] == '.') continue;
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) { n++; continue; }
+        char sub[MAX_PATH * 2];
+        if (snprintf(sub, sizeof sub, "%s\\%s", dir, fd.cFileName) < (int)sizeof sub) n += count_files(sub, depth + 1);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+int plat_count_files(const char *dir) { return count_files(dir, 0); }
+
 void plat_error_box(const char *msg) { MessageBoxA(NULL, msg, "MHGU Recomp", MB_OK | MB_ICONERROR); }
 
 void plat_fatal_notice(void) {

@@ -906,6 +906,16 @@ and exit() are HLE_SDK in runtime/hle/abort.c and log the condition, function, f
 2xxx-yyyy) and the message, then the game's lr and callers (kernel_log_guest_stack, the same heuristic as
 MHGU_DUMP_THREADS); svcExitProcess logs its caller too. Look the callers up with tools/disasm.py.
 
+Incomplete romfs (2026-10-29, two reports): the update's romfs alone ("[romfs] 12 files", 0.2 GB) quit with the
+game's "Shader compile failed. system\app_shader\AppShaderPackage" right after start-up (a black window); the base
+game's without the update merged (34149 files, 12.1 GB) got through character creation, then crashed on the way into
+town ("no function at 0", lr 0xdd8500: the resource manager at 0xdd84e4 calls a method of a resource whose vtable is
+empty). A full 1.4.0 romfs has 35531 files, 2321 folders, 12.3 GB. Started on its own, the game now counts data\romfs
+before its window opens (main.c; plat_count_files, the system's directory listing: ~80 ms on Windows, where a stat
+per file took 450-900 ms) and stops with a message box below 35000 files or without
+nativeNX/system/app_shader/AppShaderPackage.mfx. MHGU_ROMFS_ANY=1 skips the check. Checked on Windows and Linux (WSL):
+the full romfs starts; 12 files without the shader package, 51 and 4 with it get the message.
+
 Debug env: `MHGU_TRACE_SVC`, `MHGU_TRACE_IPC`, `MHGU_LOG_FILES`, `MHGU_FNPROF` (hot functions every 5 s),
 `MHGU_FNTRACE=lo-hi[:n]` (calls into a guest address range, with caller and thread), `MHGU_DUMP_THREADS=<s>`
 (every guest thread's wait state after s seconds), `MHGU_HLE_SKIP`, `MHGU_AUDIO_LOG`, `MHGU_AUDIO_TRACE=1` (once a

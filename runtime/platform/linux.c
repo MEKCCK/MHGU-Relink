@@ -10,6 +10,7 @@
 //   It is installed by plat_reserve_guest(), i.e. from main.c's constructor, before any guest code can run.
 // - No console to keep or free: with stderr not a terminal nobody is watching, so the log goes to log.txt.
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <execinfo.h>
@@ -208,6 +209,28 @@ bool plat_user_dir(char *buf, size_t size) {
     snprintf(buf, size, "%s", dir);
     return true;
 }
+
+static int count_files(const char *dir, int depth) {
+    DIR *dd = depth > 32 ? NULL : opendir(dir);
+    if (!dd) return 0;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(dd))) {
+        if (e->d_name[0] == '.') continue;
+        char sub[PATH_MAX];
+        if (snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name) >= (int)sizeof sub) continue;
+        int type = e->d_type;
+        if (type == DT_UNKNOWN || type == DT_LNK) {  // (file systems without types; links: what they point at)
+            struct stat st;
+            type = stat(sub, &st) != 0 ? DT_UNKNOWN : S_ISDIR(st.st_mode) ? DT_DIR : S_ISREG(st.st_mode) ? DT_REG : DT_UNKNOWN;
+        }
+        if (type == DT_DIR) n += count_files(sub, depth + 1);
+        else if (type == DT_REG) n++;
+    }
+    closedir(dd);
+    return n;
+}
+int plat_count_files(const char *dir) { return count_files(dir, 0); }
 
 void plat_error_box(const char *msg) {
     fprintf(stderr, "\n*** %s\n", msg);
