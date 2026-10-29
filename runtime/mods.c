@@ -1,5 +1,6 @@
 // Mod folders (mods.h).
 #include "mods.h"
+#include "modorder.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -15,16 +16,9 @@ static bool is_dir(const char *p) {
     return !stat(p, &st) && S_ISDIR(st.st_mode);
 }
 
-const char *mods_dir(void) {
-    const char *e = getenv("MHGU_MODS_DIR");
-    return e && *e ? e : "mods";
-}
-
 void mods_make_dir(void) {
     if (!is_dir(mods_dir())) mkdir(mods_dir(), 0755);
 }
-
-static int cmp(const void *a, const void *b) { return strcasecmp(*(char *const *)a, *(char *const *)b); }
 
 #define MAX_MODS 256
 static char *g_names[MAX_MODS];
@@ -33,65 +27,14 @@ static int g_nmods = -1;
 static void list_mods(void) {
     if (g_nmods >= 0) return;
     g_nmods = 0;
+    ModEntry all[MODS_MAX];
+    int n = mods_installed(all, MODS_MAX);
+    for (int i = 0; i < n; i++)
+        if (all[i].on) g_names[g_nmods++] = strdup(all[i].name);
     char path[1100];
     snprintf(path, sizeof path, "%s/load_order.txt", mods_dir());
-    FILE *f = fopen(path, "r");
-    if (f) {
-        char line[512];
-        while (g_nmods < MAX_MODS && fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            char *s = line;
-            while (*s == ' ' || *s == '\t') s++;
-            if (!*s || *s == '#') continue;
-            g_names[g_nmods++] = strdup(s);
-        }
-        fclose(f);
-        LOG("[mods] %d mod(s) listed in %s\n", g_nmods, path);
-        return;
-    }
-    DIR *d = opendir(mods_dir());
-    if (!d) return;
-    struct dirent *e;
-    while (g_nmods < MAX_MODS && (e = readdir(d))) {
-        if (e->d_name[0] == '.' || e->d_name[0] == '_') continue;
-        snprintf(path, sizeof path, "%s/%s", mods_dir(), e->d_name);
-        if (is_dir(path)) g_names[g_nmods++] = strdup(e->d_name);
-    }
-    closedir(d);
-    qsort(g_names, g_nmods, sizeof *g_names, cmp);
-}
-
-// The folder named `want` (any case) in dir or up to `depth` levels below it (shallowest first), into out.
-static bool find_dir(const char *dir, const char *want, int depth, char *out, size_t n) {
-    for (int level = 0; level <= depth; level++) {
-        // breadth first: walk the tree to `level` and look there
-        struct { char path[1024]; int lv; } stack[64];
-        int sp = 0;
-        snprintf(stack[sp].path, sizeof stack[sp].path, "%s", dir), stack[sp++].lv = 0;
-        while (sp) {
-            sp--;
-            char cur[1024];
-            int lv = stack[sp].lv;
-            snprintf(cur, sizeof cur, "%s", stack[sp].path);
-            DIR *d = opendir(cur);
-            if (!d) continue;
-            struct dirent *e;
-            while ((e = readdir(d))) {
-                if (e->d_name[0] == '.') continue;
-                char p[1100];
-                snprintf(p, sizeof p, "%s/%s", cur, e->d_name);
-                if (!is_dir(p)) continue;
-                if (lv == level && !strcasecmp(e->d_name, want)) {
-                    closedir(d);
-                    snprintf(out, n, "%s", p);
-                    return true;
-                }
-                if (lv < level && sp < 64) snprintf(stack[sp].path, sizeof stack[sp].path, "%s", p), stack[sp++].lv = lv + 1;
-            }
-            closedir(d);
-        }
-    }
-    return false;
+    struct stat st;
+    if (!stat(path, &st)) LOG("[mods] %d mod(s) loading, in the order of %s\n", g_nmods, path);
 }
 
 int mods_romfs_layers(const char **out, int max) {
@@ -101,12 +44,7 @@ int mods_romfs_layers(const char **out, int max) {
         char mod[1100], path[1100];
         snprintf(mod, sizeof mod, "%s/%s", mods_dir(), g_names[i]);
         if (!is_dir(mod)) { LOG("[mods] %s: no such folder in %s\n", g_names[i], mods_dir()); continue; }
-        bool found = find_dir(mod, "romfs", 3, path, sizeof path);
-        if (!found && find_dir(mod, "nativeNX", 3, path, sizeof path)) {  // the files without their romfs/ folder
-            *strrchr(path, '/') = 0;
-            found = true;
-        }
-        if (!found) continue;
+        if (!mods_romfs_of(g_names[i], path, sizeof path)) continue;
         out[k++] = strdup(path);
         LOG("[mods] %s: romfs %s\n", g_names[i], path);
     }
@@ -247,7 +185,7 @@ void mods_patch_module(Module *m, const uint8_t build_id[32]) {
     for (int i = 0; i < g_nmods; i++) {
         char mod[1100], ex[1100];
         snprintf(mod, sizeof mod, "%s/%s", mods_dir(), g_names[i]);
-        if (!find_dir(mod, "exefs", 3, ex, sizeof ex)) continue;
+        if (!mods_find_dir(mod, "exefs", 3, ex, sizeof ex)) continue;
         DIR *d = opendir(ex);
         if (!d) continue;
         struct dirent *e;

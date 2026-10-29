@@ -9,13 +9,15 @@
 // These folders are found up to three levels down, so a mod unpacked as Mod/Mod/romfs or with an emulator or
 // Atmosphere layout (atmosphere/contents/0100770008DD8000/romfs) works as it is.
 // Mods load in name order; a file in a later mod wins. mods/load_order.txt (one folder name per line, '#'
-// comments) picks and orders them instead; a folder whose name starts with '_' is skipped.
+// comments) picks and orders them instead; a folder whose name starts with '_' is skipped. A list the Mods tab of the
+// settings menu wrote also loads a folder it doesn't mention (a mod added since), after the listed ones.
 #pragma once
 #include <stdint.h>
 
 struct Module;
 
-const char *mods_dir(void);
+#include "modorder.h"
+
 void mods_make_dir(void);  // creates an empty mods/ (standalone: shows players where mods go)
 int mods_romfs_layers(const char **out, int max);  // host folders to layer over the RomFS, in order
 void mods_patch_module(struct Module *m, const uint8_t build_id[32]);  // exefs patches for a loaded module

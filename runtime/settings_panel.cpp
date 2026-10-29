@@ -5,20 +5,26 @@
 #include "settings_icons.h"
 #include "app_actions.h"
 #include "overlay.h"
+#include "modorder.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <string>
+#include <strings.h>
+#include <thread>
 #include <vector>
 
 namespace {
-enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move };
+enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -68,6 +74,71 @@ struct State {
 } s;
 std::atomic<bool> request_exit, request_back, is_dirty, is_confirming;
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
+std::string fmt(const char *text, ...) {
+    char buffer[512];
+    va_list args;
+    va_start(args, text);
+    vsnprintf(buffer, sizeof buffer, tr(text), args);
+    va_end(args);
+    return buffer;
+}
+// The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
+constexpr int PAGES = 7, MODS_PAGE = 5;
+struct ScanResult {
+    std::vector<std::string> names;  // (the order ModConflict's indexes are in)
+    ModScan scan = {};
+    std::atomic<bool> done{false};
+    ~ScanResult() { modscan_free(&scan); }
+};
+struct Mods {
+    std::vector<ModEntry> draft, saved, boot;
+    bool boot_set = false;
+    std::shared_ptr<ScanResult> scan;
+} mods;
+bool same_mods(const std::vector<ModEntry> &a, const std::vector<ModEntry> &b) {
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i].on != b[i].on || strcmp(a[i].name, b[i].name))
+            return false;
+    return true;
+}
+bool mods_dirty() { return !same_mods(mods.draft, mods.saved); }
+bool mods_restart() { return !same_mods(mods.saved, mods.boot); }
+void load_mods() {
+    ModEntry all[MODS_MAX];
+    int n = mods_installed(all, MODS_MAX);
+    mods.draft.assign(all, all + n);
+    mods.saved = mods.draft;
+    if (!mods.boot_set) {
+        mods.boot = mods.draft;
+        mods.boot_set = true;
+    }
+    mods.scan.reset();
+}
+void start_scan() {
+    auto result = std::make_shared<ScanResult>();
+    for (const auto &m : mods.draft)
+        result->names.push_back(m.name);
+    std::sort(result->names.begin(), result->names.end(),
+              [](const std::string &a, const std::string &b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
+    mods.scan = result;
+    std::thread([result]() {
+        std::vector<std::array<char, 128>> names;
+        for (const auto &n : result->names) {
+            names.emplace_back();
+            snprintf(names.back().data(), 128, "%s", n.c_str());
+        }
+        modscan_run(reinterpret_cast<const char(*)[128]>(names.data()), (int)names.size(), &result->scan);
+        result->done = true;
+    }).detach();
+}
+int mod_index(const std::string &name) {
+    for (int i = 0; i < (int)mods.draft.size(); ++i)
+        if (name == mods.draft[i].name)
+            return i;
+    return -1;
+}
 struct GuideLayout {
     ImVec2 offset[3];
     float height = 0;
@@ -167,7 +238,7 @@ bool equal(const Config &a, const Config &b) {
     }
     return true;
 }
-bool dirty() { return !equal(s.draft, s.saved); }
+bool dirty() { return !equal(s.draft, s.saved) || mods_dirty(); }
 bool pending_text() {
     bool editing = s.view == View::Keyboard;
     for (const auto &o : s.origins)
@@ -220,6 +291,7 @@ void first_page(int page) {
 }
 void discard() {
     s.draft = s.saved;
+    mods.draft = mods.saved;
     quest_keys();
     s.error.clear();
     s.saved_notice = false;
@@ -402,7 +474,13 @@ void reset_section() {
         c.hp = f.hp;
         quest_keys();
         break;
-    case 5:
+    case MODS_PAGE:
+        for (auto &m : mods.draft)
+            m.on = m.name[0] != '_';
+        std::sort(mods.draft.begin(), mods.draft.end(),
+                  [](const ModEntry &a, const ModEntry &b) { return strcasecmp(a.name, b.name) < 0; });
+        break;
+    case 6:
         c.language = f.language;
         c.menu_scale = f.menu_scale;
         c.confirm_exit = f.confirm_exit;
@@ -411,6 +489,167 @@ void reset_section() {
         break;
     }
     pop();
+}
+// Suggested order: the mods that replace each other's files keep their places among the mods that are on, with the
+// ones that change the most files first and the small tweaks last, so a tweak wins over an overhaul.
+std::vector<ModEntry> suggested_mods() {
+    std::vector<ModEntry> order = mods.draft;
+    auto result = mods.scan;
+    if (!result || !result->done)
+        return order;
+    std::vector<int> slots;
+    std::vector<std::string> involved;
+    for (int i = 0; i < (int)order.size(); ++i) {
+        if (!order[i].on)
+            continue;
+        for (int k = 0; k < result->scan.nconflicts; ++k) {
+            const ModConflict &c = result->scan.conflicts[k];
+            if (!c.replaced)
+                continue;
+            const std::string &a = result->names[c.a], &b = result->names[c.b];
+            int ia = mod_index(a), ib = mod_index(b);
+            if (ia >= 0 && ib >= 0 && mods.draft[ia].on && mods.draft[ib].on && (order[i].name == a || order[i].name == b)) {
+                slots.push_back(i);
+                involved.push_back(order[i].name);
+                break;
+            }
+        }
+    }
+    auto files = [&](const std::string &name) {
+        auto at = std::find(result->names.begin(), result->names.end(), name);
+        return at == result->names.end() ? 0 : result->scan.files[at - result->names.begin()];
+    };
+    std::stable_sort(involved.begin(), involved.end(),
+                     [&](const std::string &a, const std::string &b) { return files(a) > files(b); });
+    for (size_t k = 0; k < slots.size(); ++k)
+        snprintf(order[slots[k]].name, sizeof order[slots[k]].name, "%s", involved[k].c_str());
+    return order;
+}
+// One row per pair of mods that are on and change the same file or archive entry; selecting it picks the one used
+void conflict_rows(std::vector<Row> &r) {
+    auto result = mods.scan;
+    if (!result || !result->done)
+        return;
+    for (int k = 0; k < result->scan.nconflicts; ++k) {
+        const ModConflict &c = result->scan.conflicts[k];
+        if (!c.replaced)  // (archives whose changes are combined are not a problem)
+            continue;
+        int ia = mod_index(result->names[c.a]), ib = mod_index(result->names[c.b]);
+        if (ia < 0 || ib < 0 || !mods.draft[ia].on || !mods.draft[ib].on)
+            continue;
+        if (ia > ib)
+            std::swap(ia, ib);
+        const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
+        std::string text = fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second);
+        std::string a = first, b = second;
+        action(r, "mods.conflict." + std::to_string(k), text, []() {});
+        {  // select it to choose which of the two is used: that one moves below the other
+            Row &row = r.back();
+            Row copy = row;
+            copy.title = tr("Which mod is used?");
+            row.activate = [copy, a, b]() {
+                choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+                    int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
+                    if (ia < 0 || ib < 0 || win > lose)
+                        return;
+                    ModEntry moved = mods.draft[win];
+                    mods.draft.erase(mods.draft.begin() + win);
+                    mods.draft.insert(mods.draft.begin() + lose, moved);  // (the loser is now one place earlier)
+                    s.saved_notice = false;
+                });
+            };
+        }
+    }
+}
+void mods_rows(std::vector<Row> &r) {
+    if (!mods.scan)
+        start_scan();
+    auto result = mods.scan;  // (the scan thread fills it; `done` says when)
+    if (mods.draft.empty())
+        action(r, "mods.none", tr("No mods found in the mods folder"), []() {});
+    for (int i = 0; i < (int)mods.draft.size(); ++i) {
+        std::string name = mods.draft[i].name;
+        bool on = mods.draft[i].on, clash = false;
+        if (on && result->done)
+            for (int k = 0; k < result->scan.nconflicts && !clash; ++k) {
+                const ModConflict &c = result->scan.conflicts[k];
+                if (!c.replaced || (result->names[c.a] != name && result->names[c.b] != name))
+                    continue;
+                int other = mod_index(result->names[result->names[c.a] == name ? c.b : c.a]);
+                clash = other >= 0 && mods.draft[other].on;
+            }
+        Row row;
+        row.id = "mod." + name;
+        row.title = name;
+        row.value = std::string(tr(on ? "On" : "Off")) + (clash ? " !" : "");
+        row.cold = true;
+        auto set_on = [name](bool v) {
+            int at = mod_index(name);
+            if (at >= 0 && mods.draft[at].on != v) {
+                mods.draft[at].on = v;
+                s.saved_notice = false;
+            }
+        };
+        row.adjust = [set_on](int d) { set_on(d > 0); };
+        Row copy = row;
+        row.activate = [copy, name, on, set_on]() {
+            auto move = [name](int d) {
+                int at = mod_index(name), to = at + d;
+                if (at >= 0 && to >= 0 && to < (int)mods.draft.size()) {
+                    std::swap(mods.draft[at], mods.draft[to]);
+                    s.saved_notice = false;
+                }
+            };
+            choices(copy, {tr(on ? "Turn off" : "Turn on"), tr("Move up"), tr("Move down")}, 0,
+                    [set_on, move, on](int v) {
+                        if (v == 0)
+                            set_on(!on);
+                        else
+                            move(v == 1 ? -1 : 1);
+                    });
+        };
+        r.push_back(std::move(row));
+    }
+    if (!result->done) {
+        action(r, "mods.scanning", tr("Checking for conflicts..."), []() {});
+    } else {
+        std::vector<Row> found;
+        conflict_rows(found);
+        if (found.empty())
+            action(r, "mods.clear", tr("No conflicts found"), []() {});
+        else {
+            action(r, "mods.conflicts", fmt("Mods change the same files (%d): select to review", (int)found.size()),
+                   []() { push(View::Conflicts, ""); });
+            r.back().value = "!";
+        }
+    }
+    auto order = suggested_mods();
+    action(
+        r, "mods.suggest", tr("Apply suggested order"),
+        [order]() {
+            mods.draft = order;
+            s.saved_notice = false;
+        },
+        !same_mods(order, mods.draft));
+    action(r, "mods.rescan", tr("Rescan mods"), []() {
+        std::vector<ModEntry> now(MODS_MAX);
+        int n = mods_installed(now.data(), MODS_MAX);
+        // new folders join the end (on), gone ones leave; the order and the switches of the rest stay
+        std::vector<ModEntry> next;
+        for (const auto &m : mods.draft)
+            for (int i = 0; i < n; ++i)
+                if (!strcmp(now[i].name, m.name)) {
+                    next.push_back(m);
+                    break;
+                }
+        mods.draft = next;
+        for (int i = 0; i < n; ++i)
+            if (mod_index(now[i].name) < 0) {
+                now[i].on = true;  // (as at start: a mod added later loads)
+                mods.draft.push_back(now[i]);
+            }
+        mods.scan.reset();
+    });
 }
 std::vector<Row> main_rows() {
     std::vector<Row> r;
@@ -596,7 +835,10 @@ std::vector<Row> main_rows() {
                 c.hp.quests < HP_QUESTS_MAX);
         }
         break;
-    case 5:
+    case MODS_PAGE:
+        mods_rows(r);
+        break;
+    case 6:
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
                    [](int v) { c.language = v; }, cold("Language"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, cold("MenuScale"));
@@ -636,6 +878,13 @@ bool save() {
         s.error = settings_text(s.draft.language, error);
         return false;
     }
+    if (mods_dirty()) {
+        if (!mods_save_order(mods.draft.data(), (int)mods.draft.size(), error, sizeof error)) {
+            s.error = settings_text(s.draft.language, error);
+            return false;
+        }
+        mods.saved = mods.draft;
+    }
     s.saved = s.draft;
     s.saved_notice = true;
     s.error.clear();
@@ -670,6 +919,9 @@ std::vector<Row> rows_for_view(bool *open) {
         action(r, "key.case", tr("Case"), []() { s.keyboard.upper = !s.keyboard.upper; });
         action(r, "key.accept", tr("Accept"), []() { accept_keyboard(); });
         action(r, "key.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Conflicts) {
+        conflict_rows(r);
+        action(r, "conflicts.back", tr("Back"), []() { pop(); });
     } else if (s.view == View::Move) {
         action(r, "move.accept", tr("Accept"), []() { pop(); });
         action(r, "move.cancel", tr("Cancel"), []() {
@@ -921,6 +1173,7 @@ void settings_panel(bool *open) {
         s.floating = false;
         s.advanced = false;
         quest_keys();
+        load_mods();
     }
     if (request_exit.exchange(false) && s.view != View::Exit)
         push(View::Exit, "dialog.cancel");
@@ -982,10 +1235,10 @@ void settings_panel(bool *open) {
             true);
     if (s.view == View::Main) {
         if (pressed(ImGuiKey_GamepadR1))
-            first_page((s.page + 1) % 6);
+            first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
-            first_page((s.page + 5) % 6);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Miscellaneous", "App"};
+            first_page((s.page + PAGES - 1) % PAGES);
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Miscellaneous", "Mods", "App"};
         float avail = ImGui::GetContentRegionAvail().x;
         float fw = ImGui::GetFontSize();
         ImVec2 scrolling_start = ImGui::GetCursorScreenPos();
@@ -993,10 +1246,10 @@ void settings_panel(bool *open) {
         ImGui::SetCursorScreenPos(tabs_start);
         float gutter = fw * 2.1f;
         float tabs_width = avail - gutter * 2;
-        int columns = tabs_width / fw < 43 ? 3 : 6;
+        int columns = tabs_width / fw < 50 ? 4 : PAGES;
         float tabw = (tabs_width - ImGui::GetStyle().ItemSpacing.x * (columns - 1)) / columns;
-        float tabh = fw * (columns == 3 ? 2.1f : 2.7f);
-        int lines = 6 / columns;
+        float tabh = fw * (columns == PAGES ? 2.7f : 2.1f);
+        int lines = (PAGES + columns - 1) / columns;
         float header_height = tabh * lines + ImGui::GetStyle().ItemSpacing.y * (lines - 1);
         auto *header = ImGui::GetWindowDrawList();
         header->AddRectFilled(
@@ -1008,7 +1261,7 @@ void settings_panel(bool *open) {
         SettingsIcons::draw(
             header, ImVec2(tabs_start.x + avail - fw * 1.5f, tabs_start.y + (header_height - fw) * .5f), fw,
             s.draft.button_icons, SettingsIcons::Right, 0);
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < PAGES; i++) {
             if (i % columns)
                 ImGui::SameLine();
             else
@@ -1052,6 +1305,7 @@ void settings_panel(bool *open) {
                                                             : s.view == View::Restart ? "Restart game?"
                                                             : s.view == View::Reset   ? "Reset this tab?"
                                                             : s.view == View::Move    ? "Move menu"
+                                                            : s.view == View::Conflicts ? "Mod conflicts"
                                                                                       : "Unsaved changes");
         ImGui::TextWrapped("%s", title);
     }
@@ -1122,10 +1376,12 @@ void settings_panel(bool *open) {
         ImGui::TextWrapped("%s", s.error.c_str());
         ImGui::PopStyleColor();
     } else if (s.saved_notice)
-        ImGui::TextUnformatted(tr(config_restart_required(&s.draft) ? "Saved - restart pending" : "Saved"));
+        ImGui::TextUnformatted(tr((config_restart_required(&s.draft) || mods_restart()) ? "Saved - restart pending" : "Saved"));
     if (s.view == View::Main) {
         if (s.page == 1 && (s.draft.fsr || g_config.fsr))
             ImGui::TextWrapped("%s", tr("FSR overrides MSAA and FXAA while active."));
+        if (s.page == MODS_PAGE)
+            ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Select a conflict to choose which mod is used. Press Save, then restart."));
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
         ImGui::Dummy(ImVec2(1, guides.height + ImGui::GetStyle().ItemSpacing.y));
