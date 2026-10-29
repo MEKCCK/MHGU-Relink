@@ -12,9 +12,9 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 ## What it adds over the Switch version
 
 - Graphics settings (resolution, MSAA, FXAA, Supersampling, VSync)
-- Any screen shape from 16:10 to ultrawide (21:9, 32:9 and wider), with the HUD unstretched: centered or spread to
-  the screen's sides
+- Any widescreen aspect ratio (16:10, 16:9 and and anything wider than that)
 - Frame rate cap anywhere between 30-240 fps
+    - Bugfixes for speed-related issues that emulators normally have when using higher FPS mods/codes
 - Supports almost every controller under the sun
 - Experimental KB+M controls
 - Optional: small monsters are properly synced between players in multiplayer
@@ -30,6 +30,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - OS: Windows 10/11 64-bit, or Linux
 - CPU: Any CPU from 2014 or newer (needs AVX2 support)
 - GPU: Any GPU from 2016 or newer (needs Vulkan 1.2 support), and at least 1GB of VRAM
+- RAM: 4GB
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
     - (Title ID `0100770008DD8000`, the `main` executable's build ID starts with `FB08F1D20FD1204F`)
 
@@ -67,7 +68,7 @@ If the files are missing or the wrong version, a message box says so.
 
 ### Staying up to date
 
-Releases come out often. To get them automatically, start `mhgurecomp-updater.exe` (`mhgurecomp-updater` on Linux)
+Releases may come out pretty often. To update automatically, start `mhgurecomp-updater.exe` (`mhgurecomp-updater` on Linux)
 instead of `mhgurecomp.exe`: point your shortcut at it, or on a Steam Deck add it as the non-Steam game. It asks
 GitHub for the latest release and, when that is newer than yours, offers to install it, then starts the game.
 `mhgurecomp.exe` itself never checks or updates anything; starting it directly is always fine.
@@ -205,6 +206,11 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
 If you are newer to the game, I very strongly recommend the [Key Quest Markers](https://gamebanana.com/mods/727960) mod by PurplefinNeptuna. This marks out the Village and Hub quests you need to complete for the next tier directly in the quest menu, which means you no longer need a wiki to play the damn game.
+
+**Good places to get mods:**
+
+- [The MHGURecomp-Mods repo](https://github.com/Oddity-git/MHGURecomp-mods)
+- [GameBanana](https://gamebanana.com/mods/games/17088)
 
 ### Cheats
 
