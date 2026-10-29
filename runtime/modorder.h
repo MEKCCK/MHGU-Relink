@@ -20,9 +20,10 @@ typedef struct {
     char name[128];
     bool on;
 } ModEntry;
-// Every mod folder: the ones that load, in load order, then the others (off) by name
+// Every mod folder, in load order (the ones a list leaves out after it, by name)
 int mods_installed(ModEntry *out, int max);
-// Writes mods/load_order.txt for the list (on mods only, in this order); false with `err` set when it can't
+// Writes mods/load_order.txt for the list, in this order (mods that are off as "# off: name"); false with `err`
+// set when it can't
 bool mods_save_order(const ModEntry *e, int n, char *err, size_t errsz);
 
 // What a mod pair changes in common

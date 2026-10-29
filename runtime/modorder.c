@@ -104,40 +104,34 @@ int mods_installed(ModEntry *out, int max) {
         return n;
     }
     ModEntry *ordered = calloc((size_t)n + 1, sizeof *ordered);
-    char (*off)[128] = calloc((size_t)n + 1, sizeof *off);  // names the Mods tab wrote as "# off: name"
-    int k = 0, noff = 0;
-    bool ours = false;  // a list the Mods tab wrote: a folder it doesn't mention is a new mod, and loads
+    int k = 0;
+    bool ours = false;  // a list the Mods tab wrote: "# off: name" keeps a mod's place, and a folder it doesn't
+                        // mention is a new mod, which loads
     char line[512];
-    for (int ln = 0; ordered && off && fgets(line, sizeof line, f); ln++) {
+    for (int ln = 0; ordered && fgets(line, sizeof line, f); ln++) {
         line[strcspn(line, "\r\n")] = 0;
         char *s = line;
         while (*s == ' ' || *s == '\t') s++;
         if (!ln && !strncmp(s, MODS_LIST_MARK, strlen(MODS_LIST_MARK))) ours = true;
-        if (ours && !strncmp(s, "# off: ", 7) && noff < n) snprintf(off[noff++], sizeof *off, "%s", s + 7);
-        if (!*s || *s == '#') continue;
+        bool on = true;
+        if (ours && !strncmp(s, "# off: ", 7)) s += 7, on = false;
+        else if (!*s || *s == '#') continue;
         for (int i = 0; i < n; i++)
-            if (!out[i].on && !strcmp(out[i].name, s)) {
-                out[i].on = true;
-                ordered[k++] = out[i];
+            if (out[i].name[0] && !strcmp(out[i].name, s)) {
+                ordered[k] = out[i];
+                ordered[k++].on = on;
                 out[i].name[0] = 0;  // (taken)
                 break;
             }
     }
     fclose(f);
-    int rest = k;
-    for (int pass = 0; pass < 2 && ordered; pass++)  // new mods (on), then the ones left off
-        for (int i = 0; i < n; i++) {
-            if (!out[i].name[0]) continue;
-            bool known = false;
-            for (int j = 0; j < noff; j++) known |= !strcmp(off[j], out[i].name);
-            bool fresh = ours && !known;
-            if (fresh != !pass) continue;
-            ordered[rest] = out[i];
-            ordered[rest++].on = fresh;
-            out[i].name[0] = 0;
+    for (int i = 0; i < n && ordered; i++)  // the folders the list doesn't mention, by name: new mods load
+        if (out[i].name[0]) {
+            ordered[k] = out[i];
+            ordered[k++].on = ours;
         }
     if (ordered) memcpy(out, ordered, sizeof *out * (size_t)n);
-    free(ordered), free(off);
+    free(ordered);
     return n;
 }
 
@@ -154,10 +148,8 @@ bool mods_save_order(const ModEntry *e, int n, char *err, size_t errsz) {
           "# One mod folder per line, first to last: a file in a later mod wins.\n"
           "# A folder added later, that is neither listed nor marked off, loads after the listed ones.\n",
           f);
-    for (int i = 0; i < n; i++)
-        if (e[i].on) fprintf(f, "%s\n", e[i].name);
-    for (int i = 0; i < n; i++)
-        if (!e[i].on) fprintf(f, "# off: %s\n", e[i].name);
+    for (int i = 0; i < n; i++)  // (a mod that is off keeps its place, for when it is turned on again)
+        fprintf(f, "%s%s\n", e[i].on ? "" : "# off: ", e[i].name);
     bool ok = fclose(f) == 0;
 #ifdef _WIN32
     if (ok) ok = MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) != 0;  // (Windows' rename won't replace a file)

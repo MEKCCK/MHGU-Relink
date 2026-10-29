@@ -202,7 +202,7 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   the mods listed load, in that order. The merged archives are kept in `cache\arcmerge\`.
 - The **Mods** tab of the settings menu does this without editing files: it lists the mod folders, turns each on or
   off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
-  later load too, after the listed ones, until you turn them off). It also compares the mods and lists the ones that change the same game files (and which of
+  later load too, after the listed ones, until you turn them off; a mod turned off keeps its place in the order). It also compares the mods and lists the ones that change the same game files (and which of
   the two is used), and can apply a suggested order, with the mods that change the most files first.
 - exefs patches (`.pchtxt`, `.ips`) are applied when they change data. Patches to game code can't be applied, because
   the code is precompiled; the log lists them.
