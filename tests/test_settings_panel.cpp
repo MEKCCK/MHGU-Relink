@@ -18,6 +18,8 @@ static int requested;
 extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c compares archives with the game's)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
+extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
+extern "C" void ldn_hub_check(const char *, const char *) {}
 extern "C" int overlay_face_position(int semantic) {
     const int p[] = {1, 0, 3, 2};
     return p[semantic];

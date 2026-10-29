@@ -6,6 +6,7 @@
 #include "app_actions.h"
 #include "overlay.h"
 #include "modorder.h"
+#include "net/net.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -224,7 +225,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(hp.village);
     SAME(hp.quests);
 #undef SAME
-    if (strcmp(a.ldn_join, b.ldn_join))
+    if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -426,6 +427,57 @@ void action(std::vector<Row> &rows, const std::string &id, const std::string &na
     r.enabled = enabled;
     rows.push_back(std::move(r));
 }
+// A text setting (a char array of the draft, size bytes) typed on the on-screen keyboard; shown: its row's value
+void text(std::vector<Row> &rows, const char *id, const char *name, char *field, size_t size, const std::string &shown,
+          bool cold) {
+    size_t at = (size_t)(field - (char *)&s.draft);
+    Row r;
+    r.id = id;
+    r.title = tr(name);
+    r.value = shown;
+    r.cold = cold;
+    r.activate = [name, at, size]() {
+        keyboard(tr(name), (char *)&s.draft + at, size - 1, [at, size](const std::string &typed, std::string &error) {
+            Config temp = s.draft;
+            SDL_strlcpy((char *)&temp + at, typed.c_str(), size);
+            char why[512];
+            if (!config_validate(&temp, why, sizeof why)) {
+                error = settings_text(s.draft.language, why);
+                return false;
+            }
+            s.draft = temp;
+            return true;
+        });
+    };
+    rows.push_back(std::move(r));
+}
+// The hub server and key being edited, checked on request (runtime/net/ldn.c); the value: the server's last known
+// state, from the check or from the game's own searches and hubs
+void hub_check(std::vector<Row> &rows) {
+    int ms = -1, hubs = -1;
+    std::string state;
+    switch (ldn_hub_status(s.draft.ldn_server, s.draft.ldn_key, &ms, &hubs)) {
+    case HUB_CHECKING: state = tr("Checking..."); break;
+    case HUB_OFF: state = tr("Off"); break;
+    case HUB_ONLINE:
+        state = hubs >= 0 ? fmt("Online, %d ms, %d hub(s)", ms, hubs) : ms >= 0 ? fmt("Online, %d ms", ms) : tr("Online");
+        break;
+    case HUB_NOT_FOUND: state = tr("Not found"); break;
+    case HUB_UNREACHABLE: state = tr("Unreachable"); break;
+    case HUB_LOST: state = tr("Connection lost"); break;
+    case HUB_NO_ANSWER: state = tr("No answer"); break;
+    case HUB_BUSY: state = tr("Busy"); break;
+    case HUB_VERSION: state = tr("Other version"); break;
+    case HUB_REFUSED: state = tr("Refused"); break;
+    default: state = tr("Not checked"); break;
+    }
+    Row r;
+    r.id = "server.check";
+    r.title = tr("Check hub server");
+    r.value = state;
+    r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
+    rows.push_back(std::move(r));
+}
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
     switch (s.page) {
@@ -467,6 +519,8 @@ void reset_section() {
     case 3:
         c.ldn_port = f.ldn_port;
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
+        SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
+        SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
         c.sync_small_monsters = f.sync_small_monsters;
         c.village_in_hub = f.village_in_hub;
         break;
@@ -752,28 +806,13 @@ std::vector<Row> main_rows() {
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, cold("Port"));
-        {
-            Row row;
-            row.id = "hosts";
-            row.title = tr("Search hosts");
-            row.value = *c.ldn_join ? c.ldn_join : tr("LAN");
-            row.cold = cold("Join");
-            row.activate = []() {
-                keyboard(tr("Search hosts"), c.ldn_join, 255,
-                         [](const std::string &text, std::string &error) {
-                             Config temp = c;
-                             SDL_strlcpy(temp.ldn_join, text.c_str(), sizeof temp.ldn_join);
-                             char why[512];
-                             if (!config_validate(&temp, why, sizeof why)) {
-                                 error = settings_text(c.language, why);
-                                 return false;
-                             }
-                             c = temp;
-                             return true;
-                         });
-            };
-            r.push_back(std::move(row));
-        }
+        text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), cold("Join"));
+        text(r, "server", "Hub server", c.ldn_server, sizeof c.ldn_server,
+             !*c.ldn_server ? std::string(tr("Default")) + (*LDN_DEFAULT_SERVER ? " (" LDN_DEFAULT_SERVER ")" : "")
+                            : c.ldn_server,
+             cold("Server"));
+        text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), cold("Key"));
+        hub_check(r);
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, cold("SyncSmallMonsters"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, cold("VillageQuestsInHub"));
         break;

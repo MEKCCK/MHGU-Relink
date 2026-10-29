@@ -170,6 +170,55 @@ APIs are HLE'd at the function level, so no Switch service (ldn:u, bsd:u) is inv
   on a mutex it owned - forever. Single player rarely times out (a thread or two hung unnoticed); the network
   threads do it constantly. MHGU_DUMP_THREADS dumps now show mutex owners and a heuristic list of callers.
 
+## Internet hubs through a hub server (2026-10-29, branch feat/ldn-server)
+
+Local Play over the internet without port forwarding, for friends (matchmaking key) and strangers (public), through
+our own lobby / relay server (server/, Go, stdlib only; server/README.md: build, run, self-host, Docker, systemd).
+Plan and security notes: docs/research/internet-hubs.md.
+- ini [Multiplayer] Server (empty: LDN_DEFAULT_SERVER in config.h, the public server below;
+  Off: none; host[:port], default port 39510) and Key (matchmaking key; empty: public). Both in the settings menu
+  (Multiplayer page) and live (config_live_ldn; until 2026-10-29 the menu saved them but the game kept the start-up
+  values): Scan / Join read them each time, a hub at each (re)connection to the server. MHGU_LDN_SERVER /
+  MHGU_LDN_KEY env overrides for tests.
+- What the player sees of the server (ldn.c hub_report): a notice at the top of the screen for 7 s (overlay_notice,
+  drawn on ImGui's foreground draw list, so it shows with or without a menu open and takes no input) when the server
+  is not found / unreachable / lost / busy / another version / refuses: hosting ("your hub is not listed online",
+  once per failure, and "listed online again" when it comes back), searching ("only hubs on your local network",
+  every search, but not twice within 10 s), joining (every failure; "the host did not answer" too). Texts are in
+  settings_locale.h (UI_TEXT in ldn.c; tests/test_settings_locale.py checks them). The Multiplayer page has a
+  "Check hub server" row: LIST with the server / key being edited (ldn_hub_check, a thread), showing "Online, N ms,
+  N hub(s)" or the failure; before a check it shows the last state the game's own searches / hub saw for that server.
+- Key -> room: first 16 bytes of SHA-256("MHGURecomp matchmaking key:" + key, spaces around it trimmed), all zero
+  without a key (updater/sha256.c is linked into the game for it). The server lists a hub only for requests with the
+  same room and link PROTO_VERSION; JOIN with another room answers "not found".
+- Host (ldn.c lobby_thread): Create Hub also lists the hub (HOST with its NetworkInfo; UPDATE on every
+  push_info_locked change; PING every 15 s; reconnects after 10 / 30 s). For each INCOMING ticket it opens a second
+  connection (ATTACH), and the spliced socket goes to the same station_thread as a LAN connection. If the ini Port is
+  taken, hosting with a hub server falls back to a system-chosen port (online only).
+- Station: Scan asks the server (in a thread while the LAN is searched); a hub found both ways is joined directly.
+  Connect to a listed hub = JOIN, then the usual F_HELLO handshake over the spliced connection.
+- UDP through the server: datagrams prefixed "MHGR" + pair id + own secret (Link relay_pair / relay_secret); the
+  server passes the rest to the other end. The host sends a bare prefix every second until the station's hellos come
+  through, so the server knows where its end is. TCP fallback as before.
+- Hardening on the way: every NetworkInfo from the network goes through info_sane (counts / sizes in range, strings
+  terminated, node ids = index) before the game sees it; a WELCOME's node number is range-checked (was an out-of-
+  bounds read); F_REFUSE results other than nn::ldn's become ConnectionRejected.
+- Tested on one PC (server on 127.0.0.1, run/ hosts on port 39500, run2/ on 39600 so LAN search can't find it, key
+  "friends"): hub listed, found by Search Hubs only through the server, joined (game packets by UDP through the
+  relay), both see each other in the Hub, the listing follows the player count (1/4 -> 2/4 -> 1/4), a killed station
+  is seen leaving, Disconnect delists the hub, other keys / no key see nothing. Server: `go test ./...` (keys,
+  versions, splice, UDP relay incl. a forged secret, rate and per-IP limits, a host that never attaches). Not tested
+  yet: two PCs / real NAT, a hunt through the relay, more than 2 players. Note the joiner needs the host's hub type
+  unlocked (Hunters' Pub = G Rank).
+- Public server (2026-10-29): morerokk-mhgurecomp-ldnserver.duckdns.org (DuckDNS name -> the VM's public IP), an Oracle
+  Cloud Always Free VM (AMD micro, Oracle Linux 9). /usr/local/bin/mhgurecomp-hubserver (GOOS=linux GOARCH=amd64
+  build), systemd unit mhgurecomp-hubserver (-v, DynamicUser, sandboxed), firewalld + VCN security list open 39510
+  TCP / UDP. Log: `sudo journalctl -u mhgurecomp-hubserver`. Update: copy the new binary in, restorecon, restart.
+  Checked from outside: list, join, splice, UDP relay (scratchpad hubcheck.py <host>), ~4 MB RAM.
+- Two-instance test: scratchpad mp_start.ps1 (-port / -server / -key), hub_route.ps1 (loads the save; -mode host
+  stops at Create Hub settings: A on "Hunters Hub", LEFT to "Wycademy Hub", A, X; -mode join opens Search Hubs),
+  hublist.py <key> (what the server lists). The run\ save starts on the airship: ZL = Multiplayer menu.
+
 ## Event camera pans skippable with A (2026-10-21)
 
 Entering a village / hub area when something is new plays an event (rScheduler, arc/ev/*.arc, path
@@ -574,8 +623,11 @@ affected (its own sleep). Since the Linux port began; a 4-core machine shows it 
    memory if some effect needs it.
 3. A README with build instructions; Linux platform layer (runtime/platform/linux.c). It must also give
    plat_user_dir a home for save data: $XDG_DATA_HOME/MHGURecomp, else ~/.local/share/MHGURecomp (see "Save data").
-4. Internet hubs without port forwarding (friends by code, public list) through our own relay / lobby server, and a
-   security audit of the network code before strangers can join: plan in docs/research/internet-hubs.md.
+4. Internet hubs: the hub server and client exist, and the public server runs (see "Internet hubs through a hub
+   server"). Left: test across two PCs and real NATs, a hunt, 3-4 players; measure the
+   relay's traffic per player; direct UDP by hole punching (relay as fallback); the rest of the security audit
+   (vsock.c, emsync.c, hpscale / villagehub aux messages, IPC / fs boundary) before public hubs are advertised:
+   docs/research/internet-hubs.md.
 5. Android build (arm64, controller only, no touch controls): plan in docs/research/android.md.
 6. Draw distance ([Graphics] DrawDistance, 2026-10-28): town NPCs (uLobbyNpc, the 15 people in Bherna) fade in
    within a distance and out beyond it (uLobbyNpc 0x8c2d9c: squared distance to the object at a global +0x54 against
