@@ -351,6 +351,23 @@ stage from; the Arena's b_m09em062_00 spawn), MHGU_QUICKHUNT=404, then the hunte
 
 Buff icons and the frame rate (2026-10-28): fixed. Reported: with two or more buffs the icon beside a name on the HUD's status plates (yours, the other hunters', the Palicoes') takes turns far too fast at 240 fps. The plates (cUIOStatusPlate / cUIOStatusPlateGuests, update 0x834314) call 0x834d00 once per update for each of their two icon slots ({index, countdown, shown} at plate +0xf0 / +0xfc; tables of 54 and 36 icons at image 0x1839250 / 0x18395b0, tested against the player's buff flags +0x2840..+0x2864, rebuilt from the buff timers each update at 0x49f0xx): the countdown drops by 1 per update and is reloaded with 20, 0.67 s at 30 fps, 0.08 s at 240. Fix (runtime/hle/buffcycle.c, tools/gen.py PATCHES): the decrement (0x834d20) takes step / 2 updates (at most 1) in 1/65536 units and the reload (0x834ef4) is 20 of those. Checked at 240 fps (test save, quest 101, two buffs from their timers: player +0x287c and +0x2880 poked to 3000): the two icons change every 0.667 s, 12 times in 8 s.
 
+KO (stun) and the frame rate (2026-10-29): not found yet. Reported: KO from head hits with blunt weapons much harder at
+high frame rates (a 240 fps player: Alatreon hammer solo, horns broken early, 0-1 KOs). Suspected status decay counted
+per update: it isn't. Status data (dt_tune, rEnemyDtTune; monster +0x75ec -> the resource, entry pointers at +0x98:
+poison, sleep, paralysis, stun, exhaust, mount, blast, ...): per status s16 initial threshold, decay interval (60 fps
+frames), decay amount, duration, increase per KO, max (poison two more). The status block *(monster + 0x1428): stun
+buildup +0x5d76, threshold +0x5d78, decay timer f32 +0x5d7c, KO count +0x5d80, stunned bit 0x10 of +0x5e08, time left
+f32 +0x5e0c. A head hit adds KO x part multiplier / 100 (at least 1) to +0x4d2 (0x29db54); the monster's update applies
+it (0x29a34c -> 0x2a2e18: buildup += it, decay timer reloaded; at the threshold the KO starts, 0x2a2f0c, unless one of
+the u8 counters +0x3a2..+0x3a4 (set to 2 by 0x2c0410 / 0x2c0438 / 0x2c044c, -1 per update at 0x2c957c) or vtable
++0x39c (overridden by 3 monsters: 0x110d8f4, 0x11c266c, 0x11e3298) holds it back at threshold - 1); after a KO the
+threshold rises (0x2a2f80). Decay (0x2a398c, all statuses) and the KO's duration (0x2c9254) count down by the
+monster's step (+0x1c, via 0x272128 / 0x73aa84). Measured (Arena Volvidon, buildup poked to 90): 5 every 10 s at 30 and
+at 120 fps; a KO (pending KO poked) lasts 10.0 s at 30 and 60 fps. Next: MHGU_KOTRACE=1 (runtime/hle/kotrace.c) logs
+every hit's KO, the buildup / threshold, KOs held back at the threshold, KO start / end and decay, for a player's
+30 vs 60 fps hammer session. Debug aid added: the control file's "interpread <lo>:<hi> <file of entries>" (interp.c:
+logs the instructions of the listed functions and their callees that read a guest range).
+
 Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
 need both buttons almost together at high frame rates. The player's input update (0x47ca28, every weapon; called
 from the player update at 0x4a7dec) holds a new attack-button press (the key config's mask from 0x85f93c, | 0x1b0)

@@ -193,6 +193,31 @@ static void control_poll(void) {
                 LOG("[watch] %s: %d functions interpreted\n", arg, n);
                 continue;
             }
+            if (!strcmp(cmd, "interpread")) {  // interpread <lo hex>:<hi hex> <file of hex entries>: as interpwatch, but
+                // logging the instructions that read the range (once each)
+                void interp_read_watch(uint32_t, uint32_t);
+                void interp_add_range(uint32_t, uint32_t);
+                int dispatch_interpret(uint32_t, uint32_t);
+                FILE *fl = fopen(arg2, "r");
+                char fn[32];
+                int n = 0;
+                interp_add_range(0x200000, 0x1800000);
+                while (fl && fgets(fn, sizeof fn, fl)) {
+                    uint32_t e = (uint32_t)strtoul(fn, NULL, 16);
+                    int r = e ? dispatch_interpret(e, e + 4) : -2;
+                    if (r > 0) n++;
+                    else {
+                        extern GuestFn dispatch_lookup(uint32_t);
+                        LOG("[readwatch] %x: not interpreted (%d, lookup %p)\n", e, r, (void *)dispatch_lookup(e));
+                    }
+                }
+                if (!fl) LOG("[readwatch] can't open %s\n", arg2);
+                if (fl) fclose(fl);
+                const char *colon = strchr(arg, ':');
+                interp_read_watch((uint32_t)strtoul(arg, NULL, 16), colon ? (uint32_t)strtoul(colon + 1, NULL, 16) : 0);
+                LOG("[readwatch] %s: %d functions interpreted\n", arg, n);
+                continue;
+            }
             if (!strcmp(cmd, "emact")) {  // emact <group> <index> [mode]: start a monster action (hle/emtrace.c)
                 void emtrace_request(uint32_t, uint32_t, uint32_t);
                 char arg3[16] = "";

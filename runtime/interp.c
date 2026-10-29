@@ -1484,6 +1484,26 @@ static uint32_t code_word(uint32_t pc) {
 volatile uint32_t g_interp_watch;
 static volatile int watch_left;
 void interp_watch(uint32_t addr, int n) { watch_left = n, g_interp_watch = addr; }
+// (debug) A guest range whose reads by interpreted code (LDR / LDRB / LDRH / LDRSH / LDRSB with an immediate offset)
+// are logged, once per instruction ("interpread": host_input.c).
+static volatile uint32_t read_lo, read_hi;
+static uint32_t read_seen[256];
+static int read_nseen;
+void interp_read_watch(uint32_t lo, uint32_t hi) { read_nseen = 0, read_lo = lo, read_hi = hi; }
+static void read_check(const Cpu *c, uint32_t pc, uint32_t w) {
+    uint32_t imm;
+    if ((w & 0x0E100000u) == 0x04100000u && !(w & 0x02000000u)) imm = w & 0xFFFu;  // LDR / LDRB immediate
+    else if ((w & 0x0E5000B0u) == 0x005000B0u) imm = ((w >> 4) & 0xF0u) | (w & 0xFu);  // LDRH / LDRSH / LDRSB imm
+    else return;
+    if ((w >> 28) == 0xF) return;
+    uint32_t rn = (w >> 16) & 15, base = rn == 15 ? pc + 8 : c->r[rn];
+    uint32_t ea = (w & (1u << 24)) ? ((w & (1u << 23)) ? base + imm : base - imm) : base;
+    if (ea < read_lo || ea >= read_hi) return;
+    for (int i = 0; i < read_nseen; i++)
+        if (read_seen[i] == pc) return;
+    if (read_nseen < 256) read_seen[read_nseen++] = pc;
+    LOG("[readwatch] %08x reads %08x (+%x) = %08x (r0 %08x lr %08x)\n", pc, ea, ea - read_lo, LD32(ea & ~3u), c->r[0], c->r[14]);
+}
 
 static void interp_run_inner(Cpu *c);
 void interp_run(Cpu *c) {
@@ -1498,6 +1518,7 @@ static void interp_run_inner(Cpu *c) {
         int link;
         g_ip_pc = g_ip_last = pc;
         uint32_t wa = g_interp_watch, before = wa ? LD32(wa) : 0;
+        if (read_hi) read_check(c, pc, code_word(pc));
         uint32_t next = interp_exec(c, pc, code_word(pc), &link);
         if (wa && LD32(wa) != before && watch_left > 0) {
             watch_left--;
