@@ -505,6 +505,19 @@ static void set_state(_Atomic int *state, int v, uint64_t t_req) {
 // than being skipped at once: most builds take a few ms (SPIR-V and pipeline caches), so the effect appears in its
 // first frame instead of a few frames later, and a slow (uncached) build costs at most the budget once per frame.
 // at_least_ns: a draw that mustn't be skipped waits that long whatever is left of the budget.
+//
+// The quest photo (Quest Rewards / Reward Box screen): at the clear the game copies the scene into its photo buffer
+// once and never again, so a draw skipped then leaves the photo as whatever the buffer's memory held: black (the R9),
+// or other textures' data (RADV, Steam Deck). The game's request (0xa6f97c, hooked in tools/gen.py) opens a window of
+// PHOTO_FRAMES frames in which every draw waits for its build, up to PHOTO_WAIT_NS: the capture and the scene it copies.
+#define PHOTO_FRAMES 8
+#define PHOTO_WAIT_NS 2000000000ll
+static _Atomic uint64_t photo_until;
+void backend_photo_requested(void) {
+    uint64_t f = vk_frame_counter();
+    if (atomic_exchange(&photo_until, f + PHOTO_FRAMES) < f)
+        LOG("[vk] quest photo requested (frame %llu): draws wait for their shaders until it is taken\n", (unsigned long long)f);
+}
 static int64_t wait_budget_ns;
 static uint64_t wait_frame = ~0ull;
 static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
@@ -519,6 +532,8 @@ static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
         if (budget < 0) budget = 0;
     }
     uint64_t f = vk_frame_counter();
+    uint64_t photo = atomic_load(&photo_until);
+    if (photo && f <= photo && at_least_ns < PHOTO_WAIT_NS) at_least_ns = PHOTO_WAIT_NS;
     if (f != wait_frame) wait_frame = f, wait_budget_ns = budget;
     int64_t allowed = wait_budget_ns > at_least_ns ? wait_budget_ns : at_least_ns;
     if (allowed <= 0) return false;

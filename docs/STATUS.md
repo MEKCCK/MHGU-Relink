@@ -503,6 +503,18 @@ queued") and a "[shader] prewarm:" line when it is done. MHGU_QUICKHUNT from the
 crashes (null function in the town's depart path), so the test route walks: scratchpad scripts hstart.ps1 (scratch
 MHGU_HOME / save), to_pub_quest.ps1, to_depart.ps1, to_box.ps1.
 
+Follow-up (2026-10-29): a Steam Deck player (0.10.8, warm program cache but only 14 pipelines in pipelines.bin) saw
+the photo garbled, often: stripes of other textures (wood, clouds, ground) behind an intact reward UI. Same cause, a
+skipped capture draw; RADV hands the never-drawn buffer recycled memory where the R9 gives zeros. The prewarm makes
+programs, not every pipeline, and a dormant program still needs 1-3 ms to load: the 6 ms budget can be gone by the
+capture in a busy clear frame. Reproduced here with MHGU_PIPE_WAIT_MS=0 and no pipelines.bin / vk_pipelines.bin: the
+capture (vs 78515c00 fs 7a2ac600, 960x540) skipped for its program, photo black. Fix: tools/gen.py hooks the request
+(0xa6f9ac, the `mov r1, #1` stored to sScreenShot+0x2c) to backend_photo_requested (exec.c); for PHOTO_FRAMES (8)
+frames after it every draw waits for its build up to PHOTO_WAIT_NS (2 s) instead of being skipped, so the capture and
+the scene it copies are complete (also covers the "half black" case above). Same test with the fix: one "[vk] quest
+photo requested" line, 2 waits (2 ms) at the clear, 0 skips, photo right. The reward screen's own draw of the buffer
+still skips its first frame (redrawn every frame: unseen).
+
 ## Updater (2026-10-28)
 
 `mhgurecomp-updater(.exe)` (updater/, built by `make` beside the game) is a separate program that is started instead

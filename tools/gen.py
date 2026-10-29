@@ -69,6 +69,9 @@ PATCHES = {
     # ... and its speech bubble (0x8c11f8: the same check against its own copy of the table, 0x8c1328, then the bubble
     # above the head, 0x938530)
     ('main', 0x8c127c): (0xED924A00, '{ extern float npc_fade_dist2(float); c->v.f[8] = npc_fade_dist2(LDF(c->r[2])); }'),
+    # Quest photo request (sScreenShot, 0xa6f97c: `mov r1, #1` before the store to +0x2c that asks for the capture): the
+    # renderer doesn't skip draws for building shaders while the one-off capture is drawn (exec.c, PHOTO_FRAMES)
+    ('main', 0xa6f9ac): (0xE3A01001, '{ extern void backend_photo_requested(void); backend_photo_requested(); c->r[1] = 1; }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per

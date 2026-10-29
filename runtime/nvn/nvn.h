@@ -172,6 +172,7 @@ void backend_present(NvnTexture *tex);            // show a texture in the windo
 void backend_texture_destroyed(NvnTexture *tex);
 void backend_pool_written(uint64_t addr, uint64_t size);
 void backend_program_created(const NvnProgram *p);  // nvnProgramSetShaders (the renderer may prepare it ahead of use)
+void backend_photo_requested(void);  // the game asked for its quest photo (tools/gen.py: 0xa6f97c): drawn in the next frames
 void renderer_sync(void);
 uint64_t renderer_fence_seq(void);
 void renderer_wait_seq(uint64_t seq);
