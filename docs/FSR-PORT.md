@@ -138,6 +138,9 @@ Order at the HUD start (scene frames): prep (depth, camera vectors) -> velocity 
   max(2 units, 1%) of the scene's and |mv| <= 64 px.
 - Static draws: on every 4th texel the pass notes per draw "seen" / "differs from the camera by > 0.25 px" (read back
   frames later); 240 checked frames without differing -> left out for 600 frames (camera vectors are right for them).
+  The notes are atomics into device memory, copied to host memory for the CPU after the pass. (Atomics straight
+  into host memory each crossed the bus: in town, 225 draws a frame, the pass took 12 ms of a 15 ms frame on an RTX
+  3090 at 1080p, FSR ran at ~28 fps; with the copy 0.2 ms, ~50 fps in the same hidden test run.)
 - Finish: object vector where valid, else camera. Reactive from the game's moving-object mask (the first render-size
   colour target drawn with the scene depth, when it is not the main scene target; blue/green channel; characters,
   monsters, their shadows): only where the silhouette changed - outside the 3x3 min/max of the previous frame's
