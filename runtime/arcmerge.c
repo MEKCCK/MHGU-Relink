@@ -62,9 +62,11 @@ static bool arc_open(Arc *a, const char *path) {
 
 static void arc_free(Arc *a) { free(a->buf), free(a->e); }
 
-static Ent *arc_find(Arc *a, const char *name) {
+// An entry is its name and type: most archives hold several files of one name (a model, its material, its textures;
+// a sound bank and its requests)
+static Ent *arc_find(Arc *a, const char *name, uint32_t type) {
     for (int i = 0; i < a->n; i++)
-        if (!strcmp(a->e[i].name, name)) return &a->e[i];
+        if (a->e[i].type == type && !strcmp(a->e[i].name, name)) return &a->e[i];
     return NULL;
 }
 
@@ -85,6 +87,7 @@ static uint64_t fnv_file(uint64_t h, const char *path) {
 
 bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, size_t outsz) {
     uint64_t h = 14695981039346656037ull;
+    h = fnv(h, "2", 1);  // (merge version: 0.10.8's matched entries by name alone, its merges aren't to be reused)
     h = fnv_file(fnv_file(fnv_file(h, orig), prev), mod);
     snprintf(out, outsz, "cache/arcmerge/%016llx.arc", (unsigned long long)h);
     struct stat st;
@@ -102,11 +105,11 @@ bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, s
     if (!res) goto done;
     memcpy(res, p.e, sizeof *res * (size_t)p.n);
     for (int i = 0; i < m.n; i++) {
-        Ent *base = arc_find(&o, m.e[i].name);
+        Ent *base = arc_find(&o, m.e[i].name, m.e[i].type);
         if (base && same(base, &m.e[i])) continue;  // (as the game's: not this mod's change)
         Ent *r = NULL;
         for (int k = 0; k < n && !r; k++)
-            if (!strcmp(res[k].name, m.e[i].name)) r = &res[k];
+            if (res[k].type == m.e[i].type && !strcmp(res[k].name, m.e[i].name)) r = &res[k];
         if (r && base && !same(base, r) && !same(r, &m.e[i]))  // (an earlier mod changed it as well)
             LOG("[mods] %s changes %s, which an earlier mod changed too: this one is used. The order the mods "
                 "load in (alphabetical) can be set in mods/load_order.txt\n", mod, m.e[i].name);
@@ -153,7 +156,7 @@ int arc_overlap(const char *orig, const char *a, const char *b, char *name, size
     if (arc_open(&o, orig) && arc_open(&x, a) && arc_open(&y, b) && o.version == x.version && o.version == y.version) {
         n = 0;
         for (int i = 0; i < x.n; i++) {
-            Ent *base = arc_find(&o, x.e[i].name), *other = arc_find(&y, x.e[i].name);
+            Ent *base = arc_find(&o, x.e[i].name, x.e[i].type), *other = arc_find(&y, x.e[i].name, x.e[i].type);
             if (!other || (base && same(base, &x.e[i])) || (base && same(base, other)) || same(&x.e[i], other)) continue;
             if (!n && name) snprintf(name, namesz, "%s", x.e[i].name);
             n++;
