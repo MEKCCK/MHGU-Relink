@@ -153,6 +153,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"The hub server %s did not answer", "El servidor de salas %s no responde"},
         {"Your hub is not listed online. Trying again...", "Tu sala no aparece en línea. Reintentando..."},
         {"Only hubs on your local network are shown.", "Solo se muestran las salas de tu red local."},
+        {"Only hubs on your local network and Join addresses are shown.", "Solo se muestran las salas de tu red local y de las direcciones de conexión."},
         {"Could not join the hub.", "No se pudo entrar en la sala."},
         {"Your hub is listed online again.", "Tu sala vuelve a aparecer en línea."},
         {"The host did not answer through the hub server.", "El anfitrión no respondió a través del servidor de salas."},

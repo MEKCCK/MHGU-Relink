@@ -748,7 +748,9 @@ static void hub_report(int what, const char *srv, int state, int ms, int hubs) {
     int lang = config_language();
     char line[LOBBY_NAME + 128];
     snprintf(line, sizeof line, settings_text(lang, title), srv);
-    overlay_notice(line, settings_text(lang, state == HUB_ONLINE ? UI_TEXT("Your hub is listed online again.") : next[what]));
+    const char *text = state == HUB_ONLINE ? UI_TEXT("Your hub is listed online again.") : next[what];
+    if (what == NOTE_SEARCH && g_config.ldn_join[0]) text = UI_TEXT("Only hubs on your local network and Join addresses are shown.");
+    overlay_notice(line, settings_text(lang, text));
 }
 
 // Host: one thread per created network keeps it listed and opens a connection for each player the server announces.
