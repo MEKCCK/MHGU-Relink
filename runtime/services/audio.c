@@ -1130,7 +1130,6 @@ static void *renderer_tick(void *arg) {
     uint32_t N = r->sample_count > 4096 ? 4096 : r->sample_count;
     int frame_bytes = (int)(N * 2 * sizeof(float));
     uint64_t next = 0;
-    struct timespec now;
     int target = 4 * frame_bytes;  // queued audio to keep ahead of the device: >= 2 device periods
     int dev_bytes = 0;
     if (r->stream) {
@@ -1154,17 +1153,19 @@ static void *renderer_tick(void *arg) {
     int prime = target - dev_bytes / 2;
     bool primed = !r->stream;
     while (!r->quit) {
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        uint64_t t = now.tv_sec * 1000000000ull + now.tv_nsec;
+        uint64_t t = plat_now_ns();
         int q = r->stream ? SDL_GetAudioStreamQueued(r->stream) : 0;
         if (!primed) {
             if (q >= prime) primed = true, next = t;
         } else if (!r->stream || q >= low) {
             if (!next || t > next + 4 * period) next = t;  // (behind after a stall: no burst to make up for it)
-            if (next > t) { struct timespec ts = {0, (long)(next - t)}; nanosleep(&ts, NULL); }
+            plat_sleep_until_ns(next);  // (Windows: a high-resolution timer, not nanosleep's whole milliseconds)
             next += period;
-            if (r->stream && SDL_GetAudioStreamQueued(r->stream) >= high) { r->ts.skips++; continue; }
-        } else {
+            if (r->stream && SDL_GetAudioStreamQueued(r->stream) >= high) {
+                if (r->vt) r->ts.skips++;
+                continue;
+            }
+        } else if (r->vt) {
             r->ts.catch_ups++;
         }
         int64_t queued = r->stream && r->vt ? SDL_GetAudioStreamQueued(r->stream) / (2 * (int)sizeof(float)) : -1;

@@ -908,8 +908,10 @@ MHGU_DUMP_THREADS); svcExitProcess logs its caller too. Look the callers up with
 
 Debug env: `MHGU_TRACE_SVC`, `MHGU_TRACE_IPC`, `MHGU_LOG_FILES`, `MHGU_FNPROF` (hot functions every 5 s),
 `MHGU_FNTRACE=lo-hi[:n]` (calls into a guest address range, with caller and thread), `MHGU_DUMP_THREADS=<s>`
-(every guest thread's wait state after s seconds), `MHGU_HLE_SKIP`, `MHGU_AUDIO_LOG`, `MHGU_AUDIO_TRACE=1` (once a second: audio frames vs game updates, device queue underruns and pacing corrections, aux ring lag, voices in use / playing; plus every voice that ended without playing (SKIP), only silently or cut short; `=2` every voice), `MHGU_MOVIE_TRACE` (calls
-through the movie vtables), `MHGU_HIDDEN=1` (no visible window), `MHGU_REGION=<n>` (GetRegionCode; default 2 Europe), `MHGU_NO_WRITE_WATCH=1` (Windows: no page write tracking, textures hashed as on Linux), `MHGU_INPUT="frame:BUTTON:frames,..."` (scripted
+(every guest thread's wait state after s seconds), `MHGU_HLE_SKIP`, `MHGU_AUDIO_LOG`, `MHGU_AUDIO_TRACE=1` (once a
+second: audio frames vs game updates, device queue underruns and pacing corrections, aux ring lag, voices in use /
+playing; plus every voice that ended without playing (SKIP), only silently or cut short; `=2` every voice),
+`MHGU_MOVIE_TRACE` (calls through the movie vtables), `MHGU_HIDDEN=1` (no visible window), `MHGU_REGION=<n>` (GetRegionCode; default 2 Europe), `MHGU_NO_WRITE_WATCH=1` (Windows: no page write tracking, textures hashed as on Linux), `MHGU_INPUT="frame:BUTTON:frames,..."` (scripted
 controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers every text entry with that text at once),
 `MHGU_CONTROL=ctl.txt` (drive a running game: append lines `A`, `DOWN 8`, `STICK_UP 60`, `shot name` -> shots/name.png;
 `X 6 25` = X for 6 frames from 25 frames on, lines written together form a timed sequence; `fntrace lo hi n`;
