@@ -4,16 +4,17 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting! Mods can cause problems that look like recomp bugs, so please say whether you were using any.
-        If the problem only happens **with mods installed**, report it in the [mod directory](https://github.com/Oddity-git/MHGURecomp-mods/issues/new?template=report-mod-issue.yml) instead, where it can be matched to the mod.
+        Thanks for reporting! Mods can sometimes cause problems that look like recomp bugs, so it helps to say whether you were using any.
+        If a mod looks like the cause, you're welcome to also share it in the [mod directory](https://github.com/Oddity-git/MHGURecomp-mods/issues/new?template=report-mod-issue.yml), which keeps track of mod issues. That's entirely optional, and you can report it here either way.
   - type: dropdown
     id: mods
     attributes:
-      label: Does the problem happen with no mods installed?
-      description: Empty your `mods` folder (or move it away) and try again before answering.
+      label: Were any mods installed?
+      description: Moving your `mods` folder away and trying again is the quickest way to find out.
       options:
-        - "Yes, it happens with no mods installed"
-        - "No, it only happens with mods installed (please use the mod directory form instead)"
+        - "No, it happens with no mods installed"
+        - "Yes, it only happens with mods installed"
+        - "Not sure / haven't tried without mods"
     validations:
       required: true
   - type: textarea
