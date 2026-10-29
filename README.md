@@ -152,7 +152,8 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
   first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about
   340 MB). `pipelines.list` next to the exe lists the shader combinations the common areas use; with the prewarm on,
   they are prepared in the background as well, so entering those areas for the first time no longer shows surfaces
-  briefly black. Only made with MSAA Off; the rest is still prepared the first time it is needed.
+  briefly black. Only made with MSAA Off; the rest is still prepared the first time it is needed. Recording more of
+  it: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md).
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
   with a wiki in front of it; default On), `ComboInputWindow` (Lenient / Strict: how long the game waits for a
