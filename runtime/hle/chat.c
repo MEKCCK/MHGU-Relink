@@ -66,8 +66,9 @@ void chat_save_position(void) {
 }
 
 void chat_open(void) {
-    if (atomic_exchange(&g_composing, true)) return;
+    if (atomic_load(&g_composing)) return;
     textinput_begin("", MAX_CHARS);
+    atomic_store(&g_composing, true);  // (after it: chat_tick never sees the line without its text entry, below)
 }
 
 void chat_close(void) { atomic_store(&g_composing, false); }
@@ -130,6 +131,11 @@ static size_t next_piece(const char *s, const char **rest) {
 
 void chat_tick(Cpu *c) {
     if (!atomic_load(&g_composing)) return;
+    if (!textinput_active()) {  // (ended under it: the game's keyboard calls (swkbd.c Disappear, Finalize) end any entry;
+                                // the box would stay, and the chat key no longer open one)
+        atomic_store(&g_composing, false);
+        return;
+    }
     char text[512];
     int chars, ev = textinput_poll(text, sizeof text, &chars);
     if (ev != TI_ENTER && ev != TI_CANCEL) return;

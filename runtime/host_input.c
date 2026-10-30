@@ -778,10 +778,11 @@ void host_input_update(void) {
     static uint64_t was;
     uint64_t down = b & ~was;
     was = b;
-    if (typing) {  // Plus (Start) confirms, B cancels the entry; the game keeps the rest of the controller. Dropping it
-                   // whole read as a lock-up: with no keyboard on screen (the game's own inline keyboard needs
-                   // nativeNX/arc/swkbd_eu.arc, which is missing), a pad-only player had no way out - B only reopened
-                   // the entry.
+    // Plus (Start) confirms, B cancels the entry; the game keeps the rest of the controller. Dropping it whole read as a
+    // lock-up: with no keyboard on screen (the game's own inline keyboard needs nativeNX/arc/swkbd_eu.arc, which is
+    // missing), a pad-only player had no way out - B only reopened the entry. A line of chat (runtime/hle/chat.c)
+    // leaves them to the game: it is typed on the keyboard, and B mid-hunt is a dodge, not losing the line.
+    if (typing && !chat_active()) {
         if (down & B(BTN_PLUS)) textinput_key(TI_ENTER);
         else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(BTN_B));
