@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <thread>
 #include <filesystem>
@@ -41,8 +42,9 @@ static void press(ImGuiKey key) {
     ImGui::GetIO().AddKeyEvent(key, false);
     idle();
 }
-static ImGuiID id(const char *name) {
-    auto *w = ImGui::FindWindowByName("Settings##main");
+static ImGuiID id(const char *name) {  // (a dropdown's choices are in a window of their own)
+    auto *w = ImGui::FindWindowByName(strncmp(name, "choice.", 7) ? "Settings##main" : "Settings##dropdown");
+    assert(w);
     return ImHashStr("###row", 0, ImHashStr(name, 0, w->ID));
 }
 static void selected(const char *name) {
@@ -154,6 +156,34 @@ int main() {
     selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
+    // The frame rate: Confirm lists the common ones, left / right go a frame at a time
+    confirm();
+    selected("choice.1");  // (60, the one it has)
+    down();
+    confirm();
+    selected("fps");
+    press(ImGuiKey_GamepadDpadRight);
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    assert(config_editable().fps == 91);
+    press(ImGuiKey_Home);
+    selected("fps");
+    confirm();
+    selected("choice.2");  // (91 is none of them: the one below)
+    press(ImGuiKey_GamepadDpadUp);
+    confirm();
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    confirm();
+    assert(config_editable().fps == 60);
+    press(ImGuiKey_Home);
+    confirm();
+    selected("choice.1");
+    back();  // (Back closes the dropdown, nothing changed)
+    selected("fps");
+    assert(!settings_panel_dirty() && opened);
     tab();
     selected("face");
     down();

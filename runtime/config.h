@@ -114,6 +114,7 @@ bool config_valid(const ConfigSetting *s, const Config *c);
 bool config_equal(const ConfigSetting *s, const Config *a, const Config *b);
 bool config_restart_key(const char *key);  // the setting takes effect at the next start
 bool config_range(const char *key, float *min, float *max);  // a number setting's range
+bool config_help(const char *key, char *buf, size_t size);  // what the default ini's comments say of it (the menu's help)
 
 // File values, before environment overrides and automatic resolution are resolved.
 void config_store_loaded(const Config *config);

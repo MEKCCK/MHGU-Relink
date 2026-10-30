@@ -17,13 +17,26 @@ fully clear of the guide.
 
 ## Navigation and editing
 
-L/R cycles six tabs once per press and selects their first field. The tabs are
-Display, Graphics & Audio, Controls, Network, Miscellaneous and App. Miscellaneous
-contains the monster-HP multipliers and quest-specific overrides. D-pad or
+L/R cycles seven tabs once per press and selects their first field. The tabs are
+Display, Graphics & Audio, Controls, Network, Miscellaneous, Mods and App. Miscellaneous
+contains the monster-HP multipliers (under a "Monster HP Scaling" title: a header row,
+skipped by navigation) and quest-specific overrides. D-pad or
 left stick moves between rows; left/right adjusts the selected value. Confirm
-opens a choice list or the host-address text editor. Numeric rows adjust
-directly with left/right; clicking or confirming them never opens a keypad. Each compound setting has
+opens the host-address text editor, or a dropdown on rows with choices (an arrow after
+their value): their choices in a small window of its own under the row (above it when
+there is more room there), the current one marked by a bar. Up/down move in it,
+Confirm picks, Back or a click elsewhere closes it. Numeric rows adjust
+directly with left/right; clicking or confirming them never opens a keypad, except
+the frame rate, whose Confirm opens a dropdown of 30, 60, 90, 120, 150 and 240 (left/right
+still go one frame at a time). Each compound setting has
 one focus stop per editable value. Mouse and physical keyboard remain supported.
+
+Above the guides, a pinned help box explains the row last focused or pointed at with
+the mouse: the comment lines above its key in the default ini (`config.c` DEFAULT_INI,
+`config_help`; wrapped lines joined, "Default: x" last), or a text of the row's own
+(Per-quest overrides, Check hub server). It keeps room for the longest help of the tab,
+so moving between rows doesn't move the guides. The ini's text is English; each line goes
+through `settings_locale.h`, so a translation added there is used.
 
 Back, Escape and F1/chord share a single-level route: cancel an editor, cancel a
 confirmation, or leave the main panel. The panel owns its navigation keys before

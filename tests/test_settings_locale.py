@@ -30,10 +30,10 @@ class SettingsLocaleTest(unittest.TestCase):
 
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
-        # INI keys looked up in the settings table (cold("Mode"), lo("FPS")...) are not shown
-        source = re.sub(r'\b(?:cold|lo|hi)\(' + LITERAL + r'\)', '', source)
+        # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
+        source = re.sub(r'\b(?:ini|cold|lo|hi)\(' + LITERAL + r'\)', '', source)
         unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
-                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Settings##main"}
+                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Settings##main", "Settings##dropdown"}
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
         self.assertFalse(visible - set(keys) - unchanged,

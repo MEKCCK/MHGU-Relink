@@ -26,11 +26,14 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
+    std::string key, help;  // its ini key (config.c g_settings; its help: config_help), or a help text of its own
     bool enabled = true, cold = false, action = false, warn = false;
+    bool header = false, current = false;  // a section title (not a row to select); the choice a dropdown has now
+    bool menu = false;                     // Confirm opens a dropdown of its choices
     std::function<void(int)> adjust;
     std::function<void()> activate;
 };
@@ -44,11 +47,15 @@ struct Origin {
     std::string focus;
     float scroll;
 };
-struct Choice {
+// A row's choices, listed in a window of their own under it (or above it, near the bottom) while it is open: the
+// controller moves in the list, Confirm picks, Back or a click elsewhere closes it
+struct Dropdown {
+    bool open = false, hovered = false, anchored = false;
+    std::string row;  // the row it belongs to
     std::vector<std::string> names;
-    int selected;
+    int selected = 0;
     std::function<void(int)> set;
-    std::string title;
+    ImRect anchor;  // that row on the screen, this frame (draw_rows)
 };
 struct Keyboard {
     std::string title, original, buffer;
@@ -63,9 +70,11 @@ struct State {
     View view = View::Main;
     Command command = Command::None;
     std::string focus, error;
+    std::string help_row, hovered;  // the row whose help shows (the one focused or pointed at last); the one pointed at
+    float help_height = 0;          // room for the longest help of the tab (last frame's)
     std::vector<Target> targets;
     std::vector<Origin> origins;
-    Choice choice;
+    Dropdown dropdown;
     Keyboard keyboard;
     uint64_t quest_keys[HP_QUESTS_MAX] = {}, next_quest_key = 1;
     bool restore_scroll = false;
@@ -259,7 +268,14 @@ void focus(const std::string &id) {
     s.focus = id;
     s.focus_request = true;
 }
+void close_dropdown() {
+    if (!s.dropdown.open)
+        return;
+    s.dropdown.open = false;
+    focus(s.dropdown.row);
+}
 void push(View view, const std::string &first) {
+    s.dropdown.open = false;
     auto *root = ImGui::FindWindowByName("Settings##main");
     s.origins.push_back({s.view, s.focus, root ? root->Scroll.y : 0});
     s.view = view;
@@ -270,6 +286,7 @@ void push(View view, const std::string &first) {
     ImGui::ClearActiveID();
 }
 void pop() {
+    s.dropdown.open = false;
     if (s.origins.empty()) {
         s.view = View::Main;
         s.focus.clear();
@@ -285,6 +302,7 @@ void pop() {
     ImGui::ClearActiveID();
 }
 void first_page(int page) {
+    s.dropdown.open = false;
     s.page = page;
     s.view = View::Main;
     s.origins.clear();
@@ -302,7 +320,9 @@ void discard() {
     s.saved_notice = false;
 }
 void ask_back(bool *open) {
-    if (s.view != View::Main) {
+    if (s.dropdown.open)
+        close_dropdown();
+    else if (s.view != View::Main) {
         if (s.view == View::Move) {
             s.move_position = s.move_start;
             s.position_override = true;
@@ -352,39 +372,48 @@ bool accept_keyboard() {
     pop();
     return true;
 }
+// The row's choices in a dropdown under it; selected: the one it has now (-1: none of them)
 void choices(const Row &row, std::vector<std::string> names, int selected, std::function<void(int)> set) {
-    s.choice = {std::move(names), selected, std::move(set), row.title};
-    push(View::Choices, "choice." + std::to_string(selected));
+    int first = std::clamp(selected, 0, (int)names.size() - 1);
+    s.dropdown = {true, false, false, row.id, std::move(names), selected, std::move(set), {}};
+    focus("choice." + std::to_string(first));
 }
-// What the settings table (config.c g_settings) says of a setting: does it need a restart, a number's range
-bool cold(const char *key) { return config_restart_key(key); }
+// What the settings table (config.c g_settings) says of a setting: does it need a restart, a number's range. ini():
+// the key a row is for (its restart mark and its help)
+const char *ini(const char *key) { return key; }
+bool cold(const char *key) { return key && config_restart_key(key); }
 float lo(const char *key) { float a = 0, b = 0; config_range(key, &a, &b); return a; }
 float hi(const char *key) { float a = 0, b = 0; config_range(key, &a, &b); return b; }
-void add_bool(std::vector<Row> &rows, const char *id, const char *name, int *value, bool cold = false) {
+void keyed(Row &r, const char *key) {
+    r.key = key ? key : "";
+    r.cold = cold(key);
+}
+void add_bool(std::vector<Row> &rows, const char *id, const char *name, int *value, const char *key = nullptr) {
     Row r;
     r.id = id;
     r.title = tr(name);
-    r.cold = cold;
+    keyed(r, key);
     r.value = tr(*value ? "On" : "Off");
     r.adjust = [value](int d) { *value = d > 0 ? 1 : 0; };
     r.activate = [value]() { *value = !*value; };
     rows.push_back(std::move(r));
 }
 void add_choice(std::vector<Row> &rows, const char *id, const char *name, int selected,
-                const std::vector<std::string> &names, std::function<void(int)> set, bool cold = false) {
+                const std::vector<std::string> &names, std::function<void(int)> set, const char *key = nullptr) {
     Row r;
     r.id = id;
     r.title = tr(name);
     r.value = names[std::clamp(selected, 0, (int)names.size() - 1)];
-    r.cold = cold;
+    keyed(r, key);
     r.adjust = [selected, names, set](int d) { set((selected + d + (int)names.size()) % (int)names.size()); };
     Row copy = r;
+    r.menu = true;
     r.activate = [copy, names, selected, set]() { choices(copy, names, selected, set); };
     rows.push_back(std::move(r));
 }
 void add_number(std::vector<Row> &rows, const std::string &id, const std::string &name,
                 std::function<double()> get, std::function<void(double)> set, double low, double high,
-                double step, bool integral, bool cold = false,
+                double step, bool integral, const char *key = nullptr,
                 std::function<bool(double, std::string &)> check = {}) {
     char text[64];
     snprintf(text, sizeof text, integral ? "%.0f" : "%.2f", get());
@@ -392,7 +421,7 @@ void add_number(std::vector<Row> &rows, const std::string &id, const std::string
     r.id = id;
     r.title = name;
     r.value = text;
-    r.cold = cold;
+    keyed(r, key);
     r.adjust = [get, set, low, high, step, check](int d) {
         double v = std::clamp(get() + d * step, low, high);
         std::string error;
@@ -410,16 +439,25 @@ void add_number(std::vector<Row> &rows, const std::string &id, const std::string
     rows.push_back(std::move(r));
 }
 void number(std::vector<Row> &r, const char *id, const char *name, int *p, int low, int high, int step = 1,
-            bool cold = false) {
+            const char *key = nullptr) {
     add_number(
         r, id, tr(name), [p]() { return (double)*p; }, [p](double v) { *p = (int)v; }, low, high, step, true,
-        cold);
+        key);
 }
 void number(std::vector<Row> &r, const std::string &id, const std::string &name, float *p, float low,
-            float high, float step, bool cold = false) {
+            float high, float step, const char *key = nullptr) {
     add_number(
         r, id, name, [p]() { return (double)*p; }, [p](double v) { *p = (float)v; }, low, high, step, false,
-        cold);
+        key);
+}
+// A section's title between the rows (not selectable)
+void header(std::vector<Row> &rows, const std::string &id, const std::string &title) {
+    Row r;
+    r.id = id;
+    r.title = title;
+    r.header = true;
+    r.enabled = false;
+    rows.push_back(std::move(r));
 }
 void action(std::vector<Row> &rows, const std::string &id, const std::string &name, std::function<void()> fn,
             bool enabled = true) {
@@ -433,13 +471,13 @@ void action(std::vector<Row> &rows, const std::string &id, const std::string &na
 }
 // A text setting (a char array of the draft, size bytes) typed on the on-screen keyboard; shown: its row's value
 void text(std::vector<Row> &rows, const char *id, const char *name, char *field, size_t size, const std::string &shown,
-          bool cold) {
+          const char *key) {
     size_t at = (size_t)(field - (char *)&s.draft);
     Row r;
     r.id = id;
     r.title = tr(name);
     r.value = shown;
-    r.cold = cold;
+    keyed(r, key);
     r.activate = [name, at, size]() {
         keyboard(tr(name), (char *)&s.draft + at, size - 1, [at, size](const std::string &typed, std::string &error) {
             Config temp = s.draft;
@@ -478,6 +516,7 @@ void hub_check(std::vector<Row> &rows) {
     Row r;
     r.id = "server.check";
     r.title = tr("Check hub server");
+    r.help = tr("Asks the hub server above whether it answers, with the matchmaking key above: how long it takes, and how many hubs it lists.");
     r.value = state;
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
@@ -487,6 +526,7 @@ void chat_key_row(std::vector<Row> &rows) {
     Row r;
     r.id = "chat.key";
     r.title = tr("Chat key");
+    keyed(r, ini("ChatKey"));
     SDL_Scancode key = SDL_GetScancodeFromName(s.draft.chat_key);
     r.value = key != SDL_SCANCODE_UNKNOWN ? s.draft.chat_key : tr("None");
     if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_in_use((int)key) : nullptr) {
@@ -624,6 +664,7 @@ void conflict_rows(std::vector<Row> &r) {
             Row &row = r.back();
             Row copy = row;
             copy.title = tr("Which mod is used?");
+            row.menu = true;
             row.activate = [copy, a, b]() {
                 choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
                     int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
@@ -669,6 +710,7 @@ void mods_rows(std::vector<Row> &r) {
         };
         row.adjust = [set_on](int d) { set_on(d > 0); };
         Row copy = row;
+        row.menu = true;
         row.activate = [copy, name, on, set_on]() {
             auto move = [name](int d) {
                 int at = mod_index(name), to = at + d;
@@ -677,7 +719,7 @@ void mods_rows(std::vector<Row> &r) {
                     s.saved_notice = false;
                 }
             };
-            choices(copy, {tr(on ? "Turn off" : "Turn on"), tr("Move up"), tr("Move down")}, 0,
+            choices(copy, {tr(on ? "Turn off" : "Turn on"), tr("Move up"), tr("Move down")}, -1,
                     [set_on, move, on](int v) {
                         if (v == 0)
                             set_on(!on);
@@ -735,17 +777,17 @@ std::vector<Row> main_rows() {
     case 0:
         add_choice(
             r, "display.mode", "Window mode", c.display_mode,
-            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, cold("Mode"));
+            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, ini("Mode"));
         add_choice(
             r, "display.auto", "Screen resolution", !c.width ? 0 : 1, {tr("Desktop"), tr("Custom")},
             [](int v) {
                 s.draft.width = v ? 1920 : 0;
                 s.draft.height = v ? 1080 : 0;
             },
-            cold("Resolution"));
+            ini("Resolution"));
         if (c.width) {
-            number(r, "display.width", "Width", &c.width, 320, 16384, 80, cold("Resolution"));
-            number(r, "display.height", "Height", &c.height, 180, 16384, 45, cold("Resolution"));
+            number(r, "display.width", "Width", &c.width, 320, 16384, 80, ini("Resolution"));
+            number(r, "display.height", "Height", &c.height, 180, 16384, 45, ini("Resolution"));
         }
         add_choice(
             r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
@@ -753,31 +795,48 @@ std::vector<Row> main_rows() {
                 s.draft.render_w = v ? 1920 : 0;
                 s.draft.render_h = v ? 1080 : 0;
             },
-            cold("RenderResolution"));
+            ini("RenderResolution"));
         if (c.render_w) {
-            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, cold("RenderResolution"));
-            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, cold("RenderResolution"));
+            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, ini("RenderResolution"));
+            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, ini("RenderResolution"));
         }
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
-            {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, cold("AspectRatio"));
+            {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, ini("AspectRatio"));
         if (c.aspect_ratio)
-            number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, cold("AspectRatio"));
-        number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, cold("FOV"));
+            number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, ini("AspectRatio"));
+        number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
-            [](int v) { c.ui_anchor = v + 1; }, cold("UIAnchor"));
+            [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
         break;
     case 1:
-        number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, cold("FPS"));
-        add_bool(r, "vsync", "VSync", &c.vsync, cold("VSync"));
-        add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, cold("ShaderPrewarm"));
+        number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
+        {  // left / right: one frame per second more or less; Confirm: the common ones
+            static const int presets[] = {30, 60, 90, 120, 150, 240};
+            r.back().menu = true;
+            Row copy = r.back();
+            r.back().activate = [copy]() {
+                std::vector<std::string> names;
+                int now = -1;
+                for (int i = 0; i < (int)std::size(presets); i++) {
+                    names.push_back(std::to_string(presets[i]));
+                    if (presets[i] <= s.draft.fps)
+                        now = presets[i] == s.draft.fps ? i : -1 - i;  // (not one of them: start at the one below)
+                }
+                choices(copy, names, now, [](int v) { s.draft.fps = presets[v]; });
+                if (now < -1)
+                    focus("choice." + std::to_string(-1 - now));
+            };
+        }
+        add_bool(r, "vsync", "VSync", &c.vsync, ini("VSync"));
+        add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, ini("ShaderPrewarm"));
         add_choice(r, "msaa", "MSAA",
                    c.msaa == 8   ? 3
                    : c.msaa == 4 ? 2
                    : c.msaa == 2 ? 1
                                  : 0,
-                   {tr("Off"), "2x", "4x", "8x"}, [](int v) { c.msaa = 1 << v; });
+                   {tr("Off"), "2x", "4x", "8x"}, [](int v) { c.msaa = 1 << v; }, ini("MSAA"));
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -785,7 +844,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        add_bool(r, "fxaa", "FXAA", &c.fxaa);
+        add_bool(r, "fxaa", "FXAA", &c.fxaa, ini("FXAA"));
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -794,7 +853,7 @@ std::vector<Row> main_rows() {
             }
         }
         add_choice(r, "fxaamode", "FXAA mode", c.fxaa_mode, {tr("Original"), "3.11"}, [](int v) { c.fxaa_mode = v; },
-                   cold("FXAAMode"));
+                   ini("FXAAMode"));
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -803,65 +862,69 @@ std::vector<Row> main_rows() {
             }
         }
         number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
-               cold("DrawDistance"));
+               ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, cold("Volume"));
-        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, cold("MuteInBackground"));
-        add_bool(r, "fsr", "FSR", &c.fsr, cold("FSR"));
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.fsr) {
             add_choice(
                 r, "fsr.provider", "Upscaler", c.fsr_upscaler, {"FSR 3.1", "FSR 4"},
-                [](int v) { s.draft.fsr_upscaler = v; }, cold("Upscaler"));
+                [](int v) { s.draft.fsr_upscaler = v; }, ini("Upscaler"));
             add_choice(
                 r, "fsr.quality", "FSR quality", c.fsr_quality,
                 {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},
-                [](int v) { s.draft.fsr_quality = v; }, cold("FSRQuality"));
-            number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, lo("Sharpness"), hi("Sharpness"), .05f, cold("Sharpness"));
-            add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, cold("ObjectMotion"));
-            number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, cold("Reactive"));
-            add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, cold("AnimSurf"));
+                [](int v) { s.draft.fsr_quality = v; }, ini("FSRQuality"));
+            number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, lo("Sharpness"), hi("Sharpness"), .05f, ini("Sharpness"));
+            add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, ini("ObjectMotion"));
+            number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, ini("Reactive"));
+            add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
         }
         break;
     case 2:
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
-                   [](int v) { c.face_buttons = v; }, cold("FaceButtons"));
+                   [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
         add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
                    {tr("Original"), tr("Bottom button"), tr("Right button")},
-                   [](int v) { s.draft.menu_confirm = v; }, cold("MenuConfirm"));
+                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
-                   [](int v) { c.button_icons = v; }, cold("ButtonIcons"));
-        add_bool(r, "background", "Background input", &c.background_input, cold("BackgroundInput"));
+                   [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
+        add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
-                   [](int v) { c.combo_window = v; }, cold("ComboInputWindow"));
-        number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, cold("MouseSensitivity"));
+                   [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
+        number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         chat_key_row(r);
         break;
     case 3:
-        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, cold("Port"));
-        text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), cold("Join"));
+        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
+        text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), ini("Join"));
         text(r, "server", "Hub server", c.ldn_server, sizeof c.ldn_server,
              !*c.ldn_server ? std::string(tr("Default")) + (*LDN_DEFAULT_SERVER ? " (" LDN_DEFAULT_SERVER ")" : "")
                             : c.ldn_server,
-             cold("Server"));
-        text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), cold("Key"));
+             ini("Server"));
+        text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
-        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, cold("SyncSmallMonsters"));
-        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, cold("VillageQuestsInHub"));
+        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
+        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         break;
-    case 4:
+    case 4: {
+        const char *per_quest =
+            tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
+        header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
-                   lo("1Player"), hi("1Player"), .05f, cold("1Player"));
-        number(r, "hp.village", tr("Village HP multiplier"), &c.hp.village, lo("HubHP"), hi("HubHP"), .05f,
-               cold("HubHP"));
+                   lo("1Player"), hi("1Player"), .05f, ini("1Player"));
+        number(r, "hp.village", tr("Village quests in Hub"), &c.hp.village, lo("HubHP"), hi("HubHP"), .05f,
+               ini("HubHP"));
         action(r, "hp.advanced", tr("Per-quest overrides"), []() { s.advanced = !s.advanced; });
+        r.back().help = per_quest;
         if (s.advanced) {
             for (int i = 0; i < c.hp.quests; i++) {
                 auto id = quest_id(i);
                 add_number(
                     r, id, tr("Quest ID"), [i]() { return (double)s.draft.hp.quest[i].quest; },
-                    [i](double v) { s.draft.hp.quest[i].quest = (uint32_t)v; }, 1, 4294967295., 1, true, true,
+                    [i](double v) { s.draft.hp.quest[i].quest = (uint32_t)v; }, 1, 4294967295., 1, true, ini("1Player"),
                     [i](double v, std::string &e) {
                         for (int j = 0; j < s.draft.hp.quests; j++)
                             if (j != i && s.draft.hp.quest[j].quest == (uint32_t)v) {
@@ -872,7 +935,7 @@ std::vector<Row> main_rows() {
                     });
                 for (int n = 0; n < 4; n++)
                     number(r, id + "." + std::to_string(n), std::to_string(n + 1) + " " + tr(n == 0 ? "Hunter" : "Hunters"),
-                           &c.hp.quest[i].scale[n], HP_SCALE_MIN, HP_SCALE_MAX, .05f, true);
+                           &c.hp.quest[i].scale[n], HP_SCALE_MIN, HP_SCALE_MAX, .05f, ini("1Player"));
                 action(r, id + ".remove", tr("Remove quest"), [i]() {
                     for (int j = i; j < s.draft.hp.quests - 1; j++) {
                         s.draft.hp.quest[j] = s.draft.hp.quest[j + 1];
@@ -906,18 +969,22 @@ std::vector<Row> main_rows() {
                 },
                 c.hp.quests < HP_QUESTS_MAX);
         }
+        for (auto &row : r)
+            if (!row.id.compare(0, 6, "quest.") || row.id == "hp.add")
+                row.help = per_quest;
         break;
+    }
     case MODS_PAGE:
         mods_rows(r);
         break;
     case 6:
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
-                   [](int v) { c.language = v; }, cold("Language"));
-        number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, cold("MenuScale"));
-        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, cold("ConfirmExit"));
+                   [](int v) { c.language = v; }, ini("Language"));
+        number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
+        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
-                   [](int v) { c.updates = v; }, cold("Updates"));
-        add_bool(r, "bonus", "Bonus content", &c.bonus_content, cold("BonusContent"));
+                   [](int v) { c.updates = v; }, ini("Updates"));
+        add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
         action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
                []() { s.floating = !s.floating; });
         if (s.floating)
@@ -966,14 +1033,7 @@ std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main)
         return main_rows();
     std::vector<Row> r;
-    if (s.view == View::Choices) {
-        for (int i = 0; i < (int)s.choice.names.size(); i++)
-            action(r, "choice." + std::to_string(i), s.choice.names[i], [i]() {
-                s.choice.set(i);
-                pop();
-            });
-        action(r, "choice.cancel", tr("Cancel"), []() { pop(); });
-    } else if (s.view == View::Keyboard) {
+    if (s.view == View::Keyboard) {
         std::string chars = "1234567890abcdefghijklmnopqrstuvwxyz.:,-_/@";
         if (s.keyboard.upper)
             for (char &c : chars)
@@ -1048,11 +1108,46 @@ std::vector<Row> rows_for_view(bool *open) {
     }
     return r;
 }
+// The open dropdown's choices
+std::vector<Row> dropdown_rows() {
+    std::vector<Row> r;
+    for (int i = 0; i < (int)s.dropdown.names.size(); i++) {
+        action(r, "choice." + std::to_string(i), s.dropdown.names[i], [i]() {
+            auto set = s.dropdown.set;
+            close_dropdown();
+            set(i);
+        });
+        r.back().current = i == s.dropdown.selected;
+    }
+    return r;
+}
+// A row's help: its own, or what the default ini says of its setting (each line looked up in settings_locale.h)
+std::string help_text(const Row &r) {
+    if (!r.help.empty() || r.key.empty())
+        return r.help;
+    static std::vector<std::pair<std::string, std::string>> cache;  // (key, help in English)
+    auto at = std::find_if(cache.begin(), cache.end(), [&](const auto &e) { return e.first == r.key; });
+    if (at == cache.end()) {
+        char buf[2048];
+        cache.emplace_back(r.key, config_help(r.key.c_str(), buf, sizeof buf) ? buf : "");
+        at = cache.end() - 1;
+    }
+    std::string out, line;
+    for (size_t i = 0, j; i < at->second.size(); i = j + 1) {
+        j = at->second.find('\n', i);
+        if (j == std::string::npos)
+            j = at->second.size();
+        line = at->second.substr(i, j - i);
+        out += (out.empty() ? "" : "\n") + std::string(tr(line.c_str()));
+    }
+    return out;
+}
 bool pressed(ImGuiKey key, bool repeat = false) { return ImGui::IsKeyPressed(key, repeat); }
 bool direction(ImGuiKey a, ImGuiKey b, ImGuiKey c) {
     return pressed(a, true) || pressed(b, true) || pressed(c, true);
 }
-void navigate(std::vector<Row> &rows) {
+// list: a dropdown's choices (left / right do nothing there)
+void navigate(std::vector<Row> &rows, bool list = false) {
     if (rows.empty())
         return;
     auto it =
@@ -1072,6 +1167,8 @@ void navigate(std::vector<Row> &rows) {
                                                                                                     : 0;
     if (pressed(ImGuiKey_Tab, true))
         dy = ImGui::GetIO().KeyShift ? -1 : 1;
+    if (list)
+        dx = 0;
     if (dx && it->adjust) {
         it->adjust(dx);
         return;
@@ -1108,10 +1205,12 @@ void navigate(std::vector<Row> &rows) {
         if (next >= 0 && next < (int)rows.size())
             focus(rows[next].id);
     }
+    auto first = std::find_if(rows.begin(), rows.end(), [](const Row &r) { return r.enabled; });
+    auto last = std::find_if(rows.rbegin(), rows.rend(), [](const Row &r) { return r.enabled; });
     if (pressed(ImGuiKey_Home))
-        focus(rows.front().id);
+        focus(first->id);
     if (pressed(ImGuiKey_End))
-        focus(rows.back().id);
+        focus(last->id);
 }
 // Keep ImGui internals at this boundary: rows retain native activation and rendering.
 void own_focus(ImGuiWindow *w, ImGuiID id, const ImRect &rect) {
@@ -1140,16 +1239,31 @@ void own_focus(ImGuiWindow *w, ImGuiID id, const ImRect &rect) {
             ImGui::ScrollToRect(w, rect, ImGuiScrollFlags_KeepVisibleEdgeY);
     }
 }
-void draw_rows(std::vector<Row> &rows) {
+// list: a dropdown's choices; else the view's rows (while a dropdown is open they keep its row marked, the focus being
+// in the dropdown)
+void draw_rows(std::vector<Row> &rows, bool list = false) {
     auto *w = ImGui::GetCurrentWindow();
     float font = ImGui::GetFontSize(), width = ImGui::GetContentRegionAvail().x;
-    bool keyboard_view = s.view == View::Keyboard;
+    bool keyboard_view = s.view == View::Keyboard && !list;
+    bool passive = s.dropdown.open && !list;
     float gap = ImGui::GetStyle().ItemSpacing.x;
     float cell = (width - 9 * gap) / 10;
-    s.targets.clear();
+    if (!list) {
+        s.targets.clear();
+        s.hovered.clear();
+        s.dropdown.anchored = false;
+    }
     std::function<void()> activate;
     for (int i = 0; i < (int)rows.size(); i++) {
         Row &r = rows[i];
+        if (r.header) {  // (a section's title: accent-coloured, a little apart from the rows above it)
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            float h = font * (i ? 2.2f : 1.6f);
+            ImGui::Dummy(ImVec2(width, h));
+            w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .25f, p.y + h - font * 1.35f),
+                                 IM_COL32(111, 216, 255, 255), r.title.c_str());
+            continue;
+        }
         bool grid = keyboard_view && r.id.size() > 4 && r.id[4] >= '0' && r.id[4] <= '9';
         float rw = grid ? cell : width;
         if (grid && i % 10)
@@ -1161,7 +1275,9 @@ void draw_rows(std::vector<Row> &rows) {
         ImGui::PushID(r.id.c_str());
         ImGuiID id = w->GetID("row");
         ImRect rect(p, ImVec2(p.x + rw, p.y + h));
-        bool selected = s.focus == r.id;
+        bool selected = passive ? r.id == s.dropdown.row : s.focus == r.id;
+        if (passive && selected)
+            s.dropdown.anchor = rect, s.dropdown.anchored = true;
         ImGui::PushStyleColor(ImGuiCol_Button,
                               selected ? ImVec4(.16f, .32f, .46f, 1) : ImVec4(.09f, .13f, .19f, 1));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.15f, .28f, .39f, 1));
@@ -1171,18 +1287,29 @@ void draw_rows(std::vector<Row> &rows) {
         bool clicked = ImGui::Button("###row", ImVec2(rw, h));
         ImGui::EndDisabled();
         ImGui::PopStyleColor(4);
+        if (!list && ImGui::IsItemHovered())
+            s.hovered = r.id;
         if (selected && r.enabled) {
-            own_focus(w, id, rect);
+            if (!passive)
+                own_focus(w, id, rect);
             w->DrawList->AddRect(rect.Min, rect.Max, IM_COL32(111, 216, 255, 255), 3.f, 2.f, 0);
         }
         w->DrawList->PushClipRect(rect.Min, rect.Max, true);
         ImU32 ink = r.enabled ? IM_COL32(244, 247, 252, 255) : IM_COL32(132, 145, 160, 255);
         ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255) : ink;
+        if (r.current)  // (the dropdown's choice now: a bar on its left)
+            w->DrawList->AddRectFilled(rect.Min, ImVec2(rect.Min.x + font * .22f, rect.Max.y), IM_COL32(111, 216, 255, 255));
         w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .5f, p.y + (h - label.y) * .5f), ink,
                              r.title.c_str(), nullptr, wrap);
+        float arrow = 0;
+        if (r.menu && r.enabled) {  // (Confirm opens a dropdown: an arrow after the value)
+            arrow = font * 1.1f;
+            ImGui::RenderArrow(w->DrawList, ImVec2(p.x + rw - font * .5f - font * .7f, p.y + (h - font) * .5f), ink,
+                               s.dropdown.open && s.dropdown.row == r.id ? ImGuiDir_Up : ImGuiDir_Down, .7f);
+        }
         if (!r.value.empty()) {
             std::string value = r.value + (r.cold ? " *" : "");
-            float available = rw * .38f - font;
+            float available = rw * .38f - font - arrow;
             if (ImGui::CalcTextSize(value.c_str()).x > available) {
                 do {
                     size_t n = value.size() - 1;
@@ -1193,7 +1320,7 @@ void draw_rows(std::vector<Row> &rows) {
                 value += "...";
             }
             auto sz = ImGui::CalcTextSize(value.c_str());
-            w->DrawList->AddText(ImVec2(p.x + rw - font * .5f - sz.x, p.y + (h - font) * .5f), value_ink,
+            w->DrawList->AddText(ImVec2(p.x + rw - font * .5f - arrow - sz.x, p.y + (h - font) * .5f), value_ink,
                                  value.c_str());
         }
         w->DrawList->PopClipRect();
@@ -1206,6 +1333,35 @@ void draw_rows(std::vector<Row> &rows) {
     }
     if (activate)
         activate();
+}
+// The open dropdown, a window of its own over the menu: under its row, at the right, or above the row when there is
+// more room there; it scrolls when it doesn't fit. scale, base: the menu's (settings_panel)
+void draw_dropdown(std::vector<Row> &options, float scale, float base) {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    const ImGuiStyle &style = ImGui::GetStyle();
+    float font = base * scale, longest = 0;
+    for (const auto &o : options)
+        longest = std::max(longest, ImGui::CalcTextSize(o.title.c_str()).x * scale);
+    const ImRect &a = s.dropdown.anchor;
+    float w = std::clamp(longest + font * 2 + style.WindowPadding.x * 2, a.GetWidth() * .4f, a.GetWidth());
+    float h = options.size() * (font * 2.1f + style.ItemSpacing.y) - style.ItemSpacing.y + style.WindowPadding.y * 2;
+    float below = vp->WorkPos.y + vp->WorkSize.y - a.Max.y, above = a.Min.y - vp->WorkPos.y;
+    bool up = h > below && above > below;
+    h = std::min(h, up ? above : below);
+    ImGui::SetNextWindowPos(ImVec2(a.Max.x - w, up ? a.Min.y - h : a.Max.y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(.05f, .08f, .12f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(.43f, .85f, 1, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.f);
+    ImGui::Begin("Settings##dropdown", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(scale);
+    draw_rows(options, true);
+    s.dropdown.hovered = ImGui::IsWindowHovered();
+    ImGui::End();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
 }
 } // namespace
 void settings_panel_request_close() { request_exit.store(true); }
@@ -1269,6 +1425,8 @@ void settings_panel(bool *open) {
         s.saved_notice = false;
         s.floating = false;
         s.advanced = false;
+        s.dropdown.open = false;
+        s.help_row.clear();
         quest_keys();
         load_mods();
     }
@@ -1316,20 +1474,24 @@ void settings_panel(bool *open) {
     }
     if (request_back.exchange(false) || pressed(ImGuiKey_GamepadFaceRight) || pressed(ImGuiKey_Escape))
         ask_back(open);
+    if (s.dropdown.open && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !s.dropdown.hovered)
+        close_dropdown();  // (a click elsewhere: on a row, it acts as it does with no dropdown open)
     bool pinned_guides = s.view == View::Main;
     bool clipped_body = false;
     auto *window = ImGui::GetCurrentWindow();
+    float spacing = ImGui::GetStyle().ItemSpacing.y;
     GuideLayout guides = guide_layout(ImGui::GetContentRegionAvail().x);
-    s.guide_height = pinned_guides ? guides.height : 0;
+    // pinned above the guides: the help of the row focused or pointed at, with room for the longest of the tab
+    float help_area = pinned_guides && s.help_height > 0 ? s.help_height + spacing * 2 : 0;
+    s.guide_height = pinned_guides ? guides.height + help_area : 0;
     float guide_top =
         std::max(window->Pos.y + window->Size.y - ImGui::GetStyle().WindowPadding.y - guides.height,
                  window->InnerClipRect.Min.y);
+    float help_top = std::max(guide_top - help_area, window->InnerClipRect.Min.y);
     if (pinned_guides)
         ImGui::PushClipRect(
             window->InnerClipRect.Min,
-            ImVec2(window->InnerClipRect.Max.x,
-                   std::max(window->InnerClipRect.Min.y, guide_top - ImGui::GetStyle().ItemSpacing.y)),
-            true);
+            ImVec2(window->InnerClipRect.Max.x, std::max(window->InnerClipRect.Min.y, help_top - spacing)), true);
     if (s.view == View::Main) {
         if (pressed(ImGuiKey_GamepadR1))
             first_page((s.page + 1) % PAGES);
@@ -1396,8 +1558,7 @@ void settings_panel(bool *open) {
                             window->ClipRect.Max, true);
         clipped_body = true;
     } else {
-        const char *title = s.view == View::Choices    ? s.choice.title.c_str()
-                            : s.view == View::Keyboard ? s.keyboard.title.c_str()
+        const char *title = s.view == View::Keyboard ? s.keyboard.title.c_str()
                                                        : tr(s.view == View::Exit      ? "Exit game?"
                                                             : s.view == View::Restart ? "Restart game?"
                                                             : s.view == View::Reset   ? "Reset this tab?"
@@ -1454,11 +1615,35 @@ void settings_panel(bool *open) {
         }
     }
     auto rows = rows_for_view(open);
-    if (s.view != View::Move)
-        navigate(rows);
-    else
+    std::vector<Row> options;  // (a dropdown open: the controller moves in it)
+    if (s.dropdown.open)
+        options = dropdown_rows();
+    if (s.view == View::Move)
         focus("move.accept");
+    else
+        navigate(s.dropdown.open ? options : rows, s.dropdown.open);
     draw_rows(rows);
+    float help_wrap = window->InnerRect.GetWidth() - 2 * ImGui::GetStyle().WindowPadding.x;
+    std::string help;
+    if (s.view == View::Main) {  // (the row moved to, or the one the mouse moved onto)
+        static std::string last_focus;
+        if (s.focus != last_focus)
+            last_focus = s.help_row = s.focus;
+        ImVec2 moved = ImGui::GetIO().MouseDelta;
+        if ((moved.x || moved.y) && !s.hovered.empty())
+            s.help_row = s.hovered;
+        const std::string &id = s.dropdown.open ? s.dropdown.row : s.help_row;
+        float tallest = 0;
+        for (const auto &r : rows) {
+            std::string text = help_text(r);
+            if (!text.empty())
+                tallest = std::max(tallest, ImGui::CalcTextSize(text.c_str(), nullptr, false, help_wrap).y);
+            if (r.id == id)
+                help = text;
+        }
+        s.help_height = tallest;
+    } else
+        s.help_height = 0;
     if (s.command != Command::None) {
         auto cmd = s.command;
         s.command = Command::None;
@@ -1482,15 +1667,29 @@ void settings_panel(bool *open) {
             ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Select a conflict to choose which mod is used. Press Save, then restart."));
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
-        ImGui::Dummy(ImVec2(1, guides.height + ImGui::GetStyle().ItemSpacing.y));
+        ImGui::Dummy(ImVec2(1, guides.height + help_area + ImGui::GetStyle().ItemSpacing.y));
     }
     if (clipped_body)
         ImGui::PopClipRect();
     if (pinned_guides)
         ImGui::PopClipRect();
+    if (pinned_guides && help_area > 0) {
+        auto *draw = window->DrawList;
+        float x0 = window->InnerRect.Min.x, x1 = window->InnerRect.Max.x, pad = ImGui::GetStyle().WindowPadding.x;
+        draw->AddRectFilled(ImVec2(x0, help_top - spacing), ImVec2(x1, guide_top),
+                            ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK);
+        draw->AddLine(ImVec2(x0 + pad, help_top), ImVec2(x1 - pad, help_top), IM_COL32(52, 72, 94, 255));
+        if (!help.empty())
+            draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(x0 + pad, help_top + spacing),
+                          IM_COL32(178, 192, 208, 255), help.c_str(), nullptr, help_wrap);
+    }
     if (pinned_guides && s.view == View::Main)
         draw_guides(window, guides, guide_top);
     ImGui::End();
+    if (s.dropdown.open && s.dropdown.anchored && !options.empty())
+        draw_dropdown(options, scale, base);
+    else
+        s.dropdown.hovered = false;
     ImGui::PopStyleColor(2);
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
