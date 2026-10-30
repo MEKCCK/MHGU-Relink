@@ -461,9 +461,45 @@ static void pick_pad(void) {  // over every controller SDL sees now: those MHGU_
     SDL_free(ids);
 }
 
+// While a line of chat is typed the pointer shows, and dragging the box moves it (kept in chat_box.txt)
+static bool chat_mouse(const SDL_Event *e) {
+    static bool dragging;
+    static float last_x, last_y;
+    if (!chat_active()) {
+        dragging = false;
+        return false;
+    }
+    int w = 0, h = 0;
+    SDL_Window *win = ui_window();
+    if (win) SDL_GetWindowSize(win, &w, &h);
+    if (w <= 0 || h <= 0) return false;
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (e->button.button == SDL_BUTTON_LEFT && chat_in_box(e->button.x / w, e->button.y / h))
+            dragging = true, last_x = e->button.x, last_y = e->button.y;
+        return true;
+    case SDL_EVENT_MOUSE_MOTION:
+        if (dragging) {
+            chat_move((e->motion.x - last_x) / w, (e->motion.y - last_y) / h);
+            last_x = e->motion.x, last_y = e->motion.y;
+        }
+        return true;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (dragging && e->button.button == SDL_BUTTON_LEFT) {
+            dragging = false;
+            chat_save_position();
+        }
+        return true;
+    case SDL_EVENT_MOUSE_WHEEL:
+        return true;
+    }
+    return false;
+}
+
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
+    if (chat_mouse(e)) return;  // (typing a line of chat: the mouse drags its box)
     if (textinput_event(e)) return;  // (typing into a text entry: not controller buttons)
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:
@@ -544,7 +580,7 @@ static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 3276
 
 // Capture or release the mouse as wanted, and add its movement to the right stick.
 static void mouse_update(int *rx, int *ry) {
-    bool want = mouse_grab && !overlay_menu_open();  // (Forge's menu: the pointer is its)
+    bool want = mouse_grab && !overlay_menu_open() && !chat_active();  // (Forge's menu, the chat box: the pointer is theirs)
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -554,6 +590,12 @@ static void mouse_update(int *rx, int *ry) {
             mouse_grab = false, mouse_no_capture = true;
         }
         mouse_dx = mouse_dy = 0;
+    }
+    static bool chat_pointer;  // (full screen hides the pointer: shown while the chat box can be dragged)
+    if (chat_active() != chat_pointer && w) {
+        chat_pointer = chat_active();
+        if (chat_pointer) SDL_ShowCursor();
+        else if (SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN) SDL_HideCursor();
     }
     static uint64_t last;
     static float vx, vy;  // the speed, smoothed: counts a second

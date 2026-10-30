@@ -7,6 +7,7 @@
 #include "chat.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "../hle.h"
@@ -27,6 +28,42 @@
 #define LINE_BYTES     0x67
 
 static atomic_bool g_composing;
+static float g_left = .016f, g_bottom = .74f, g_box[4];  // (above the game's chat window, bottom left)
+static bool g_loaded;
+#define POSITION_FILE "chat_box.txt"  // (beside mhgurecomp.ini)
+
+bool chat_active(void) { return atomic_load(&g_composing); }
+
+void chat_position(float *left, float *bottom) {
+    if (!g_loaded) {
+        g_loaded = true;
+        FILE *f = fopen(POSITION_FILE, "r");
+        float x, y;
+        if (f && fscanf(f, "%f %f", &x, &y) == 2 && x >= 0 && x <= 1 && y >= 0 && y <= 1) g_left = x, g_bottom = y;
+        if (f) fclose(f);
+    }
+    *left = g_left, *bottom = g_bottom;
+}
+
+void chat_set_box(float x0, float y0, float x1, float y1) { g_box[0] = x0, g_box[1] = y0, g_box[2] = x1, g_box[3] = y1; }
+
+bool chat_in_box(float x, float y) { return x >= g_box[0] && x <= g_box[2] && y >= g_box[1] && y <= g_box[3]; }
+
+void chat_move(float dx, float dy) {
+    float w = g_box[2] - g_box[0], h = g_box[3] - g_box[1];
+    g_left += dx, g_bottom += dy;
+    if (g_left > 1 - w) g_left = 1 - w;  // (kept on the screen)
+    if (g_left < 0) g_left = 0;
+    if (g_bottom > 1) g_bottom = 1;
+    if (g_bottom < h) g_bottom = h;
+}
+
+void chat_save_position(void) {
+    FILE *f = fopen(POSITION_FILE, "w");
+    if (!f) return;
+    fprintf(f, "%.4f %.4f\n", g_left, g_bottom);
+    fclose(f);
+}
 
 void chat_open(void) {
     if (atomic_exchange(&g_composing, true)) return;

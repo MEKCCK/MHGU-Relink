@@ -438,7 +438,8 @@ static void draw_notice(uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(at_text.x, at_text.y + ts.y + gap), color(.96f, .97f, 1, 1), text.c_str(), nullptr, wrap);
 }
 
-// The line of chat being typed ("/", runtime/hle/chat.c): bottom left, above the game's chat window, wrapped
+// The line of chat being typed ("/", runtime/hle/chat.c): where the player dragged it (at first above the game's
+// chat window), wrapped
 static void draw_chat(const char *line, uint64_t now, float scale) {
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImFont *font = ImGui::GetFont();
@@ -447,8 +448,12 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     float wrap = std::min(vp->WorkSize.x * .45f, 560 * scale);  // (a long line wraps; the box grows upwards)
     ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, wrap, text.c_str());
     float w = std::max(ts.x, 320 * scale) + bar + 2 * pad, h = ts.y + 2 * pad;
-    float bottom = vp->WorkPos.y + vp->WorkSize.y * .74f;
-    ImVec2 p0(vp->WorkPos.x + 30 * scale, bottom - h), p1(p0.x + w, bottom);
+    float left, low;
+    chat_position(&left, &low);
+    float bottom = vp->WorkPos.y + vp->WorkSize.y * low;
+    ImVec2 p0(vp->WorkPos.x + vp->WorkSize.x * left, bottom - h), p1(p0.x + w, bottom);
+    chat_set_box((p0.x - vp->WorkPos.x) / vp->WorkSize.x, (p0.y - vp->WorkPos.y) / vp->WorkSize.y,
+                 (p1.x - vp->WorkPos.x) / vp->WorkSize.x, (p1.y - vp->WorkPos.y) / vp->WorkSize.y);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     dl->AddRectFilled(p0, p1, IM_COL32(6, 10, 17, 235), 6 * scale);
     dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), IM_COL32(111, 216, 255, 255), 6 * scale, ImDrawFlags_RoundCornersLeft);
