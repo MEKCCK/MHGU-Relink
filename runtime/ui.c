@@ -97,6 +97,15 @@ static void set_fullscreen(bool on) {
 
 void ui_init(void) {
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
+    int sdl = SDL_GetVersion();
+#ifdef MHGU_SDL_BUNDLED
+    extern char g_sdl_choice[];  // (runtime/platform/linux_sdl.c)
+    LOG("[ui] SDL %d.%d.%d, %s; video %s\n", SDL_VERSIONNUM_MAJOR(sdl), SDL_VERSIONNUM_MINOR(sdl),
+        SDL_VERSIONNUM_MICRO(sdl), g_sdl_choice, SDL_GetCurrentVideoDriver());
+#else
+    LOG("[ui] SDL %d.%d.%d; video %s\n", SDL_VERSIONNUM_MAJOR(sdl), SDL_VERSIONNUM_MINOR(sdl), SDL_VERSIONNUM_MICRO(sdl),
+        SDL_GetCurrentVideoDriver());
+#endif
     config_load();
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().

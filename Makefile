@@ -102,7 +102,7 @@ SHADERC_DEPS := $(SHADERC_DIR)/lib/libshaderc_combined.a
 SHADERC_LIBS := $(SHADERC_DEPS)
 endif
 # the libraries' headers, for everything compiled here (the stamps: built before anything includes them)
-LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include)
+LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include -DMHGU_SDL_BUNDLED) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include)
 LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built)
 
 ifeq ($(PLATFORM),windows)
@@ -123,7 +123,7 @@ else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
 GENFLAGS += -fPIC
-RT_SRC   += runtime/platform/linux_glibc.c
+RT_SRC   += runtime/platform/linux_glibc.c $(if $(SDL_DEPS),runtime/platform/linux_sdl.c)
 FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
@@ -280,8 +280,8 @@ $(EXE): $(RT_OBJ) $(AV_DEPS)
 
 # The updater (updater/updater.c): started in place of the game, it installs the latest release and starts the game.
 UPD_OBJ  := $(patsubst updater/%.c,$(O)/updater/%.o,$(wildcard updater/*.c))
-# (the glibc wrappers, as the game's)
-UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),,$(O)/rt/platform/linux_glibc.o)
+# (the glibc wrappers and the newer SDL, as the game's)
+UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),,$(O)/rt/platform/linux_glibc.o $(if $(SDL_DEPS),$(O)/rt/platform/linux_sdl.o))
 $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@

@@ -642,6 +642,12 @@ instead: it needs glibc 2.43 (sqrtf, acosf, asinf, atan2f, log10f).
   (GCC 13; shaderc needs that one). `-Wl,--exclude-libs,ALL`: the executable exports none of the static libraries'
   symbols (SDL, glslang, FFmpeg), so a Vulkan layer with its own glslang or SDL doesn't bind to ours (see the ImGui
   note on IMGUIFLAGS).
+- The newer SDL wins (runtime/platform/linux_sdl.c, the game and the updater): a constructor, before anything uses
+  SDL, opens the system's libSDL3.so.0, and when its SDL_GetVersion is ours or newer sets SDL3_DYNAMIC_API, so the
+  built-in SDL hands every call to it: Arch keeps Arch's SDL (controllers newer than ours) as before. No system SDL3
+  or an older one: ours. MHGU_SDL=bundled keeps ours; a player's own SDL3_DYNAMIC_API is left alone. Logged as
+  `[ui] SDL 3.4.18, the system's (/usr/lib/libSDL3.so.0; built in: 3.4.18); video x11`. Checked in WSL: Arch maps
+  /usr/lib/libSDL3.so.0 (with MHGU_SDL=bundled it doesn't), Ubuntu 24.04 runs the built-in one.
 - The game now needs from the system: libc, libm, libstdc++, libgcc_s and libvulkan.so.1; the updater libc, libm and
   libz (and libcurl, opened at run time). Both at most glibc 2.38. New licenses: licenses/SDL3.txt, shaderc.txt.
 - Tested in WSL: Arch (the game runs to the title, its shaders compiled by the bundled shaderc, 0 failed; the settings
@@ -958,7 +964,7 @@ Debug env: `MHGU_TRACE_SVC`, `MHGU_TRACE_IPC`, `MHGU_LOG_FILES`, `MHGU_FNPROF` (
 (every guest thread's wait state after s seconds), `MHGU_HLE_SKIP`, `MHGU_AUDIO_LOG`, `MHGU_AUDIO_TRACE=1` (once a
 second: audio frames vs game updates, device queue underruns and pacing corrections, aux ring lag, voices in use /
 playing; plus every voice that ended without playing (SKIP), only silently or cut short; `=2` every voice),
-`MHGU_MOVIE_TRACE` (calls through the movie vtables), `MHGU_HIDDEN=1` (no visible window), `MHGU_REGION=<n>` (GetRegionCode; default 2 Europe), `MHGU_NO_WRITE_WATCH=1` (Windows: no page write tracking, textures hashed as on Linux), `MHGU_INPUT="frame:BUTTON:frames,..."` (scripted
+`MHGU_MOVIE_TRACE` (calls through the movie vtables), `MHGU_HIDDEN=1` (no visible window), `MHGU_SDL=bundled` (Linux: the built-in SDL even when the system's is as new), `MHGU_REGION=<n>` (GetRegionCode; default 2 Europe), `MHGU_NO_WRITE_WATCH=1` (Windows: no page write tracking, textures hashed as on Linux), `MHGU_INPUT="frame:BUTTON:frames,..."` (scripted
 controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers every text entry with that text at once),
 `MHGU_CONTROL=ctl.txt` (drive a running game: append lines `A`, `DOWN 8`, `STICK_UP 60`, `shot name` -> shots/name.png;
 `X 6 25` = X for 6 frames from 25 frames on, lines written together form a timed sequence; `fntrace lo hi n`;

@@ -369,7 +369,9 @@ needs:
   Like FFmpeg, the first build downloads pinned releases of SDL3 and shaderc (with glslang and SPIRV-Tools) to
   `third_party/`, checked against their SHA-256, and links them in statically, so the game runs on distributions
   that have neither (Ubuntu 24.04 has no SDL3) and the release needs nothing besides glibc, libstdc++ and the
-  Vulkan loader. SDL still loads X11 / Wayland and the audio server from the system when it runs. That takes a few
+  Vulkan loader. SDL still loads X11 / Wayland and the audio server from the system when it runs, and when the system
+  has an SDL3 of the same version or newer (new controllers, fixes), the game uses that one instead: `log.txt` says
+  which (`[ui] SDL ...`), and `MHGU_SDL=bundled` keeps the built-in one. That takes a few
   minutes, once; the build stops if SDL didn't find one of those (`SDL3_NEED`). `make SDL3=system SHADERC=system`
   links the system's `libSDL3.so.0` / `libshaderc_shared.so.1` instead, as a distribution package would;
 - `vk_mem_alloc.h` (3.4.0) in `third_party/vk_mem_alloc/`, which the Makefile has on the include path (a
