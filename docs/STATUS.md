@@ -218,6 +218,13 @@ Plan and security notes: docs/research/internet-hubs.md.
 - Two-instance test: scratchpad mp_start.ps1 (-port / -server / -key), hub_route.ps1 (loads the save; -mode host
   stops at Create Hub settings: A on "Hunters Hub", LEFT to "Wycademy Hub", A, X; -mode join opens Search Hubs),
   hublist.py <key> (what the server lists). The run\ save starts on the airship: ZL = Multiplayer menu.
+- How many hubs Search Hubs shows (2026-10-30): the game asks Scan for up to 24 (the scan log line says "room for
+  N") but its Join Hub list shows at most 18: 6 a page, 3 pages, RIGHT past the last wraps to the first; the 19th
+  on are never seen. Measured with a stand-in server (scratchpad mp/fakehub.py: HOST / LIST on 127.0.0.1, LIST
+  answers 20 copies of a real hosted hub, each with its own session id, bssid and hunter name "Hunter NN") and two
+  instances on copies of testsave\save_0 (ports 39500 / 39600, test key): pages 1-3 held Hunter 01-18. So the order
+  matters: LAN / Join hubs first (ldn_scan), then the server's (server.go list: hubs with a free slot first, then
+  the fuller, then the newest; ListMax 24).
 
 ## Event camera pans skippable with A (2026-10-21)
 

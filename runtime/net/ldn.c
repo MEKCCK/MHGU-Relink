@@ -1471,11 +1471,12 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
         if (k < max) memcpy((uint8_t *)G2H(out) + (size_t)k++ * NETINFO_SIZE, infos[i], NETINFO_SIZE);
     }
     if (pcount) ST32(pcount, k);
-    static int last = -1, last_online = -1;
+    static int last = -1, last_online = -1, last_max = -1;
     int listed = asked && online.state == HUB_ONLINE ? online.n : 0;
-    if (k != last || listed != last_online) {
-        LOG("[ldn] scan: %d network(s) found (%d listed on the hub server)\n", k, listed);
-        last = k, last_online = listed;
+    if (nfound != last || listed != last_online || max != last_max) {
+        LOG("[ldn] scan: %d network(s) found (%d listed on the hub server), %d given to the game (room for %d)\n",
+            nfound, listed, k, max);
+        last = nfound, last_online = listed, last_max = max;
     }
     RET(0);
 }
