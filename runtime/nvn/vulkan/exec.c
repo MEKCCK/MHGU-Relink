@@ -852,7 +852,7 @@ static inline bool ss_need(uint32_t bit, bool same) {
 }
 
 // ---- (debug) pass dumps: MHGU_CONTROL "dump" saves colour target 0 of every render pass of the next frame as
-// shots/pass_NNN_<format>_<w>x<h>.png (RGBA8 / BGRA8 / RGBA16F / B10G11R11; HDR values clamped to [0, 1] and also
+// shots/pass_NNN_<format>_<w>x<h>.png (RGBA8 / BGRA8 / RGBA16F / RGBA16 / B10G11R11; HDR values clamped to [0, 1] and also
 // listed as the max in the log line).
 volatile int g_dump_active;  // (device.c: set for one frame)
 static char dump_draw_info[4096];  // the pass's last draw: program and fragment textures
@@ -921,7 +921,7 @@ static void dump_pass(void) {
     switch (b->format) {
     case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB: case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB:
     case VK_FORMAT_B10G11R11_UFLOAT_PACK32: bpp = 4; break;
-    case VK_FORMAT_R16G16B16A16_SFLOAT: bpp = 8; break;
+    case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R16G16B16A16_UNORM: bpp = 8; break;
     default:
         LOG("[dump] pass %03d: format %d %ux%u (not dumped, %llu draws)\n", g_dump_no++, b->format, w, h, (unsigned long long)draws);
         return;
@@ -942,6 +942,9 @@ static void dump_pass(void) {
         if (b->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
             const uint16_t *q = (const uint16_t *)s;
             for (int k = 0; k < 4; k++) f[k] = half_to_float(q[k]);
+        } else if (b->format == VK_FORMAT_R16G16B16A16_UNORM) {
+            const uint16_t *q = (const uint16_t *)s;
+            for (int k = 0; k < 4; k++) f[k] = q[k] / 65535.0f;
         } else if (b->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32) {
             uint32_t v;
             memcpy(&v, s, 4);
@@ -1225,6 +1228,7 @@ static void begin_pass(void) {
         NvnTexture *t = st.rt.color[i];
         pass_color[i] = VK_FORMAT_UNDEFINED;
         if (!t) continue;
+        vk_rt_widen(t, vk_wide_rt_on() && !vk_fsr_input(t));  // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM)
         if (g_fsr_on) {  // FSR: from the start of the HUD on, an output-size stand-in (fsr.c)
             NvnTexture *s = vk_fsr_map(t, false);
             if (s != t) pass_sx = (float)s->width / (float)t->width, pass_sy = (float)s->height / (float)t->height, t = s;
@@ -3697,7 +3701,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) || b->astc_bw) return;
     bool array = b->layers > 1 && b->depth == 1;
     uint32_t hb = ((uint32_t)rg[4] + fi->bh - 1) / fi->bh, wb = ((uint32_t)rg[3] + fi->bw - 1) / fi->bw;
-    uint32_t out_bpb = fi->bpb == 3 ? 4 : fi->bpb;
+    uint32_t out_bpb = b->wide ? 8 : fi->bpb == 3 ? 4 : fi->bpb;  // (wide: RGBA8 texels widened to RGBA16)
     uint32_t nz = (uint32_t)rg[5];
     if (!guest_range_ok(src, img * nz)) return;
     VkCommandBuffer cb = vk_cmd();
@@ -3709,6 +3713,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
             const uint8_t *sr = (const uint8_t *)G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row));
             uint8_t *dr = (uint8_t *)s.ptr + ((uint64_t)z * hb + y) * out_row;
             if (out_bpb == fi->bpb) memcpy(dr, sr, out_row);
+            else if (b->wide) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = (uint16_t)(sr[x] * 257);
             else for (uint32_t x = 0; x < wb; x++) { memcpy(dr + x * 4, sr + x * 3, 3); dr[x * 4 + 3] = 255; }
         }
     VkBufferImageCopy c = {.bufferOffset = s.off, .bufferRowLength = wb * fi->bw, .bufferImageHeight = hb * fi->bh,
@@ -3738,7 +3743,7 @@ static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
     if (!guest_range_ok(dst, total)) return;
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
-    VkSpan out = vk_readback(total);
+    VkSpan out = vk_readback(b->wide ? total * 2 : total);  // (wide: RGBA16 read back, narrowed to the guest's RGBA8)
     VkBufferImageCopy c = {.bufferOffset = out.off, .bufferRowLength = (uint32_t)(row / fi->bpb) * fi->bw,
                            .bufferImageHeight = (uint32_t)(img / row) * fi->bh,
                            .imageSubresource = {b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect,
@@ -3748,7 +3753,10 @@ static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
     vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &c);
     renderer_submit();  // the CPU may read the result right after the fence
     vk_wait_seq(submit_seq);
-    memcpy(G2H((uint32_t)dst), out.ptr, total);
+    if (b->wide) {
+        uint8_t *d = (uint8_t *)G2H((uint32_t)dst);
+        for (uint64_t i = 0; i < total; i++) d[i] = (uint8_t)((((const uint16_t *)out.ptr)[i] + 128) / 257);
+    } else memcpy(G2H((uint32_t)dst), out.ptr, total);
 }
 
 static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags) {

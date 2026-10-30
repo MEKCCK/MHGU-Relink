@@ -1590,6 +1590,8 @@ NvnTexture *vk_fsr_map(NvnTexture *t, bool depth) {
     return t;
 }
 
+bool vk_fsr_input(NvnTexture *t) { return g_fsr_on && t == g_h; }
+
 NvnTexture *vk_fsr_present(NvnTexture *t) {
     NvnTexture *show = t;
     if (redirect) {

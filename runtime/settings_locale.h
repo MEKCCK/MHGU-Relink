@@ -135,6 +135,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Aspect ratio (0 = Auto)", "Proporción (0 = Auto)"},
         {"Field of view", "Campo de visión"},
         {"Draw distance", "Distancia de dibujado"},
+        {"Smooth gradients", "Degradados suaves"},
         {"No limit", "Sin límite"},
         {"HUD anchor", "Posición del HUD"},
         {"Edges", "Bordes"},
