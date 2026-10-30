@@ -205,6 +205,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(draw_distance);
     SAME(msaa);
     SAME(fxaa);
+    SAME(fxaa_mode);
     SAME(face_buttons);
     SAME(ldn_port);
     SAME(sync_small_monsters);
@@ -525,6 +526,7 @@ void reset_section() {
         c.draw_distance = f.draw_distance;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
+        c.fxaa_mode = f.fxaa_mode;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         break;
@@ -784,6 +786,15 @@ std::vector<Row> main_rows() {
             }
         }
         add_bool(r, "fxaa", "FXAA", &c.fxaa);
+        if (g_config.fsr) {
+            r.back().cold = true;
+            if (c.fsr) {
+                r.back().enabled = false;
+                r.back().value = tr("Off (FSR)");
+            }
+        }
+        add_choice(r, "fxaamode", "FXAA mode", c.fxaa_mode, {tr("Original"), "3.11"}, [](int v) { c.fxaa_mode = v; },
+                   cold("FXAAMode"));
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {

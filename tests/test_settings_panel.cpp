@@ -274,7 +274,7 @@ int main() {
     tab();
     selected("display.mode");
     tab();
-    down(6);  // (fps, vsync, prewarm, msaa, fxaa, drawdist)
+    down(7);  // (fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist)
     selected("volume");
     confirm();
     selected("volume");
@@ -309,7 +309,7 @@ int main() {
     assert(!settings_panel_dirty());
     assert(config_editable().volume == 99);
     press(ImGuiKey_Home);
-    down(6);
+    down(7);
     selected("volume");
     press(ImGuiKey_GamepadDpadRight);
     back();
@@ -445,7 +445,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("fps");
-    down(8);  // (vsync, prewarm, msaa, fxaa, drawdist, volume, mutebg, fsr)
+    down(9);  // (vsync, prewarm, msaa, fxaa, fxaamode, drawdist, volume, mutebg, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());
