@@ -28,7 +28,8 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 
 ## Requirements
 
-- OS: Windows 10/11 64-bit, or Linux
+- OS: Windows 10/11 64-bit, or Linux 64-bit with glibc 2.39 or newer (Ubuntu 24.04, Linux Mint 22, Debian 13,
+  SteamOS 3.7, Arch, Fedora 40 or newer) and a Vulkan driver
 - CPU: Any CPU from 2014 or newer (needs AVX2 support)
 - GPU: Any GPU from 2016 or newer (needs Vulkan 1.2 support), and at least 1GB of VRAM
 - RAM: 4GB
@@ -305,6 +306,7 @@ Useful targets and options:
 - `make clean`: removes the compiled files (`obj\` and the program files in `build\`). It keeps `build\data`.
 - `GENARCH=-march=x86-64-v2`: compiles the game code without AVX2, for older CPUs. Untested.
 - `FFMPEG=system`: links the system's FFmpeg libraries instead of building them (see below).
+- Linux: `SDL3=system`, `SHADERC=system`: link the system's SDL3 / shaderc instead of building them (see Linux).
 
 ### FFmpeg
 
@@ -360,9 +362,16 @@ The Windows build runs under Proton / Wine. A native Linux build is supported as
 x86_64 with clang under Wayland (NVIDIA). Besides `make`, `git`, `clang`, `lld` and Python 3.10 or newer it
 needs:
 
-- SDL3, the Vulkan loader and headers and shaderc — the same libraries the MSYS2 list above installs, under your
-  distro's names — plus `curl` and optionally `nasm` for building FFmpeg (see "FFmpeg" above; no FFmpeg package
-  needed);
+- the Vulkan loader and headers, plus `curl` and optionally `nasm` for building FFmpeg (see "FFmpeg" above; no
+  FFmpeg package needed);
+- `cmake` and the development files of what SDL uses on a desktop: X11 (with Xcursor, Xext, Xfixes, Xi, Xrandr,
+  Xss, Xtst), Wayland (wayland-protocols, libxkbcommon, libdecor), PipeWire, PulseAudio, ALSA, libudev and D-Bus.
+  Like FFmpeg, the first build downloads pinned releases of SDL3 and shaderc (with glslang and SPIRV-Tools) to
+  `third_party/`, checked against their SHA-256, and links them in statically, so the game runs on distributions
+  that have neither (Ubuntu 24.04 has no SDL3) and the release needs nothing besides glibc, libstdc++ and the
+  Vulkan loader. SDL still loads X11 / Wayland and the audio server from the system when it runs. That takes a few
+  minutes, once; the build stops if SDL didn't find one of those (`SDL3_NEED`). `make SDL3=system SHADERC=system`
+  links the system's `libSDL3.so.0` / `libshaderc_shared.so.1` instead, as a distribution package would;
 - `vk_mem_alloc.h` (3.4.0) in `third_party/vk_mem_alloc/`, which the Makefile has on the include path (a
   distro package that installs the header where the compiler looks by default works just as well);
 - `zenity` or `kdialog` for the dialog on a fatal error. Without either, the message goes to the terminal and
@@ -387,7 +396,9 @@ From Windows, the Linux build can be made in WSL with Arch Linux (`wsl --install
 Windows checkout, into its own folders so the Windows build is left alone:
 
 ```bash
-pacman -S --needed make git clang lld python sdl3 vulkan-headers vulkan-icd-loader shaderc nasm vulkan-swrast
+pacman -Syu --needed make git clang lld python cmake vulkan-headers vulkan-icd-loader nasm vulkan-swrast \
+    libx11 libxcursor libxext libxfixes libxi libxrandr libxss libxtst wayland wayland-protocols libxkbcommon \
+    libdecor pipewire libpulse alsa-lib systemd-libs dbus
 mkdir -p /usr/local/include/vma && cp /mnt/c/msys64/ucrt64/include/vma/vk_mem_alloc.h /usr/local/include/vma/
 make -j16 B=build-linux O=obj-linux     # in the repository, under /mnt/c/...
 ```

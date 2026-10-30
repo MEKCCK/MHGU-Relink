@@ -598,8 +598,8 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
   version.
 - HTTPS: WinHTTP on Windows; on Linux the system's libcurl loaded with dlopen (libcurl.so.4 /
   libcurl-gnutls.so.4), retried with the usual CA bundle paths when a runtime's libcurl can't find its own. Archives:
-  zlib (static on Windows, libz.so.1 on Linux). The updater needs glibc 2.34 at most and is checked like the game
-  (GLIBC_CHECK). Window: SDL3 with SDL_RenderDebugText, shown only when there is something to say (after 0.7 s of
+  zlib (static on Windows, libz.so.1 on Linux). On Linux SDL3 is linked in (the Makefile's SDL3), so the updater
+  needs glibc 2.38 at most, checked like the game (GLIBC_CHECK). Window: SDL3 with SDL_RenderDebugText, shown only when there is something to say (after 0.7 s of
   checking, or a question); keyboard, mouse and controller (South: choose, East / Back: not now). Without a display it
   installs in Auto mode and doesn't ask in Ask mode.
 - Tested 2026-10-28 on throwaway copies:
@@ -624,6 +624,29 @@ sleeping thread did this: the 60 Hz vblank timer (hle/vi.c), svcSleepThread (eve
 Play. Fix: sleep until 200 us before the deadline, then yield as designed. Measured (WSL, 200 sleeps of 5 ms): before
 60% of a core (0.5 s sys a second), after 2%, still on time (1 us late on average, 42 us at worst). Windows was not
 affected (its own sleep). Since the Linux port began; a 4-core machine shows it the most.
+
+## Fixed (2026-10-30): the Linux release needed the system's SDL3 and shaderc
+
+Reported (Linux Mint 22.3): `./mhgurecomp: error while loading shared libraries: libSDL3.so.0`, before log.txt. The
+Linux build linked libSDL3.so.0 and libshaderc_shared.so.1 from the system; Ubuntu 24.04 (Mint 22's base) has no
+SDL3 package at all, and shaderc (`libshaderc1`) isn't installed by default. Arch's own SDL3 could not be shipped
+instead: it needs glibc 2.43 (sqrtf, acosf, asinf, atan2f, log10f).
+- The Makefile now builds SDL 3.4.18 and shaderc 2026.4 (glslang 16.6.0, SPIRV-Tools / SPIRV-Headers 1.4.363.0: the
+  versions MSYS2 has for the Windows build) from their release sources like FFmpeg (third_party/sdl3, third_party/
+  shaderc, checked against their SHA-256; cmake, into obj/) and links them in statically: the game and the updater.
+  SDL still loads X11, Wayland, libdecor, PipeWire / PulseAudio / ALSA, udev and D-Bus from the system when it runs;
+  the build stops when SDL's configure didn't find one of those (SDL3_NEED). `SDL3=system` / `SHADERC=system` link
+  the system's instead. Windows is unchanged (MSYS2's DLLs).
+- The glibc wrappers moved to runtime/platform/linux_glibc.c (also linked into the updater), with asinf and log10f
+  added; GLIBC_MAX went from 2.41 to 2.39 (Ubuntu 24.04), and the check now also holds libstdc++ to GLIBCXX_3.4.32
+  (GCC 13; shaderc needs that one). `-Wl,--exclude-libs,ALL`: the executable exports none of the static libraries'
+  symbols (SDL, glslang, FFmpeg), so a Vulkan layer with its own glslang or SDL doesn't bind to ours (see the ImGui
+  note on IMGUIFLAGS).
+- The game now needs from the system: libc, libm, libstdc++, libgcc_s and libvulkan.so.1; the updater libc, libm and
+  libz (and libcurl, opened at run time). Both at most glibc 2.38. New licenses: licenses/SDL3.txt, shaderc.txt.
+- Tested in WSL: Arch (the game runs to the title, its shaders compiled by the bundled shaderc, 0 failed; the settings
+  tests pass) and an Ubuntu 24.04.5 root file system with Ubuntu's own Mesa, where 0.11.3 stops with that same error.
+  Not tested on a real Mint desktop or with a real GPU on Linux.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

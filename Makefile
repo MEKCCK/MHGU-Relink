@@ -57,36 +57,90 @@ AV_DEPS  := $(FFMPEG_LIBS)
 AV_LIBS  :=
 endif
 
+# SDL3 and shaderc (Linux): by default static builds of pinned releases, made here from their sources like FFmpeg
+# (downloaded once to third_party/, checked against their SHA-256), the versions MSYS2 has for the Windows build. Not
+# every distribution has them (Ubuntu 24.04 / Linux Mint 22: no SDL3), and a distribution's own can need a newer glibc
+# than GLIBC_MAX. SDL still loads X11, Wayland, libdecor, PipeWire / PulseAudio / ALSA, udev... from the system when
+# it runs, as its shared library does. Needs cmake. SDL3=system / SHADERC=system link the system's libSDL3.so.0 /
+# libshaderc_shared.so.1 instead. (Windows: always MSYS2's, their DLLs bundled.)
+SDL3          ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
+SHADERC       ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
+SDL3_VER      := 3.4.18
+SDL3_SHA256   := 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
+SDL3_TAR      := third_party/sdl3/SDL3-$(SDL3_VER).tar.gz
+SDL3_DIR      := $(O)/sdl3-$(SDL3_VER)
+SDL3_CONF     := -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+# (what a player's desktop needs: the configure must find these, or SDL would quietly build without them)
+SDL3_NEED     := X11 WAYLAND WAYLAND_LIBDECOR PIPEWIRE PULSEAUDIO ALSA HIDAPI LIBUDEV DBUS
+# shaderc with the glslang and SPIRV-Tools / SPIRV-Headers releases it was released with, in one static library
+SHADERC_VER   := 2026.4
+GLSLANG_VER   := 16.6.0
+SPIRV_VER     := 1.4.363.0
+SHADERC_PARTS := shaderc-$(SHADERC_VER) glslang-$(GLSLANG_VER) SPIRV-Tools-$(SPIRV_VER) SPIRV-Headers-$(SPIRV_VER)
+SHADERC_TARS  := $(patsubst %,third_party/shaderc/%.tar.gz,$(SHADERC_PARTS))
+SHADERC_DIR   := $(O)/shaderc-$(SHADERC_VER)
+SHADERC_CONF  := -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
+                 -DSPIRV_SKIP_EXECUTABLES=ON -DSPIRV_SKIP_TESTS=ON -DSPIRV_WERROR=OFF -DSPIRV_TOOLS_BUILD_STATIC=ON \
+                 -DENABLE_GLSLANG_BINARIES=OFF -DGLSLANG_TESTS=OFF
+# (MAKEFLAGS=: cmake's own make runs on its own, not in this one's jobs)
+CMAKE_BUILD   = cd $(1) && MAKEFLAGS= cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=$(CC) \
+                    -DCMAKE_CXX_COMPILER=$(CXX) -DCMAKE_POSITION_INDEPENDENT_CODE=ON $(2) > configure.log 2>&1 \
+                    || { tail -20 configure.log; exit 1; }; \
+                MAKEFLAGS= cmake --build build --parallel $$(nproc) $(3) > build.log 2>&1 || { tail -30 build.log; exit 1; }
+ifeq ($(SDL3),system)
+SDL_DEPS :=
+SDL_LIBS := -lSDL3
+else
+SDL_DEPS := $(SDL3_DIR)/lib/libSDL3.a
+SDL_LIBS := $(SDL_DEPS) -pthread -lm
+endif
+ifeq ($(SHADERC),system)
+SHADERC_DEPS :=
+SHADERC_LIBS := -lshaderc_shared
+else
+SHADERC_DEPS := $(SHADERC_DIR)/lib/libshaderc_combined.a
+SHADERC_LIBS := $(SHADERC_DEPS)
+endif
+# the libraries' headers, for everything compiled here (the stamps: built before anything includes them)
+LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include)
+LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built)
+
 ifeq ($(PLATFORM),windows)
 EXE      := $(B)/mhgurecomp.exe
 OSFLAGS  := -D_FILE_OFFSET_BITS=64 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_RAND_S -D_POSIX_THREAD_SAFE_FUNCTIONS
 GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
-LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 -lSDL3 $(AV_LIBS) -lvulkan-1 -lshaderc_shared -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
+LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
             -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
-UPD_LDFLAGS := -fuse-ld=lld -mwindows -lSDL3 -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
+UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
 GENFLAGS += -fPIC
+RT_SRC   += runtime/platform/linux_glibc.c
 FFMPEG_CONF += --enable-pic
-LDFLAGS  := -fuse-ld=lld -rdynamic -lSDL3 $(AV_LIBS) -lvulkan -lshaderc_shared -lpthread -ldl -lm
-# The executable starts with glibc GLIBC_MAX or later (SteamOS, Debian 13): calls to the functions newer glibc versions
-# gave a new symbol version go to the old one (runtime/platform/linux.c), and the link checks that nothing newer is left.
-GLIBC_MAX  := 2.41
-GLIBC_WRAP := sqrtf acosf atan2f sinh cosh
-LDFLAGS  += $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
+# (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
+# own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
+# doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
+LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) -lpthread -ldl -lm
+# The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
+# functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
+# link checks that nothing newer is left.
+GLIBC_MAX  := 2.39
+GLIBC_WRAP := sqrtf acosf asinf atan2f log10f sinh cosh
+GLIBC_WRAP_FLAGS := $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
+LDFLAGS  += $(GLIBC_WRAP_FLAGS)
 GAMELIB  := $(B)/mhgugame.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld
 UPDATER  := $(B)/mhgurecomp-updater
 # (libcurl: opened at run time, updater/http.c)
-UPD_LDFLAGS := -fuse-ld=lld -lSDL3 -lz -ldl
+UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl $(GLIBC_WRAP_FLAGS)
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
@@ -113,10 +167,10 @@ IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,$(O)/imgui/%.o,$(IMGUI_SRC))
 # (-fvisibility=hidden: without it the executable exports Dear ImGui's C++ symbols, and an overlay that links the
 # system ImGui (MangoHud -> libimgui.so.1) binds its HUD's calls into ours: its 1.91 ImFontAtlas handed to our 1.92
 # code crashes at swap-chain creation. Our own code and the Forge plugins' ImGui thunks bind inside the executable.)
-IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI)/imgui
+IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI)/imgui $(LIB_INC)
 # (vendored VulkanMemoryAllocator fallback: -I on a missing dir is ignored, so MSYS2 builds
 # with the system vulkan-memory-allocator package are unaffected)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) $(OSFLAGS)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.
@@ -128,7 +182,7 @@ FSR_SRC  := $(FSR)/src/ffx_vk_portable.c $(FSR)/src/ffx_vk_fsr3_portable.cpp $(F
               shared/ffx_breadcrumbs_list.cpp components/fsr3upscaler/ffx_fsr3upscaler.cpp backends/vk/ffx_vk.cpp \
               backends/shared/ffx_shader_blobs.cpp)
 FSR_OBJ  := $(patsubst $(FSR)/%,$(O)/fsr/%.o,$(FSR_SRC))
-FSRFLAGS := -O2 -w -DFFX_VK_PORTABLE_HAS_FSR3_UPSCALER=1 -DFFX_FSR3UPSCALER=1 -DDISABLE_FFX_DEBUG_BREAK=1 $(OSFLAGS) \
+FSRFLAGS := -O2 -w -DFFX_VK_PORTABLE_HAS_FSR3_UPSCALER=1 -DFFX_FSR3UPSCALER=1 -DDISABLE_FFX_DEBUG_BREAK=1 $(OSFLAGS) $(LIB_INC) \
             -I$(FSR)/include -I$(FFX)/include -I$(FFX)/src/shared -I$(FFX)/src/components -I$(FFX)/src/backends/shared \
             -I$(FFX)/src/backends/shared/blob_accessors
 # the GLSL embedded by ffx_fsr3_glsl.c (assembler .incbin, paths relative to the directory make runs in)
@@ -160,9 +214,9 @@ all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATF
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
-test-settings:
+test-settings: $(LIB_STAMPS)
 	@mkdir -p $(O)/settings-test
-	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c -lSDL3 -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
+	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
@@ -226,32 +280,50 @@ $(EXE): $(RT_OBJ) $(AV_DEPS)
 
 # The updater (updater/updater.c): started in place of the game, it installs the latest release and starts the game.
 UPD_OBJ  := $(patsubst updater/%.c,$(O)/updater/%.o,$(wildcard updater/*.c))
+# (the glibc wrappers, as the game's)
+UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),,$(O)/rt/platform/linux_glibc.o)
 $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	@mkdir -p $(dir $@)
-	$(CC) -O2 -g -Wall $(OSFLAGS) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
+	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
+# (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
+$(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ $^ $(UPD_LDFLAGS)
 	$(GLIBC_CHECK)
 
-# (Linux: a program starts with glibc GLIBC_MAX or later, see LDFLAGS; this checks the one just linked)
+# (Linux: a program starts with glibc GLIBC_MAX and libstdc++ GLIBCXX_MAX or later, see LDFLAGS; this checks the one
+# just linked. GLIBCXX_MAX: GCC 13's, the oldest of those distributions.)
+GLIBCXX_MAX := 3.4.32
 ifneq ($(PLATFORM),windows)
 define GLIBC_CHECK
-@new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) 'match($$0, /GLIBC_[0-9.]+/) { \
-	  split(substr($$0, RSTART + 6, RLENGTH - 6), v, "."); split(max, m, "."); \
-	  if (v[1] * 1000 + v[2] > m[1] * 1000 + m[2]) print "  " $$NF " (glibc " v[1] "." v[2] ")" }'); \
-	if [ -n "$$new" ]; then printf '%s needs a glibc newer than $(GLIBC_MAX) for:\n%s\n(add them to GLIBC_WRAP and runtime/platform/linux.c)\n' \
-	  $@ "$$new"; rm -f $@; exit 1; fi
+@new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) -v cxx=$(GLIBCXX_MAX) ' \
+	  match($$0, /GLIBC_[0-9.]+/) { split(substr($$0, RSTART + 6, RLENGTH - 6), v, "."); split(max, m, "."); \
+	    if (v[1] * 1000 + v[2] > m[1] * 1000 + m[2]) print "  " $$NF " (glibc " v[1] "." v[2] ")" } \
+	  match($$0, /GLIBCXX_[0-9.]+/) { split(substr($$0, RSTART + 8, RLENGTH - 8), v, "."); split(cxx, m, "."); \
+	    if (v[3] > m[3]) print "  " $$NF " (libstdc++ GLIBCXX_" v[1] "." v[2] "." v[3] ")" }'); \
+	if [ -n "$$new" ]; then printf '%s needs a newer glibc / libstdc++ than $(GLIBC_MAX) / $(GLIBCXX_MAX) for:\n%s\n%s\n' \
+	  $@ "$$new" "(glibc: add them to GLIBC_WRAP and runtime/platform/linux_glibc.c)"; rm -f $@; exit 1; fi
 endef
 endif
 
-# the bundled FFmpeg (see FFMPEG above): download, check, configure, build into $(FFMPEG_DIR)
-$(FFMPEG_TAR):
-	@mkdir -p $(dir $@)
-	curl -fL --retry 3 -o $@.part https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VER).tar.xz
-	echo "$(FFMPEG_SHA256)  $@.part" | sha256sum -c -
-	mv -f $@.part $@
+# the bundled libraries' sources (see FFMPEG, SDL3 and SHADERC above): downloaded once, checked against their SHA-256
+# FETCH(file, url, sha256)
+define FETCH
+$(1):
+	@mkdir -p $$(dir $$@)
+	curl -fL --retry 3 -o $$@.part $(2)
+	echo "$(3)  $$@.part" | sha256sum -c -
+	mv -f $$@.part $$@
+endef
+$(eval $(call FETCH,$(FFMPEG_TAR),https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VER).tar.xz,$(FFMPEG_SHA256)))
+$(eval $(call FETCH,$(SDL3_TAR),https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz,$(SDL3_SHA256)))
+$(eval $(call FETCH,third_party/shaderc/shaderc-$(SHADERC_VER).tar.gz,https://github.com/google/shaderc/archive/refs/tags/v$(SHADERC_VER).tar.gz,f06ce5bcca94e5df7f34e115743597d0ad2e13c5fe9213c67dc8c76031241947))
+$(eval $(call FETCH,third_party/shaderc/glslang-$(GLSLANG_VER).tar.gz,https://github.com/KhronosGroup/glslang/archive/refs/tags/$(GLSLANG_VER).tar.gz,9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2))
+$(eval $(call FETCH,third_party/shaderc/SPIRV-Tools-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,e6c83a215538fbfd265ccf398d3877985055df1273dbed73912bd05307664688))
+$(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,5b3a0d099f5c7649e29c0938476c462e71d66ad89a0bde42fa1ba3eb476956c9))
 
+# the bundled FFmpeg: configure, build into $(FFMPEG_DIR)
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	rm -rf $(FFMPEG_DIR) && mkdir -p $(FFMPEG_DIR)/src
 	tar -xJf $< -C $(FFMPEG_DIR)/src --strip-components=1
@@ -263,6 +335,35 @@ $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 
 $(FFMPEG_LIBS): $(FFMPEG_DIR)/.built ;
 
+# the bundled SDL3: configure (checking that it found SDL3_NEED), build, install into $(SDL3_DIR)
+$(SDL3_DIR)/.built: $(SDL3_TAR)
+	rm -rf $(SDL3_DIR) && mkdir -p $(SDL3_DIR)/src
+	tar -xzf $< -C $(SDL3_DIR)/src --strip-components=1
+	$(call CMAKE_BUILD,$(SDL3_DIR),-DCMAKE_INSTALL_PREFIX="$(abspath $(SDL3_DIR))" $(SDL3_CONF),--target install)
+	@cd $(SDL3_DIR) && for n in $(SDL3_NEED); do grep -Eq "^-- +SDL_$${n} +\(Wanted: ON\): ON$$" configure.log || \
+	    { echo "sdl3: SDL $(SDL3_VER) was configured without SDL_$$n: install its development files (README.md, Linux)"; exit 1; }; done
+	touch $@
+	@echo "sdl3: SDL $(SDL3_VER) built in $(SDL3_DIR)"
+
+$(SDL3_DIR)/lib/libSDL3.a: $(SDL3_DIR)/.built ;
+
+# the bundled shaderc: its release with glslang, SPIRV-Tools and SPIRV-Headers in its third_party/, built as one static
+# library (shaderc_combined) into $(SHADERC_DIR)/lib, its header into $(SHADERC_DIR)/include
+$(SHADERC_DIR)/.built: $(SHADERC_TARS)
+	rm -rf $(SHADERC_DIR) && mkdir -p $(SHADERC_DIR)/src/third_party/glslang $(SHADERC_DIR)/src/third_party/spirv-tools \
+	    $(SHADERC_DIR)/src/third_party/spirv-headers $(SHADERC_DIR)/lib $(SHADERC_DIR)/include
+	tar -xzf $(word 1,$^) -C $(SHADERC_DIR)/src --strip-components=1
+	tar -xzf $(word 2,$^) -C $(SHADERC_DIR)/src/third_party/glslang --strip-components=1
+	tar -xzf $(word 3,$^) -C $(SHADERC_DIR)/src/third_party/spirv-tools --strip-components=1
+	tar -xzf $(word 4,$^) -C $(SHADERC_DIR)/src/third_party/spirv-headers --strip-components=1
+	$(call CMAKE_BUILD,$(SHADERC_DIR),$(SHADERC_CONF),--target shaderc_combined)
+	cp $(SHADERC_DIR)/build/libshaderc/libshaderc_combined.a $(SHADERC_DIR)/lib/
+	cp -r $(SHADERC_DIR)/src/libshaderc/include/shaderc $(SHADERC_DIR)/include/
+	touch $@
+	@echo "shaderc: shaderc $(SHADERC_VER) (glslang $(GLSLANG_VER), SPIRV-Tools $(SPIRV_VER)) built in $(SHADERC_DIR)"
+
+$(SHADERC_DIR)/lib/libshaderc_combined.a: $(SHADERC_DIR)/.built ;
+
 ifneq ($(FFMPEG),system)
 $(O)/rt/hle/movie.o: $(FFMPEG_DIR)/.built
 $(O)/rt/hle/movie.o: RTFLAGS += -I$(FFMPEG_DIR)/include
@@ -270,7 +371,7 @@ endif
 
 # The licenses a copy of the game folder must carry, in $(B)/licenses: this program's own (LICENSE) and its
 # THIRD_PARTY_NOTICES (code compiled in: LAS Recomp, Dear ImGui, cimgui, VulkanMemoryAllocator), FFmpeg's LGPL (in the
-# executable), and on Windows those of the MSYS2 packages behind the DLLs bundled and the libraries linked in
+# executable), on Linux SDL3's and shaderc's (in the programs), and on Windows those of the MSYS2 packages behind the DLLs bundled and the libraries linked in
 # (bundle: tools/bundle_dlls.py, which lists them all with their versions and sources in licenses/README.txt).
 # The pipelines recorded in the common areas (extras/pipelines.list: the game's shader code hashes and render state,
 # nothing of the game itself), built in the background on a first run: runtime/nvn/vulkan/exec.c "pipeline list"
@@ -279,7 +380,8 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt)
+licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
+          $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
 	cp $< $@
@@ -290,6 +392,20 @@ $(B)/licenses/FFmpeg.txt: $(FFMPEG_DIR)/.built
 	   echo "https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VER).tar.xz, built with the options in this program's Makefile (FFMPEG_CONF);"; \
 	   echo "the program's own source is at https://github.com/morerokk/MHGURecomp, to rebuild it with a changed FFmpeg."; \
 	   echo; cat $(FFMPEG_DIR)/src/COPYING.LGPLv2.1; } > $@
+
+$(B)/licenses/SDL3.txt: $(SDL3_DIR)/.built
+	@mkdir -p $(dir $@)
+	@{ echo "This program contains SDL $(SDL3_VER), linked statically, under the zlib license (below). Its source code is"; \
+	   echo "https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz."; \
+	   echo; cat $(SDL3_DIR)/src/LICENSE.txt; } > $@
+$(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
+	@mkdir -p $(dir $@)
+	@{ echo "This program contains shaderc $(SHADERC_VER) with glslang $(GLSLANG_VER), SPIRV-Tools $(SPIRV_VER) and SPIRV-Headers"; \
+	   echo "$(SPIRV_VER), linked statically, under their licenses (below: shaderc's and SPIRV-Tools' Apache License 2.0,"; \
+	   echo "glslang's and SPIRV-Headers' own). Their source code is these releases on GitHub: google/shaderc,"; \
+	   echo "KhronosGroup/glslang, KhronosGroup/SPIRV-Tools and KhronosGroup/SPIRV-Headers."; \
+	   for f in LICENSE third_party/glslang/LICENSE.txt third_party/spirv-tools/LICENSE third_party/spirv-headers/LICENSE; do \
+	     echo; echo "==== $$f"; echo; cat $(SHADERC_DIR)/src/$$f; done; } > $@
 
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 	@mkdir -p $(O)
@@ -353,9 +469,9 @@ dist: all
 
 # Exercise real ImGui navigation without a game dump or graphics device.
 .PHONY: test-settings-panel
-test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/modorder.o $(O)/rt/arcmerge.o $(O)/rt/config.o $(O)/rt/config_store.o $(O)/imgui/imgui/imgui.o $(O)/imgui/imgui/imgui_draw.o $(O)/imgui/imgui/imgui_tables.o $(O)/imgui/imgui/imgui_widgets.o
+test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/modorder.o $(O)/rt/arcmerge.o $(O)/rt/config.o $(O)/rt/config_store.o $(O)/imgui/imgui/imgui.o $(O)/imgui/imgui/imgui_draw.o $(O)/imgui/imgui/imgui_tables.o $(O)/imgui/imgui/imgui_widgets.o $(LIB_STAMPS)
 	@mkdir -p $(O)/settings-test
-	$(CXX) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $^ -lSDL3 -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
+	$(CXX) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $(filter %.o,$^) $(SDL_LIBS) -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 
 # Translation coverage for both host-menu languages; no game files required.
