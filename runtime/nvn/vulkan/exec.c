@@ -1092,10 +1092,10 @@ static VkDescriptorSetLayout rs_set_layout;
 static VkPipelineLayout rs_layout;
 
 // kind 1 depth, 2 depth + stencil; into a multisampled target of `samples` (ms_expand): 3 colour, 4 depth, 5 depth +
-// stencil
+// stencil; 6 FXAA over menus' 3D models, colour without alpha (models_fxaa_end)
 static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) {
     static const char *frag[] = {NULL, "resolve.frag.depth", "resolve.frag.depth.s", "expand.frag", "expand.frag.depth",
-                                 "expand.frag.depth.s"};
+                                 "expand.frag.depth.s", "fxaa.frag.models"};
     static struct { VkRenderPass rp; int kind; VkPipeline p; } tab[32];
     static int n;
     for (int i = 0; i < n; i++) if (tab[i].rp == rp && tab[i].kind == kind) return tab[i].p;
@@ -1127,12 +1127,12 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) 
                                                .rasterizationSamples = (VkSampleCountFlagBits)samples};
     VkStencilOpState so = {VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_REPLACE, VK_COMPARE_OP_ALWAYS, 0xFF, 0xFF, 0};
     VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-                                                .depthTestEnable = kind != 3, .depthWriteEnable = kind != 3,
-                                                .depthCompareOp = VK_COMPARE_OP_ALWAYS, .stencilTestEnable = kind == 2 || kind >= 4,
-                                                .front = so, .back = so};
-    VkPipelineColorBlendAttachmentState all = {.colorWriteMask = 0xF};
+                                                .depthTestEnable = kind != 3 && kind != 6, .depthWriteEnable = kind != 3 && kind != 6,
+                                                .depthCompareOp = VK_COMPARE_OP_ALWAYS,
+                                                .stencilTestEnable = kind == 2 || kind == 4 || kind == 5, .front = so, .back = so};
+    VkPipelineColorBlendAttachmentState all = {.colorWriteMask = kind == 6 ? 0x7 : 0xF};
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                                              .attachmentCount = kind == 3, .pAttachments = &all};
+                                              .attachmentCount = kind == 3 || kind == 6, .pAttachments = &all};
     VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2,
                                            .pDynamicStates = dyn};
@@ -1263,13 +1263,113 @@ static bool ms_expand(VkCommandBuffer cb, TexBackend *b, TexBackend *m, VkFormat
                                     b->width, b->height);
     return true;
 }
-// full_picture: a picture such models are drawn over, with MSAA on: the render size, once the game's FXAA pass drew
-// this frame (before it, the 3D scene's passes, which keep their own rules). The 2D draws after the models need
-// per-sample shading (sampleRateShading).
+// The anti-aliasing such models get: the player's (models_aa), though every other anti-aliasing has run before they
+// are drawn. MSAA on: they are drawn through its samples (ms_expand; the 2D draws after them need per-sample shading,
+// sampleRateShading). FXAA on: FXAA 3.11 over them (models_fxaa_end). FSR never sees them (it runs at its start of
+// the HUD, before them): none, as with anti-aliasing off. full_picture: a picture they are drawn over: the render
+// size, once the game's FXAA pass drew this frame (before it, the 3D scene's passes, which keep their own rules).
+enum { MODELS_AA_NONE, MODELS_AA_MSAA, MODELS_AA_FXAA };
 static uint64_t aa_pass_frame;  // the frame the game's FXAA pass last drew in (fxaa_skipped)
+static int models_aa(void) {
+    if (g_fsr_on) return MODELS_AA_NONE;
+    if (g_vk.msaa > 1) return g_vk.sample_shading ? MODELS_AA_MSAA : MODELS_AA_NONE;
+    return config_live_fxaa() ? MODELS_AA_FXAA : MODELS_AA_NONE;
+}
 static bool full_picture(uint32_t w, uint32_t h) {
-    return g_vk.msaa > 1 && g_vk.sample_shading && aa_pass_frame == g_present_count && w == g_render_size[0] &&
+    return models_aa() != MODELS_AA_NONE && aa_pass_frame == g_present_count && w == g_render_size[0] &&
            h == g_render_size[1];
+}
+
+// FXAA over such models (MODELS_AA_FXAA): the picture is copied before each run of their depth-testing draws (and
+// depth clears) and again after it, then FXAA 3.11 is drawn into it from the second copy, only where the models
+// changed it and next to that ("fxaa.frag.models"), so the 2D draws around them stay sharp.
+static void snapshots_invalidate(NvnTexture *t);
+static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
+static uint64_t mf_frame;         // the frame it opened in
+static TexBackend mf_before, mf_after;
+static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
+    VkCommandBuffer cb = vk_cmd();
+    if (d->image && (d->width != b->width || d->height != b->height || d->format != b->format)) {
+        vk_views_forget(d);
+        vk_defer_image(d->image, d->mem);
+        d->image = VK_NULL_HANDLE;
+    }
+    if (!d->image) {
+        VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = b->format,
+                                .extent = {b->width, b->height, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
+        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+        if (vmaCreateImage(g_vk.vma, &ci, &ai, &d->image, &d->mem, NULL) != VK_SUCCESS) return d->image = VK_NULL_HANDLE, false;
+        d->format = b->format; d->width = b->width; d->height = b->height; d->depth = d->layers = d->levels = d->samples = 1;
+        d->aspect = VK_IMAGE_ASPECT_COLOR_BIT; d->base_type = VK_IMAGE_VIEW_TYPE_2D;
+        vk_image_init_layout(cb, d->image, d->aspect);
+    }
+    vk_full_barrier(cb);
+    VkImageCopy rg = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                      .extent = {b->width, b->height, 1}};
+    vkCmdCopyImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, d->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+    vk_full_barrier(cb);
+    return true;
+}
+static void models_fxaa_begin(NvnTexture *t) {
+    vk_end_pass();
+    st.rt_dirty = true;
+    if (picture_copy(t->backend, &mf_before)) mf_tex = t, mf_frame = g_present_count;
+}
+static void models_fxaa_end(void) {
+    NvnTexture *t = mf_tex;
+    TexBackend *b = t->backend;
+    mf_tex = NULL;
+    vk_end_pass();
+    st.rt_dirty = true;
+    if (!picture_copy(b, &mf_after)) return;
+    static const VkComponentMapping id = {0};
+    VkFormat f = b->format;
+    VkRenderPass rp = vk_render_pass(&f, 1, VK_FORMAT_UNDEFINED, 1);
+    VkPipeline p = resolve_pipeline(rp, 6, 1);
+    VkImageView dst = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    VkImageView after = vk_image_view(&mf_after, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    VkImageView before = vk_image_view(&mf_before, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (!p || !dst || !after || !before) return;
+    VkCommandBuffer cb = vk_cmd();
+    VkDescriptorSet set = vk_alloc_set(rs_set_layout);
+    VkDescriptorImageInfo ii[2] = {{vk_default_sampler(true), after, VK_IMAGE_LAYOUT_GENERAL},
+                                   {vk_default_sampler(false), before, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet w[2] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[0]},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}};
+    vkUpdateDescriptorSets(g_vk.dev, 2, w, 0, NULL);
+    VkRect2D area = {{0, 0}, {b->width, b->height}};
+    VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp,
+                                .framebuffer = vk_framebuffer(rp, &dst, 1, b->width, b->height), .renderArea = area};
+    vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, rs_layout, 0, 1, &set, 0, NULL);
+    VkViewport vp = {0, 0, (float)b->width, (float)b->height, 0, 1};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &area);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cb);
+    vk_full_barrier(cb);
+    ss_forget();
+    snapshots_invalidate(t);
+    gp_mark("  FXAA over 3D models (menus)");
+    static bool logged;
+    if (!logged) logged = true, LOG("[vk] FXAA for 3D models drawn over a finished %ux%u picture (menus)\n", b->width, b->height);
+}
+// Before a draw or clear: models (it tests or clears depth) into a picture they are drawn over open a run, anything
+// else ends it. A run still open at the frame's end is dropped (the picture is presented without it).
+static void models_fxaa_track(bool models) {
+    if (models_aa() != MODELS_AA_FXAA) { mf_tex = NULL; return; }
+    if (mf_tex && mf_frame != g_present_count) mf_tex = NULL;
+    NvnTexture *t = st.rt.ncolor ? st.rt.color[0] : NULL;
+    TexBackend *b = t ? t->backend : NULL;
+    models = models && b && b->ms_models && b->ms_models + 2 >= g_present_count && full_picture(b->width, b->height);
+    if (mf_tex && !(models && t == mf_tex)) models_fxaa_end();
+    if (!mf_tex && models) models_fxaa_begin(t);
 }
 
 // Before a draw / dispatch: the textures it samples up to date (attachments of the pass: resolve_feedback).
@@ -1360,7 +1460,7 @@ static void begin_pass(void) {
         TexBackend *b = att[k];
         if (att_index[k] < 0 || !b->ms_models) continue;
         if (b->ms_models + 2 >= g_present_count) {
-            pass_models |= att_index[k] == 0 && full_picture(minw, minh);
+            pass_models |= att_index[k] == 0 && models_aa() == MODELS_AA_MSAA && full_picture(minw, minh);
             continue;
         }
         b->ms_models = 0;
@@ -1791,6 +1891,7 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
         ms_want_depth = true;
         if (in_pass && pass_models && !pass_msaa && !pass_want_depth) st.rt_dirty = true;
     }
+    models_fxaa_track(depth || stencil);  // (FXAA: the same, models_fxaa_end)
     begin_pass();
     if (g_dump_active) LOG("[dump]   clear %d mask %#x depth %d stencil %d (after %llu draws)\n", index, mask, depth, stencil,
                            (unsigned long long)(stat_draws - pass_draws_at));
@@ -3453,6 +3554,7 @@ static void draw(CmdRec *r, bool indexed) {
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
+    models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
     if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
     ms_resolve_sampled(0, pr->vi);
     ms_resolve_sampled(1, pr->fi);
@@ -3528,8 +3630,8 @@ static void draw(CmdRec *r, bool indexed) {
     k.depth_write = k.depth_test && st.ds[1];
     k.depth_op = (uint8_t)(k.depth_test ? compare_fn(st.ds[2]) : VK_COMPARE_OP_ALWAYS);
     k.stencil_test = st.ds[3] && has_stencil;
-    // (MSAA: 3D models drawn without it over the finished picture: from the next frame on, with it, for as long as they
-    // are drawn: ms_expand)
+    // (3D models drawn over the finished picture, without MSAA: from the next frame on, for as long as they are drawn,
+    // the player's anti-aliasing for them: ms_expand, models_fxaa_end)
     if (k.depth_write) {
         TexBackend *c0 = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->backend : NULL;
         if (c0 && (!pass_msaa || c0->ms_models) && full_picture(pass_w, pass_h)) c0->ms_models = g_present_count;

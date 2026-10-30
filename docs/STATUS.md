@@ -93,15 +93,20 @@ Fixed on the way (2026-10-20):
   resolve ~1.6 ms, the depth / stencil resolve ~9 ms (the driver decompressing it; Vulkan 1.2 render pass resolves
   were as slow, and a sampleable multisampled image loses its compression: passes several times slower).
   Menus that show 3D models (Character Select, Guild Card, the smithy and item box equipment previews) draw them
-  straight into the finished picture, after the game's FXAA, in the same pass as the menu's 2D draws, so they had no
-  MSAA. With MSAA on, a full-size colour target that gets depth-writing draws without MSAA past the game's FXAA pass
-  is marked (TexBackend.ms_models, exec.c full_picture); from the next frame on, the first depth-testing draw (or depth
-  clear) into it copies the picture, and the depth the models test against unless the pass clears it (the smithy's
-  preview doesn't), into every sample of the multisampled companions (ms_expand; without VK_EXT_shader_stencil_export
-  the stencil starts at 0, as vk_ms_resolve drops it), and the rest of the frame's draws into it stay there: the 2D
-  draws after the models shaded per sample (else the seams between their quads show), so a preview that switches
-  between models and 2D costs one copy and one resolve a frame. The 3D scene's passes
-  (before the FXAA pass) keep their rules; with MSAA off, or without sampleRateShading, nothing changes.
+  straight into the finished picture, after the game's FXAA pass, in the same pass as the menu's 2D draws, so they had
+  no anti-aliasing whatever the settings. A full-size colour target that gets depth-writing draws without MSAA past
+  the game's FXAA pass is marked (TexBackend.ms_models, exec.c full_picture), and from the next frame on its models
+  get the player's anti-aliasing (models_aa):
+  - MSAA: the first depth-testing draw (or depth clear) into it copies the picture, and the depth the models test
+    against unless cleared, into every sample of the multisampled companions (ms_expand; without
+    VK_EXT_shader_stencil_export the stencil starts at 0, as vk_ms_resolve drops it), and the rest of the frame's draws
+    into it stay there: the 2D draws after the models shaded per sample (else the seams between their quads show), so
+    a preview that switches between models and 2D costs one copy and one resolve a frame. Needs sampleRateShading.
+  - FXAA: the picture is copied before each run of model draws and after it, and FXAA 3.11 ("fxaa.frag.models", luma
+    from the colour) is drawn over it only where the models changed it and next to that (models_fxaa_end), so the 2D
+    around them stays sharp. Both FXAA modes: the game's own FXAA shader only runs in its pass.
+  - FSR, or anti-aliasing off: none. FSR runs at its start of the HUD, before them, and never sees them.
+  The 3D scene's passes (before the FXAA pass) keep their rules.
 - FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
   FXAAMode = 3_11 draws FXAA 3.11 Quality there instead (exec.c fxaa_311, shaders.c "fxaa.frag": preset 39, no
