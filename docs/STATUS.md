@@ -758,7 +758,8 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
    the Guild Card greeting, the Hunting Style viewer) takes one anchor when its pieces' rules disagree (exec.c
    ui_group_end: by the nearer edge, or the centre; patched in transient memory before the pass ends; the game's scissor
    of a piece moves with it, as its group was anchored last frame, so the help windows' body is not cut), the village / Hub
-   button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the quest results screen (marked by its Time Left bar, layer 99 at y 643) centres its
+   button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the Meownster Hunters return screen (marked by its map frame, layer 105 at 215, 0) goes top but for
+   its prompts, the quest results screen (marked by its Time Left bar, layer 99 at y 643) centres its
    middle: the stamp, reward table, item lists' parchment and rows, the title's PRESS A scales
    about the centre with its layout (layer 108), and a model preview follows the frame drawn over it, not the last quad
    (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges

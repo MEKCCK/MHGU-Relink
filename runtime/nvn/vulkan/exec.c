@@ -747,6 +747,7 @@ static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu,
                                // 250 at the canvas centre, came first)
 static bool ui_stamp_pass;  // this pass draws the Quest Complete stamp (its borders, layer 97 at x 640, y 53 / 687, came first)
 static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
+static bool ui_meownster_pass;  // this pass draws the Meownster Hunters return screen (its map frame, layer 105, came first)
 volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every HUD quad of the next frame and its anchor (device.c)
 
 // 16:10: a window is drawn as pieces (body, edges, corners, then its text), each placed by its own centre, so one rule
@@ -1271,6 +1272,7 @@ static void begin_pass(void) {
     ui_frontend_pass = false;
     ui_stamp_pass = false;
     ui_results_pass = false;
+    ui_meownster_pass = false;
     ui_menu_pass = false;
     ui_nrecent = 0;
     pass_msaa = false;
@@ -2926,6 +2928,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         if (vanchor == V_CENTER) anchor = ANCHOR_CENTER;
                         else if (vanchor == V_TOP) anchor = pos_x <= 430.0f ? ANCHOR_LEFT : pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_CENTER;
                     }
+                    // Meownster Hunters return screen: a map in a black frame at the top (the frame on layers 105 and 100,
+                    // its corner at 215, 0; the map 105; its icons 102 / 103, bubbles 98), the Palicoes' tokens and the
+                    // reward list over it (100), the Reward List header and the prompts at the bottom. Layer 100 went to the
+                    // bottom with its rule: the tokens sat too low on the map, the lead Palico below the frame, and the
+                    // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
+                    if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
+                    if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
