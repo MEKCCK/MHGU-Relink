@@ -21,6 +21,10 @@
 //    first 2D draw into H started the HUD with no scene, so the models after it got no anti-aliasing. From the frame
 //    after one like that (>= 16 such depth-writing draws into H after its first 2D draw, < 16 before it), the start of
 //    the HUD waits until as many have been drawn (menu_models_late): they, and the 2D under them, go through FSR.
+//    Menus that draw 3D models with a camera of their own (the smithy's equipment preview, over the scene): its
+//    draws are found by its projection (camera_jitter.c camjit_menu_cameras), which gets the jitter in its viewport's
+//    pixels, and from the frame after one with such draws into H after its first 2D draw the HUD waits for as many
+//    (menu_cams_late), whether or not there is a scene before.
 //  - Jitter (runtime/hle/camera_jitter.c) runs while frames are scene frames; after 3 frames in a row that are not,
 //    it stops (menus: no FSR, a steady picture), and starts again with the next scene frame.
 //  - The camera of a frame: the capture whose jittered projection the frame's scene draws read from their uniform
@@ -1042,10 +1046,10 @@ static uint64_t prev_fsr_present;              // g_present_count at the last FS
 static int not_scene;                          // frames in a row that were not scene frames
 static bool jitter_on;
 // (menus, see the top) the frame's first 2D draw into H was seen, with menu_2d_scene depth-writing draws into D before
-// it; menu_models: depth-writing draws into H with the main camera since; menu_models_late: the last frame's, when the
-// HUD waits for them
+// it; menu_models: depth-writing draws into H with the main camera since, menu_cams: with a menu camera since;
+// menu_models_late / menu_cams_late: the last frame's, when the HUD waits for them
 static bool menu_2d;
-static uint32_t menu_2d_scene, menu_models, menu_models_late;
+static uint32_t menu_2d_scene, menu_models, menu_models_late, menu_cams, menu_cams_late;
 static uint64_t last_dispatch_ns, frame_id;
 // per-second log (MHGU_FSR_LOG)
 static uint32_t n_fsr4, n_fsr, n_scaled, n_none, n_match, n_nomatch, n_reset, lag_hist[4], n_objv_frames, n_react_frames;
@@ -1339,10 +1343,37 @@ static bool main_camera_draw(const FsrDraw *d) {
     return false;
 }
 
+// A draw with a menu camera (camjit_menu_cameras): its vertex uniform buffers hold that camera's projection (m[0], and
+// m[5] five words on, in either layout); its viewport goes to the camera's jitter. false: none.
+static bool menu_camera_draw(const FsrDraw *d) {
+    float m05[4][2];
+    int n = camjit_menu_cameras(m05, 4);
+    uint32_t k0[4], k5[4];
+    int idx[4], nk = 0;
+    for (int i = 0; i < n; i++)
+        if (m05[i][0] != 0) memcpy(&k0[nk], &m05[i][0], 4), memcpy(&k5[nk], &m05[i][1], 4), idx[nk++] = i;
+    if (!nk || d->vp_w <= 0 || d->vp_h <= 0) return false;
+    for (int u = 0; u < d->nvubuf; u++) {
+        uint64_t a = d->vubuf[2 * u], sz = d->vubuf[2 * u + 1];
+        if (!a || sz < 32 || a >= GUEST_SPACE || sz > GUEST_SPACE - a) continue;
+        if (sz > 0x4000) sz = 0x4000;
+        const uint32_t *w = G2H((uint32_t)a);
+        uint64_t nw = sz / 4;
+        for (uint64_t i = 0; i + 5 < nw; i++)
+            for (int k = 0; k < nk; k++)
+                if (w[i] == k0[k] && w[i + 5] == k5[k]) {
+                    camjit_menu_viewport(idx[k], d->vp_w, d->vp_h);
+                    return true;
+                }
+    }
+    return false;
+}
+
 static void frame_begin(void) {
     frame_open = true;
     menu_models_late = menu_2d && menu_2d_scene < 16 && menu_models >= 16 ? menu_models : 0;
-    menu_2d = false, menu_2d_scene = menu_models = 0;
+    menu_cams_late = menu_cams;
+    menu_2d = false, menu_2d_scene = menu_models = menu_cams = 0;
     redirect = frame_fsr = false;
     h_draws = 0;
     memset(depths, 0, sizeof depths);
@@ -1592,9 +1623,10 @@ void vk_fsr_draw(const FsrDraw *d) {
             if (k < 4) colors[k].t = d->color0, colors[k].n++;
         }
     }
-    if (menu_2d && d->color0 == g_h && d->depth && d->depth_write && d->depth->width == rw && d->depth->height == rh &&
-        main_camera_draw(d))
-        menu_models++;  // (menus, see the top)
+    if (menu_2d && d->color0 == g_h && d->depth && d->depth_write && d->depth->width == rw && d->depth->height == rh) {
+        if (main_camera_draw(d)) menu_models++;  // (menus, see the top)
+        else if (menu_camera_draw(d)) menu_cams++;
+    }
     if (redirect || !g_h || !d->color0) return;
     if (d->color0 == g_h) {
         bool post = d->count <= 6;
@@ -1602,8 +1634,9 @@ void vk_fsr_draw(const FsrDraw *d) {
         for (int i = 0; i < d->ntex; i++) reads_rt |= d->tex[i] != g_h && is_rt(d->tex[i]);
         if (post && reads_rt) { h_draws++; return; }
         if (!menu_2d) menu_2d = true, scene_depth(&menu_2d_scene);
-        if (menu_models_late && (menu_models < menu_models_late || d->depth_write)) return;  // (menus: their models first)
-        hud_start(menu_models_late ? "after the menu's 3D models" : "first HUD draw");
+        bool late = menu_models_late || menu_cams_late;  // (menus: their models first)
+        if (late && (menu_models < menu_models_late || menu_cams < menu_cams_late || d->depth_write)) return;
+        hud_start(late ? "after the menu's 3D models" : "first HUD draw");
         return;
     }
     if (presented_texture(d->color0)) {

@@ -15,6 +15,9 @@
 // view, and then gets the jitter: the third row's x / y (m[8], m[9], zero as made) offset by the jitter in NDC. With
 // w = -z, ndc.x = ... - m[8], so m[8] -= 2 jx / w shifts the picture right by jx pixels. y: the translator's clip
 // space has +y at the top, so a picture shift down by jy pixels is m[9] += 2 jy / h.
+// Cameras of another aspect are menus' (the smithy's equipment preview: 0.934, its panel): not captured, but kept as
+// menu cameras (menu_projection) and, once the renderer has found their draws and given their viewport, jittered the
+// same in that viewport's pixels, so FSR can smooth them too (fsr.c, menu cameras).
 //
 //   MHGU_JITTER_TEST=<x>,<y>  (debug) a constant shift of the 3D picture by (x, y) render pixels (x right, y down),
 //                             with FSR on or off: shows the sign convention in screenshots
@@ -59,6 +62,62 @@ static float halton(uint32_t i, uint32_t base) {
 
 static bool readable(uint32_t a, uint32_t n) { return a >= 0x1000u && a < 0xFFFFFFFFu - n && !(a & 3); }
 
+// This frame's jitter in render pixels (0, 0: off). g_lock held.
+static void frame_jitter(float *jx, float *jy) {
+    *jx = *jy = 0;
+    if (g_test) {
+        *jx = g_test_xy[0], *jy = g_test_xy[1];
+    } else if (g_on) {  // AMD's sequence: Halton(2, 3) - 0.5, phases = 8 (output / render)^2, one phase per frame
+        uint32_t i = (uint32_t)(g_present_count % g_phases);
+        *jx = halton(i + 1, 2) - 0.5f;
+        *jy = halton(i + 1, 3) - 0.5f;
+    }
+}
+
+// Menu cameras: a projection of a camera without the screen's aspect (the smithy's equipment preview: 0.934, in its
+// panel). Kept by their projection's m[0] / m[5], which the renderer finds in their draws (camjit_menu_cameras), and
+// jittered like the main camera once the renderer has given their viewport: m[8] / m[9] offset in its pixels.
+#define MENU_CAMS 4
+static struct { uint32_t cam; uint64_t present; float m0, m5, vp_w, vp_h; } g_menu[MENU_CAMS];
+
+static void menu_projection(uint32_t out, uint32_t cam) {
+    pthread_mutex_lock(&g_lock);
+    int i = 0;
+    while (i < MENU_CAMS && g_menu[i].cam != cam) i++;
+    if (i == MENU_CAMS) {  // a new one: in the slot used longest ago
+        i = 0;
+        for (int k = 1; k < MENU_CAMS; k++) if (g_menu[k].present < g_menu[i].present) i = k;
+        g_menu[i].cam = cam, g_menu[i].vp_w = g_menu[i].vp_h = 0;
+    }
+    g_menu[i].present = g_present_count;
+    g_menu[i].m0 = LDF(out), g_menu[i].m5 = LDF(out + 0x14);
+    float jx, jy, w = g_menu[i].vp_w, h = g_menu[i].vp_h;
+    frame_jitter(&jx, &jy);
+    pthread_mutex_unlock(&g_lock);
+    if ((jx != 0 || jy != 0) && w > 0 && h > 0) {
+        STF(out + 0x20, LDF(out + 0x20) - 2.0f * jx / w);
+        STF(out + 0x24, LDF(out + 0x24) + 2.0f * jy / h);
+    }
+}
+
+int camjit_menu_cameras(float (*m05)[2], int max) {
+    pthread_mutex_lock(&g_lock);
+    int n = max < MENU_CAMS ? max : MENU_CAMS;
+    for (int i = 0; i < n; i++) {
+        bool recent = g_menu[i].cam && g_menu[i].present + 1 >= g_present_count;
+        m05[i][0] = recent ? g_menu[i].m0 : 0, m05[i][1] = recent ? g_menu[i].m5 : 0;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return n;
+}
+
+void camjit_menu_viewport(int i, float w, float h) {
+    if (i < 0 || i >= MENU_CAMS) return;
+    pthread_mutex_lock(&g_lock);
+    g_menu[i].vp_w = w, g_menu[i].vp_h = h;
+    pthread_mutex_unlock(&g_lock);
+}
+
 static void lookat(Cpu *c) {
     uint32_t out = c->r[0], cam = c->r[1];
     fnhook_call_original(c, FN_LOOKAT);
@@ -78,21 +137,16 @@ static void lookat(Cpu *c) {
 static void projection(Cpu *c) {
     uint32_t out = c->r[0], cam = c->r[1];
     fnhook_call_original(c, FN_PROJECTION);
-    if (!readable(out, 64) || !readable(cam, 0x70) || !main_aspect(LDF(cam + CAM_ASPECT))) return;
+    if (!readable(out, 64) || !readable(cam, 0x70)) return;
+    if (!main_aspect(LDF(cam + CAM_ASPECT))) { menu_projection(out, cam); return; }
     float m[16];
     memcpy(m, G2H(out), 64);
     pthread_mutex_lock(&g_lock);
     int v = 0;
     while (v < g_nviews && g_views[v].cam != cam) v++;
     if (v == g_nviews) { pthread_mutex_unlock(&g_lock); return; }  // (no view of this camera yet)
-    float jx = 0, jy = 0;
-    if (g_test) {
-        jx = g_test_xy[0], jy = g_test_xy[1];
-    } else if (g_on) {  // AMD's sequence: Halton(2, 3) - 0.5, phases = 8 (output / render)^2, one phase per frame
-        uint32_t i = (uint32_t)(g_present_count % g_phases);
-        jx = halton(i + 1, 2) - 0.5f;
-        jy = halton(i + 1, 3) - 0.5f;
-    }
+    float jx, jy;
+    frame_jitter(&jx, &jy);
     CamRecord *r = &g_ring[++g_seq % RING];
     memset(r, 0, sizeof *r);
     r->seq = g_seq;
