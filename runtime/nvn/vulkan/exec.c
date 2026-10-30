@@ -736,15 +736,16 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
-// The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom): a model preview
-// follows the window drawn over it (ui_preview_map)
+// The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left /
+// 1 right / 2 centre): a model preview follows the window drawn over it (ui_preview_map)
 #define UI_RECENT 256
-static struct { float x, y; uint8_t vanchor; } ui_recent[UI_RECENT];
+static struct { float x, y; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
 static uint32_t ui_nrecent;  // (quads recorded this pass; the slot is the count modulo UI_RECENT)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
+static bool ui_stamp_pass;  // this pass draws the Quest Complete stamp (its borders, layer 97 at x 640, y 53 / 687, came first)
 static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
 volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every HUD quad of the next frame and its anchor (device.c)
 
@@ -1268,6 +1269,7 @@ static void begin_pass(void) {
     ui_loading_pass = false;
     ui_title_pass = false;
     ui_frontend_pass = false;
+    ui_stamp_pass = false;
     ui_results_pass = false;
     ui_menu_pass = false;
     ui_nrecent = 0;
@@ -1368,12 +1370,15 @@ static bool ui_preview_map(PreviewMap *pm) {
     *pm = (PreviewMap){0, 1, 0, 1};
     // The window it is drawn in: the last quad over the viewport (inside it sideways, not below it). The last quad of all
     // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it.
-    int vanchor = ui_nrecent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1;
+    int vanchor = ui_nrecent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
     {
         float x0 = vp[0] / pw * 1280.0f, x1 = (vp[0] + w) / pw * 1280.0f, y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f;
         for (uint32_t i = ui_nrecent; i > 0 && ui_nrecent - i < UI_RECENT; i--) {
             uint32_t k = (i - 1) % UI_RECENT;
-            if (ui_recent[k].x >= x0 && ui_recent[k].x <= x1 && ui_recent[k].y <= y1) { vanchor = ui_recent[k].vanchor; break; }
+            if (ui_recent[k].x >= x0 && ui_recent[k].x <= x1 && ui_recent[k].y <= y1) {
+                vanchor = ui_recent[k].vanchor, hanchor = ui_recent[k].hanchor;
+                break;
+            }
         }
     }
     if (asp > 16.0f / 9.0f) {
@@ -1382,9 +1387,12 @@ static bool ui_preview_map(PreviewMap *pm) {
         float anchor = ui < asp ? ui : asp;
         float left_px = 640.0f * (1.0f - anchor / asp) * (pw / 1280.0f);
         float cx = (vp[0] + w * 0.5f) / pw * 1280.0f;
+        // sideways as its window went (the smithy's parchment, layer 100, goes Right: by its own place the model went
+        // Left, out of it), or by where it is when no window is over it
+        if (hanchor < 0) hanchor = cx <= 430.0f ? 0 : cx >= 650.0f ? 1 : 2;
         pm->kx = s;
-        if (cx <= 430.0f) pm->sx = left_px;
-        else if (cx >= 650.0f) pm->sx = pw - left_px - pw * s;
+        if (hanchor == 0) pm->sx = left_px;
+        else if (hanchor == 1) pm->sx = pw - left_px - pw * s;
         else pm->sx = pw * 0.5f * (1.0f - s);
     } else {
         float sy = asp / (16.0f / 9.0f);
@@ -2858,6 +2866,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // The Quest Complete banner's lower border slides in from y 739: it belongs to the bottom edge.
                         vanchor = pos_y > 650.0f ? V_BOTTOM : V_TOP;
                         if (fabsf(pos_z - 97.0f) < 0.5f) ui_menu_pass = true;
+                        // The Quest Complete stamp is one picture, after its borders (x 640, by the top and bottom edges; the
+                        // lower one slides in from y 739). Right / Left by place split it on a wide picture, its tilted
+                        // "QUEST" (x -17) left of the rest.
+                        if (fabsf(pos_z - 97.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && (pos_y < 60.0f || pos_y > 680.0f))
+                            ui_stamp_pass = true;
+                        if (ui_stamp_pass) anchor = ANCHOR_CENTER;
                     } else if (fabsf(pos_z - 100.0f) < 0.5f) {
                         // 100.0: Hunter Arts HUD and bottom right prompts (y > 600) -> Bottom anchor
                         // Target cam selector (right edge, y 42..82: x > 1000, y < 360) -> Top anchor, so it stays by the minimap.
@@ -2903,8 +2917,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // parchment, the header went down). The bar is drawn after the stamp, so the last pass also tells.
                     if (fabsf(pos_z - 99.0f) < 0.5f && fabsf(pos_y - 643.0f) < 0.5f && (fabsf(pos_x - 80.0f) < 0.5f || fabsf(pos_x - 1180.0f) < 0.5f))
                         ui_results_pass = true;
-                    if ((ui_results_pass || ui_results_last) && pos_z > 98.5f && pos_z < 101.5f)
+                    // Sideways the middle is one table, centred (layer 100's Right took it right of the stamp it sits on, with
+                    // Edges / 21:9), and the header and page counter go to their side.
+                    if ((ui_results_pass || ui_results_last) && pos_z > 98.5f && pos_z < 101.5f) {
                         vanchor = pos_y < 60.0f ? V_TOP : pos_y > 600.0f ? V_BOTTOM : V_CENTER;
+                        if (vanchor == V_CENTER) anchor = ANCHOR_CENTER;
+                        else if (vanchor == V_TOP) anchor = pos_x <= 430.0f ? ANCHOR_LEFT : pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_CENTER;
+                    }
 
                     if (anchor == ANCHOR_LEFT) {
                         new_pos_x = anchor_left + pos_x * s;
@@ -2916,6 +2935,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     int v = vanchor == V_TOP ? 0 : vanchor == V_BOTTOM ? 2 : 1;
                     ui_recent[ui_nrecent % UI_RECENT].x = pos_x, ui_recent[ui_nrecent % UI_RECENT].y = pos_y;
                     ui_recent[ui_nrecent % UI_RECENT].vanchor = (uint8_t)v;
+                    ui_recent[ui_nrecent % UI_RECENT].hanchor = (uint8_t)anchor;
                     ui_nrecent++;
                     if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
