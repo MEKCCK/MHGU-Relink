@@ -8,6 +8,10 @@
 //   main+0x1C358  projection: r0 = the matrix to write, r1 = the camera (-> 0x9c617c perspective(near, far, fovy,
 //                 aspect): m[0] = 1 / tan(fovy / 2) / aspect, m[5] = 1 / tan(fovy / 2), m[10] = f / (n - f), m[11] = -1,
 //                 m[14] = n f / (n - f): row-vector (clip = v * M), right-handed, depth 0 at near .. 1 at far)
+// Event cameras (cutscenes: the canteen's meal) are their own class, with their own two (main+0x957A10 look-at,
+// main+0x957FA4 projection: same arguments, the same camera fields, +0xc0 a zoom added to the field of view): hooked
+// the same, so cutscenes are jittered and captured like the main camera (without them FSR found no camera and only
+// scaled the picture).
 // (main+0x1C380 / 0x1C3A8 are the same with the arguments swapped: the CPU's world-to-screen for HUD markers. They are
 // left alone, so the HUD's markers stay steady while the 3D picture is jittered.)
 // Both are hooked: the view is kept per camera; the projection of a camera with the screen's aspect (16:9 as made, or
@@ -34,6 +38,8 @@
 
 #define FN_LOOKAT     0x21c33cu  // look-at: r0 = out view matrix, r1 = camera
 #define FN_PROJECTION 0x21c358u  // projection: r0 = out matrix, r1 = camera
+#define FN_EVENT_LOOKAT     0xb57a10u  // the same for event cameras (cutscenes: the meal), their class's own
+#define FN_EVENT_PROJECTION 0xb57fa4u
 #define CAM_FAR       0x30u
 #define CAM_NEAR      0x34u
 #define CAM_ASPECT    0x38u
@@ -118,9 +124,9 @@ void camjit_menu_viewport(int i, float w, float h) {
     pthread_mutex_unlock(&g_lock);
 }
 
-static void lookat(Cpu *c) {
+static void lookat_at(Cpu *c, uint32_t fn) {
     uint32_t out = c->r[0], cam = c->r[1];
-    fnhook_call_original(c, FN_LOOKAT);
+    fnhook_call_original(c, fn);
     if (!readable(out, 64) || !readable(cam, 0x70) || !main_aspect(LDF(cam + CAM_ASPECT))) return;
     pthread_mutex_lock(&g_lock);
     int i = 0;
@@ -134,9 +140,9 @@ static void lookat(Cpu *c) {
     pthread_mutex_unlock(&g_lock);
 }
 
-static void projection(Cpu *c) {
+static void projection_at(Cpu *c, uint32_t fn) {
     uint32_t out = c->r[0], cam = c->r[1];
-    fnhook_call_original(c, FN_PROJECTION);
+    fnhook_call_original(c, fn);
     if (!readable(out, 64) || !readable(cam, 0x70)) return;
     if (!main_aspect(LDF(cam + CAM_ASPECT))) { menu_projection(out, cam); return; }
     float m[16];
@@ -172,6 +178,11 @@ static void projection(Cpu *c) {
             LDF(out + 0x20), LDF(out + 0x24));
 }
 
+static void lookat(Cpu *c) { lookat_at(c, FN_LOOKAT); }
+static void projection(Cpu *c) { projection_at(c, FN_PROJECTION); }
+static void event_lookat(Cpu *c) { lookat_at(c, FN_EVENT_LOOKAT); }
+static void event_projection(Cpu *c) { projection_at(c, FN_EVENT_PROJECTION); }
+
 void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases) {
     pthread_mutex_lock(&g_lock);
     g_on = on;
@@ -204,6 +215,8 @@ void camjit_init(void) {
     g_rw = g_render_size[0], g_rh = g_render_size[1];
     fnhook_set(FN_LOOKAT, hle_register("camjit:lookat", lookat));
     fnhook_set(FN_PROJECTION, hle_register("camjit:projection", projection));
+    fnhook_set(FN_EVENT_LOOKAT, hle_register("camjit:event_lookat", event_lookat));
+    fnhook_set(FN_EVENT_PROJECTION, hle_register("camjit:event_projection", event_projection));
     if (g_test) LOG("[camjit] test: the 3D picture shifted by (%g, %g) render pixels (x right, y down)\n", g_test_xy[0], g_test_xy[1]);
     else LOG("[camjit] main camera hooked (main+0x1C33C view, main+0x1C358 projection): jitter while FSR runs\n");
 }
