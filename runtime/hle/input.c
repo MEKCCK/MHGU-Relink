@@ -5,6 +5,7 @@
 
 #include "../hle.h"
 #include "../kernel.h"
+#include "chat.h"
 #include "input.h"
 #include "../net/net.h"
 
@@ -47,6 +48,7 @@ uint64_t input_npad_state(int32_t sticks[4]) {
 static void fill_state(Cpu *c) {
     emsync_tick();  // (multiplayer small monster sync: on the game's thread, once a frame is plenty)
     hpscale_tick();  // (the hub host's [Monster HP] settings to the others)
+    chat_tick(c);  // (a line typed after "/": sent as a shoutout is, runtime/hle/chat.c)
     uint8_t *s = ARGP(0);
     uint32_t id = LD32(ARG(1));
     memset(s, 0, 40);

@@ -11,6 +11,7 @@ enum { TI_NONE, TI_CHANGED, TI_ENTER, TI_CANCEL };
 void textinput_begin(const char *initial, int max_chars);  // the game shows a text entry (max_chars <= 0: no limit)
 void textinput_end(void);                                  // it is gone (decided, or closed by the game)
 int textinput_poll(char *out, size_t size, int *chars);    // TI_*: what happened since the last poll; the text now
+void textinput_peek(char *out, size_t size);               // the text now (to show it), leaving the events for the poll
 
 // window side (the main thread)
 bool textinput_active(void);
