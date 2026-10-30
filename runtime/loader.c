@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "interp.h"
 #include "mods.h"
 #include "rt.h"
 
 Module g_modules[MAX_MODULES];
-int g_nmodules;
+int g_nmodules, g_nexefs;
 
 enum { DT_NULL = 0, DT_PLTRELSZ = 2, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_RELA = 7, DT_RELASZ = 8,
        DT_INIT = 12, DT_FINI = 13, DT_REL = 17, DT_RELSZ = 18, DT_PLTREL = 20, DT_JMPREL = 23,
@@ -98,10 +99,23 @@ static uint8_t *read_file(const char *path, size_t *len) {
     return p;
 }
 
+// An NSO's size in memory (its segments and bss, page aligned); 0: not an NSO
+static uint32_t nso_size(const char *path) {
+    uint8_t h[0x40];
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    bool ok = fread(h, 1, sizeof h, f) == sizeof h && !memcmp(h, "NSO0", 4);
+    fclose(f);
+    uint32_t data_off, data_size, bss;
+    memcpy(&data_off, h + 0x34, 4), memcpy(&data_size, h + 0x38, 4), memcpy(&bss, h + 0x3C, 4);
+    uint64_t size = ((uint64_t)data_off + data_size + bss + 0xFFF) & ~0xFFFull;
+    return ok && size < 0x10000000u ? (uint32_t)size : 0;
+}
+
 static void load_nso(Module *m, const char *path, uint32_t base) {
     size_t len;
     uint8_t *raw = read_file(path, &len);
-    if (!raw || memcmp(raw, "NSO0", 4)) FATAL("cannot load %s\n", path);
+    if (!raw || len < 0x100 || memcmp(raw, "NSO0", 4)) FATAL("cannot load %s\n", path);
     uint32_t flags = *(uint32_t *)(raw + 0xC);
     uint32_t seg[3][3];  // file_off, mem_off, size
     for (int i = 0; i < 3; i++) memcpy(seg[i], raw + 0x10 + i * 0x10, 12);
@@ -113,6 +127,8 @@ static void load_nso(Module *m, const char *path, uint32_t base) {
     memset(G2H(base), 0, size);
     for (int i = 0; i < 3; i++) {
         uint32_t csize = *(uint32_t *)(raw + 0x60 + i * 4);
+        if ((uint64_t)seg[i][0] + csize > len || (uint64_t)seg[i][1] + seg[i][2] > size)
+            FATAL("%s: segment %d is outside the file or the image\n", path, i);
         uint8_t *dst = (uint8_t *)G2H(base + seg[i][1]);
         if (flags & (1 << i)) {
             size_t got = lz4_decompress(raw + seg[i][0], csize, dst, seg[i][2]);
@@ -231,7 +247,12 @@ static bool relocate(Module *m, bool plugin) {
             }
             switch (type) {
             case R_ARM_NONE: break;
-            case R_ARM_RELATIVE: ST32(where, LD32(where) + m->base); break;
+            case R_ARM_RELATIVE: {  // (a mod's subsdk elsewhere than expected: an address outside its own image is
+                // one of main's, from where the game's layout puts the subsdk: see loader_load)
+                uint32_t v = LD32(where);
+                ST32(where, v + (m->expected && v > m->size ? m->expected : m->base));
+                break;
+            }
             case R_ARM_ABS32: {
                 uint32_t s = resolve(m, si, plugin);
                 ST32(where, s ? s + LD32(where) : 0);
@@ -281,8 +302,33 @@ static bool relocate(Module *m, bool plugin) {
     return true;
 }
 
+bool loader_moved(uint32_t addr, uint32_t slack, int32_t *shift) {
+    for (int i = 2; i < g_nexefs; i++) {
+        const Module *m = &g_modules[i];
+        if (m->expected && addr + slack >= m->expected && addr < m->expected + m->size + slack) {
+            *shift = (int32_t)(m->base - m->expected);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Where a mod's subsdk goes. On the console and in emulators the modules sit one after another: main, the subsdks
+// in order, sdk. A subsdk built for that finds main from its own address (MH4U Port: its base - a fixed gap), and
+// the mod's patches of main jump into it there: that address is the expected one (after main and every subsdk
+// before it, the game's own included, though this port runs none of those). Here sdk is at SDK_BASE, which can be
+// on it: then the subsdk goes in the room between sdk and HLE_BASE instead, at a whole multiple of 256 KiB from the
+// expected address (so the mod's `add pc, pc, #imm` jumps into it, multiples of that, still encode: runtime/mods.c),
+// and its addresses outside its own image are relocated as if it were where expected (main's), mods.c moves the
+// patches' jumps and offsets into it by the difference.
+static uint32_t place_subsdk(uint32_t expected, uint32_t size, uint32_t lo) {
+    uint32_t b = expected;
+    while (b < lo) b += 0x40000;
+    return (uint64_t)b + size <= HLE_BASE ? b : 0;
+}
+
 void loader_load(const char *exefs) {
-    char path[1024];
+    char path[1100];
     static const struct { const char *name; uint32_t base; } mods[] = {{"main", MAIN_BASE}, {"sdk", SDK_BASE}};
     for (unsigned i = 0; i < 2; i++) {
         Module *m = &g_modules[g_nmodules++];
@@ -290,7 +336,40 @@ void loader_load(const char *exefs) {
         snprintf(path, sizeof path, "%s/%s", exefs, m->name);
         load_nso(m, path, mods[i].base);
     }
+    // the mods' subsdks (runtime/mods.h), in their order: the game's own (subsdk0) only take their room in the layout
+    uint32_t expected = MAIN_BASE + g_modules[0].size, lo = SDK_BASE + g_modules[1].size;
+    for (int k = 0; k < 10; k++) {
+        char name[16];
+        snprintf(name, sizeof name, "subsdk%d", k);
+        const char *mod = mods_exefs_file(name, path, sizeof path);
+        if (!mod) {
+            snprintf(path, sizeof path, "%s/%s", exefs, name);
+            expected += nso_size(path);
+            continue;
+        }
+        uint32_t size = nso_size(path), base = size ? place_subsdk(expected, size, lo) : 0;
+        if (!size) FATAL("mod %s: exefs/%s is not an NSO (remove the mod, or turn it off in the Mods tab)\n", mod, name);
+        if (!base || g_nmodules == MAX_MODULES)
+            FATAL("mod %s: no room for exefs/%s (%#x bytes) in the code region\n", mod, name, size);
+        Module *m = &g_modules[g_nmodules++];
+        m->name = strdup(name);
+        m->mod = mod;
+        if (base != expected) m->expected = expected;
+        if (base != expected)
+            LOG("[mods] %s: %s at %08x (the game's layout puts it at %08x, where this port has sdk: its addresses "
+                "outside itself are relocated for %08x)\n", mod, name, base, expected, expected);
+        else
+            LOG("[mods] %s: %s at %08x\n", mod, name, base);
+        load_nso(m, path, base);
+        expected += size;
+        lo = base + size;
+    }
+    g_nexefs = g_nmodules;
     for (int i = 0; i < g_nmodules; i++) relocate(&g_modules[i], false);
+    for (int i = 2; i < g_nexefs; i++) {  // (a subsdk's code runs in the interpreter, as Forge plugins' does)
+        Module *m = &g_modules[i];
+        interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);
+    }
 }
 
 uint32_t loader_module_symbol(const Module *m, const char *name) {

@@ -960,11 +960,15 @@ static void three_same(Cpu *c, uint32_t pc, uint32_t w) {
         for (uint32_t i = 0; i < k; i++) c->v.s[d * 2 + i] = t[i];
         return;
     }
-    if (A == 0xB && B && !U) {  // VPADD integer
+    if ((A == 0xB && B && !U) || (A == 0xA && size < 64)) {  // VPADD / VPMAX / VPMIN integer
         uint32_t per = 64 / size;
         uint64_t vals[16], t[8];
         for (uint32_t i = 0; i < per; i++) { vals[i] = lget(c, n, i, size); vals[per + i] = lget(c, m, i, size); }
-        for (uint32_t i = 0; i < per; i++) t[i] = (vals[2 * i] + vals[2 * i + 1]) & lmask(size);
+        for (uint32_t i = 0; i < per; i++) {
+            uint64_t a = vals[2 * i], b = vals[2 * i + 1];
+            bool gt = U ? a > b : sx(a, size) > sx(b, size);
+            t[i] = A == 0xB ? (a + b) & lmask(size) : (B ? !gt : gt) ? a : b;
+        }
         for (uint32_t i = 0; i < per; i++) lset(c, d, i, size, t[i]);
         return;
     }

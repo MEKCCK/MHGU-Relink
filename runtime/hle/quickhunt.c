@@ -3,6 +3,8 @@
 // (Continue), the character select (the first character) and the welcome message, then orders the quest and departs
 // at the first update of the town the save is in. The save is not changed (no quest fee is paid).
 // MHGU_QUICKHUNT=town: the same up to the town, and stays there.
+// Only quests of the town the save starts in: a Hub quest (10101...) departed from the Village stops on a call
+// through a missing vtable slot (main 0x2125b8, the stage's object; checked 2026-10-30 with no mods).
 //
 // How the game departs: the counter's accept (0x984e94) writes the quest number to sQuestSelector +0xd68 (0 = none)
 // and sets bit 0 of its flags (+0xd65); "Depart on Quest" at the departure point sets bit 3 there. The selector's

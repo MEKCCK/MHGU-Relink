@@ -3,9 +3,11 @@
 // layered over the game's own files at start, nothing is changed on disk. A mod folder may hold:
 //   romfs/   loose files layered over the game's RomFS (same paths as in the game's romfs/ folder; a bare nativeNX/
 //            folder counts as romfs/nativeNX/)
-//   exefs/   IPSwitch patches (*.pchtxt) and IPS / IPS32 patches (<build id>.ips) for the game's code modules.
-//            Only patches to data are applied: the port runs code compiled ahead of time (tools/gen.py), so a
-//            patched instruction would change nothing; those are listed in the log as not applied.
+//   exefs/   IPSwitch patches (*.pchtxt) and IPS / IPS32 patches (<build id>.ips) for the game's code modules, and
+//            code modules of the mod's own (subsdk0..subsdk9 NSOs, as Atmosphere and the emulators load them). The
+//            port runs the game's code compiled ahead of time (tools/gen.py), which never reads its instructions:
+//            every function a patch changes runs in the interpreter instead (from the patched code in memory, as a
+//            cheat's), and so does a subsdk's code (runtime/loader.c places it; mods_patch_code).
 // These folders are found up to three levels down, so a mod unpacked as Mod/Mod/romfs or with an emulator or
 // Atmosphere layout (atmosphere/contents/0100770008DD8000/romfs) works as it is.
 // Mods load in name order; a file in a later mod wins. mods/load_order.txt (one folder name per line, '#'
@@ -21,6 +23,9 @@ struct Module;
 void mods_make_dir(void);  // creates an empty mods/ (standalone: shows players where mods go)
 int mods_romfs_layers(const char **out, int max);  // host folders to layer over the RomFS, in order
 void mods_patch_module(struct Module *m, const uint8_t build_id[32]);  // exefs patches for a loaded module
+void mods_patch_code(void);  // then the patches of main's and sdk's code: once the dispatch tables are set up
+// The mods' exefs/<name> (a subsdk): its path in path, and the mod's name (the last mod that has one); NULL: none
+const char *mods_exefs_file(const char *name, char *path, size_t n);
 void forge_init(void);  // Forge plugins from the mods' RomFS (runtime/forge.c): before the game starts
 void hpscale_init(void);  // large monster HP by the number of hunters (runtime/hle/hpscale.c)
 void villagehub_init(void);  // Village quests at the Hub / Pub counter (runtime/hle/villagehub.c)

@@ -31,7 +31,10 @@ static void module_init(Cpu *c, Module *m) {
         }
 }
 static void rtld_init_sdk(Cpu *c) { module_init(c, &g_modules[1]); }
-static void rtld_init_main(Cpu *c) { module_init(c, &g_modules[0]); }
+static void rtld_init_main(Cpu *c) {  // (then the mods' subsdks, in the order rtld loads them: after main)
+    module_init(c, &g_modules[0]);
+    for (int i = 2; i < g_nexefs; i++) module_init(c, &g_modules[i]);
+}
 
 // Claim the guest window before anything else can map there.
 __attribute__((constructor(101))) static void reserve_guest_space(void) {
@@ -50,6 +53,7 @@ static void boot(const char *root) {
     loader_load(exefs);
     kernel_init();
     dispatch_init();
+    mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)

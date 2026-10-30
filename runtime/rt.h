@@ -44,12 +44,20 @@ typedef struct Module {
     uint32_t symtab, strtab, strsz, nsyms;
     uint32_t tls_off, tls_size;  // a plugin that uses __thread: its block in a thread's (from the thread pointer), and its size
     uint32_t bss_size;  // (the end of data_size)
+    // A mod's subsdk: the address the game's layout gives it (after main and the subsdks before it, as on the console
+    // and in emulators), when it is loaded elsewhere (base); 0: at its own base. See loader_load.
+    uint32_t expected;
+    const char *mod;  // the mod it comes from (a subsdk), else NULL
 } Module;
 
-#define MAX_MODULES 128  // main + sdk + up to MAX_MODULES - 2 Forge plugins
+#define MAX_MODULES 128  // main + sdk + mods' subsdks + Forge plugins
 extern Module g_modules[MAX_MODULES];
 extern int g_nmodules;
+extern int g_nexefs;  // the code modules of exefs/: main, sdk, then the mods' subsdks (g_modules[0..g_nexefs)); then Forge's
 void loader_load(const char *exefs_dir);
+// A mod's subsdk not where the game's layout puts it: is addr within slack bytes of the range it expects (an address
+// the mod's patches use for it)? *shift: where it is minus where it is expected. false: no such module.
+bool loader_moved(uint32_t addr, uint32_t slack, int32_t *shift);
 uint32_t loader_find_symbol(const char *name);
 // An NRO (a module loaded at run time: Forge plugins) at base, relocated against the loaded modules. NULL if invalid.
 Module *loader_load_nro(const char *name, const uint8_t *data, size_t len, uint32_t base);

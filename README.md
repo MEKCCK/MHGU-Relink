@@ -214,8 +214,11 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
   later load too, after the listed ones, until you turn them off; a mod turned off keeps its place in the order). It also compares the mods and lists the ones that change the same game files (and which of
   the two is used), and can apply a suggested order, with the mods that change the most files first.
-- exefs patches (`.pchtxt`, `.ips`) are applied when they change data. Patches to game code can't be applied, because
-  the code is precompiled; the log lists them.
+- exefs patches (`.pchtxt`, `.ips` / IPS32) are applied, to data and to code. The game's code is precompiled, so a
+  function a patch changes runs in an interpreter instead (a little slower, only that function). A mod's own code
+  modules (`exefs\subsdk1` and so on, as in the
+  [MH4U Port](https://github.com/Scrimas/MH4U-port-to-MHGU)) are loaded and run in the interpreter too. The log says
+  what was patched and loaded (`[mods]` lines).
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with
   Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
   use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions

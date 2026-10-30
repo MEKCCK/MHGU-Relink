@@ -673,6 +673,31 @@ applies them at once (config_live_bind). An older ini gets the section added wit
   (a key and a mouse button chosen for B, F12 refused, saved, reset). Not tried in the game by hand: the game started
   with an older ini, which got the section.
 
+## exefs code mods: subsdk modules and code patches (2026-10-30)
+
+Asked for the MH4U Port (github.com/Scrimas/MH4U-port-to-MHGU, core 1.7.1: exefs/subsdk1 and an IPS32 of main, 209
+records: 154 hook jumps `add pc, pc, #x << 18`, 16 pc-relative literals into subsdk1, 39 immediates). Before, the
+loader ran main and sdk only and code patches were skipped (logged as not applied).
+- Code patches of main and sdk (runtime/mods.c): kept at load, written by mods_patch_code once the dispatch tables are
+  set up (boot, before Forge); every function they touch runs in the interpreter from then on (dispatch_interpret, as
+  cheats' code changes). Data patches as before. MH4U Port: 170 functions interpreted.
+- Mods' subsdk0..9 (runtime/loader.c): on the console and in emulators the modules sit one after another (main, the
+  subsdks, sdk; Ryujinx: main 0x704000, subsdk0, subsdk1 at 0x2E19000). MH4U Port's subsdk1 finds main as its own base
+  minus MAIN_GAP = size(main) + size(subsdk0) = 0x2715000, and its hooks jump there: here 0x2915000, inside sdk
+  (0x2400000-0x2D41000). So a subsdk goes where expected when that is free, else in the room between sdk and
+  HLE_BASE at a multiple of 256 KiB from it (0x2D55000: `add pc` offsets are multiples of that), with Module.expected:
+  its R_ARM_RELATIVE words outside its own image get the expected base (main's addresses), and mods_patch_code moves
+  the patches' B / BL, `add` / `sub pc, pc, #imm` and pc-relative offsets (within 4 KiB) into it by the difference
+  (loader_moved; MH4U Port: 169). Its code is interpreted; its DT_INIT runs after main's (rtld_init_main). The
+  game's own subsdk0 (movies) still isn't loaded, but takes its room in the layout.
+- Interpreter: integer VPMAX / VPMIN (also in tools/neon.py), the only instruction of subsdk1's code it lacked
+  (checked: every word of its text through tools/lifter.py).
+- Checked (hidden window, a test save): the mod's module_init finds main ("main 200000: ok"), its tables, gear, text
+  and quest lists load; GU quest 101 departs and plays with it. Its own Tigerstripe Zamtrios quest (11493), by hand
+  (the user, a progressed save): listed at the Hub counter, departs, the monster fights. (MHGU_QUICKHUNT can't depart
+  a Hub quest from the Village: a plain GU Hub quest stops the same way with no mods.) Not measured: the frame rate
+  cost of the interpreted functions in a hunt.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
