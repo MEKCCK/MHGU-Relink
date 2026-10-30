@@ -23,7 +23,6 @@ void vk_fsr_draw(const FsrDraw *d);        // exec.c draw(): may run FSR (the st
 // copied to, and the depth target drawn with them, as stand-ins at the output size (else t itself). depth: t is a
 // depth target of a pass whose colour targets have stand-ins.
 NvnTexture *vk_fsr_map(NvnTexture *t, bool depth);
-bool vk_fsr_hud(void);  // exec.c: from the start of the HUD to the frame's present (vk_fsr_map has stand-ins)
 NvnTexture *vk_fsr_present(NvnTexture *t);  // device.c backend_present: the texture to show (its stand-in)
 bool vk_fsr_input(NvnTexture *t);  // t is the full-screen image FSR upscales (kept RGBA8: textures.c vk_rt_widen)
 
