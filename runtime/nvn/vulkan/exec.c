@@ -2802,11 +2802,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // Layer 110 is the loading screen's scrolling backdrop: strips at y 168 / 433 / 570 that must stay one picture.
                 // The generic rule anchored each strip to a different edge and flattened it, leaving gaps between them.
                 // They keep their height (as on a stretched 16:9 canvas), so nothing moves vertically.
+                bool loading_strip = false;
                 if (fabsf(pos_z - 110.0f) < 0.5f) {
                     sy = 1.0f;
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
-                    if (fabsf(pos_y - 168.0f) < 0.3f || fabsf(pos_y - 433.0f) < 0.3f || fabsf(pos_y - 570.0f) < 0.3f) ui_loading_pass = true;
+                    loading_strip = fabsf(pos_y - 168.0f) < 0.3f || fabsf(pos_y - 433.0f) < 0.3f || fabsf(pos_y - 570.0f) < 0.3f;
+                    if (loading_strip) ui_loading_pass = true;
                 }
                 // Front-end screens keep their backdrop 16:9: the HUD stays on it as with the 16:9 anchor. Edges / 21:9 / 32:9
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
@@ -2924,8 +2926,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         if (vanchor == V_CENTER) anchor = ANCHOR_CENTER;
                         else if (vanchor == V_TOP) anchor = pos_x <= 430.0f ? ANCHOR_LEFT : pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_CENTER;
                     }
-
-                    if (anchor == ANCHOR_LEFT) {
+                    // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
+                    // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
+                    // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
+                    if (loading_strip) {
+                        new_pos_x = pos_x * s;
+                    } else if (anchor == ANCHOR_LEFT) {
                         new_pos_x = anchor_left + pos_x * s;
                     } else if (anchor == ANCHOR_RIGHT) {
                         new_pos_x = anchor_right - (1280.0f - pos_x) * s;
