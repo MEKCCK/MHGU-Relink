@@ -703,6 +703,9 @@ affected (its own sleep). Since the Linux port began; a 4-core machine shows it 
    wants them held at the same moment would still miss a quick finger roll at very high frame rates (30 Hz polling
    hid that); a 30 Hz input polling option would cover it at up to 33 ms of input latency - not needed so far.
    Still to check: other weapons' timed inputs (Charge Blade, Insect Glaive, Styles') for other per-update windows.
+12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
+   machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
+   mapped; what is left and how: docs/research/title-menu.md.
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
