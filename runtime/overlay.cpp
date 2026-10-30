@@ -159,6 +159,7 @@ void overlay_toggle_settings(void) {
 
 bool overlay_event(const SDL_Event *e) {
     if (!g_enabled) return false;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && settings_panel_key((int)e->key.scancode)) return true;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && e->key.scancode == SDL_SCANCODE_F1) {
         overlay_toggle_settings();
         return true;
