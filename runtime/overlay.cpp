@@ -30,6 +30,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
+#include "hle/chat.h"
 #include "settings_panel.h"
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -158,6 +159,7 @@ void overlay_toggle_settings(void) {
 
 bool overlay_event(const SDL_Event *e) {
     if (!g_enabled) return false;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && settings_panel_key((int)e->key.scancode)) return true;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && e->key.scancode == SDL_SCANCODE_F1) {
         overlay_toggle_settings();
         return true;
@@ -437,6 +439,29 @@ static void draw_notice(uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(at_text.x, at_text.y + ts.y + gap), color(.96f, .97f, 1, 1), text.c_str(), nullptr, wrap);
 }
 
+// The line of chat being typed ("/", runtime/hle/chat.c): where the player dragged it (at first above the game's
+// chat window), wrapped
+static void draw_chat(const char *line, uint64_t now, float scale) {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImFont *font = ImGui::GetFont();
+    float size = ImGui::GetFontSize() * 1.25f, pad = 8 * scale, bar = 4 * scale;
+    std::string text = std::string("Chat: ") + line + ((now / 500000000ull) & 1 ? "_" : " ");
+    float wrap = std::min(vp->WorkSize.x * .45f, 560 * scale);  // (a long line wraps; the box grows upwards)
+    ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, wrap, text.c_str());
+    float w = std::max(ts.x, 320 * scale) + bar + 2 * pad, h = ts.y + 2 * pad;
+    float left, low;
+    chat_position(&left, &low);
+    float bottom = vp->WorkPos.y + vp->WorkSize.y * low;
+    ImVec2 p0(vp->WorkPos.x + vp->WorkSize.x * left, bottom - h), p1(p0.x + w, bottom);
+    chat_set_box((p0.x - vp->WorkPos.x) / vp->WorkSize.x, (p0.y - vp->WorkPos.y) / vp->WorkSize.y,
+                 (p1.x - vp->WorkPos.x) / vp->WorkSize.x, (p1.y - vp->WorkPos.y) / vp->WorkSize.y);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(p0, p1, IM_COL32(6, 10, 17, 235), 6 * scale);
+    dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), IM_COL32(111, 216, 255, 255), 6 * scale, ImDrawFlags_RoundCornersLeft);
+    dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), IM_COL32(244, 247, 252, 255), text.c_str(), nullptr,
+                wrap);
+}
+
 // ------------------------------------------------------------------ frames (game thread)
 static std::mutex g_snap_lock;  // the copy the render thread draws
 static ImDrawData g_snap;
@@ -457,8 +482,10 @@ void overlay_frame(void *cpu) {
     bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
+    char line[256];
+    bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
-    if (!open && !free_render && !notice) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !chat) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -522,6 +549,7 @@ void overlay_frame(void *cpu) {
     }
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
     if (notice) draw_notice(now, scale);
+    if (chat) draw_chat(line, now, scale);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();

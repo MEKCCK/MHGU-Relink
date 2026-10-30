@@ -5,6 +5,7 @@
 #include "settings_icons.h"
 #include "app_actions.h"
 #include "overlay.h"
+#include "keymap.h"
 #include "modorder.h"
 #include "net/net.h"
 #include "imgui_internal.h"
@@ -25,11 +26,11 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts };
+enum class View { Main, Choices, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
-    bool enabled = true, cold = false, action = false;
+    bool enabled = true, cold = false, action = false, warn = false;
     std::function<void(int)> adjust;
     std::function<void()> activate;
 };
@@ -73,7 +74,8 @@ struct State {
     ImVec2 move_start = {}, move_position = {};
     bool position_override = false;
 } s;
-std::atomic<bool> request_exit, request_back, is_dirty, is_confirming;
+std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing;
+std::atomic<int> captured_key{-1}; // (the key pressed while the chat key is being chosen; -1: none yet)
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
 std::string fmt(const char *text, ...) {
     char buffer[512];
@@ -225,7 +227,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(hp.village);
     SAME(hp.quests);
 #undef SAME
-    if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key))
+    if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
+        strcmp(a.chat_key, b.chat_key))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -478,6 +481,23 @@ void hub_check(std::vector<Row> &rows) {
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
 }
+// The key that opens a line of chat; red when the keyboard controls already use it (keymap.h)
+void chat_key_row(std::vector<Row> &rows) {
+    Row r;
+    r.id = "chat.key";
+    r.title = tr("Chat key");
+    SDL_Scancode key = SDL_GetScancodeFromName(s.draft.chat_key);
+    r.value = key != SDL_SCANCODE_UNKNOWN ? s.draft.chat_key : tr("None");
+    if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_in_use((int)key) : nullptr) {
+        r.value += std::string(" (") + tr("in use:") + " " + tr(use) + ")";
+        r.warn = true;
+    }
+    r.activate = []() {
+        captured_key = -1;
+        push(View::KeyCapture, "capture.cancel");
+    };
+    rows.push_back(std::move(r));
+}
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
     switch (s.page) {
@@ -515,6 +535,7 @@ void reset_section() {
         c.background_input = f.background_input;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
+        SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         break;
     case 3:
         c.ldn_port = f.ldn_port;
@@ -803,6 +824,7 @@ std::vector<Row> main_rows() {
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, cold("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, cold("MouseSensitivity"));
+        chat_key_row(r);
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, cold("Port"));
@@ -961,6 +983,23 @@ std::vector<Row> rows_for_view(bool *open) {
     } else if (s.view == View::Conflicts) {
         conflict_rows(r);
         action(r, "conflicts.back", tr("Back"), []() { pop(); });
+    } else if (s.view == View::KeyCapture) {
+        int key = captured_key.exchange(-1);
+        const char *name = key > 0 ? SDL_GetScancodeName((SDL_Scancode)key) : "";
+        if (key == SDL_SCANCODE_ESCAPE)
+            pop();
+        else if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
+            SDL_strlcpy(s.draft.chat_key, name, sizeof s.draft.chat_key);
+            pop();
+        } else if (key > 0)
+            s.error = tr("That key can't be used for chat.");
+        if (s.view == View::KeyCapture) {
+            action(r, "capture.none", tr("None"), []() {
+                s.draft.chat_key[0] = 0;
+                pop();
+            });
+            action(r, "capture.cancel", tr("Cancel"), []() { pop(); });
+        }
     } else if (s.view == View::Move) {
         action(r, "move.accept", tr("Accept"), []() { pop(); });
         action(r, "move.cancel", tr("Cancel"), []() {
@@ -1127,6 +1166,7 @@ void draw_rows(std::vector<Row> &rows) {
         }
         w->DrawList->PushClipRect(rect.Min, rect.Max, true);
         ImU32 ink = r.enabled ? IM_COL32(244, 247, 252, 255) : IM_COL32(132, 145, 160, 255);
+        ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255) : ink;
         w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .5f, p.y + (h - label.y) * .5f), ink,
                              r.title.c_str(), nullptr, wrap);
         if (!r.value.empty()) {
@@ -1142,7 +1182,7 @@ void draw_rows(std::vector<Row> &rows) {
                 value += "...";
             }
             auto sz = ImGui::CalcTextSize(value.c_str());
-            w->DrawList->AddText(ImVec2(p.x + rw - font * .5f - sz.x, p.y + (h - font) * .5f), ink,
+            w->DrawList->AddText(ImVec2(p.x + rw - font * .5f - sz.x, p.y + (h - font) * .5f), value_ink,
                                  value.c_str());
         }
         w->DrawList->PopClipRect();
@@ -1161,6 +1201,12 @@ void settings_panel_request_close() { request_exit.store(true); }
 void settings_panel_request_back() { request_back.store(true); }
 bool settings_panel_dirty() { return is_dirty.load(); }
 bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
+bool settings_panel_key(int scancode) {
+    if (!is_capturing.load())
+        return false;
+    captured_key = scancode;
+    return true;
+}
 // Ownership has to precede NewFrame: native cancel/windowing runs there.
 void settings_panel_before_frame(bool open) {
     if (!open && !request_exit.load())
@@ -1198,6 +1244,7 @@ void settings_panel(bool *open) {
         s.editing = false;
         is_dirty = false;
         is_confirming = false;
+        is_capturing = false;
         return;
     }
     if (!s.editing) {
@@ -1345,6 +1392,7 @@ void settings_panel(bool *open) {
                                                             : s.view == View::Reset   ? "Reset this tab?"
                                                             : s.view == View::Move    ? "Move menu"
                                                             : s.view == View::Conflicts ? "Mod conflicts"
+                                                            : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
                                                                                       : "Unsaved changes");
         ImGui::TextWrapped("%s", title);
     }
@@ -1435,6 +1483,7 @@ void settings_panel(bool *open) {
     ImGui::PopStyleColor(2);
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
+    is_capturing = *open && s.view == View::KeyCapture;
     if (!*open)
         s.editing = false;
 }

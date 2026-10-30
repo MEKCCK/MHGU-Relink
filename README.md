@@ -127,7 +127,7 @@ Click in the game window to capture the mouse for the camera; Escape lets it go 
 window). `MouseSensitivity` in the ini's `[Mouse]` section sets its speed; the game's own camera options (speed,
 inverted axes) apply to it too.
 
-When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes.
+When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes. `/` opens a line of chat anywhere, also in a quest (where the game itself only has shoutouts): type (up to 120 characters), Enter sends it to everyone as a shoutout is sent, split between words into lines of the chat window, Escape cancels. While typing, the mouse drags the box elsewhere (kept in `chat_box.txt`). Change the key in Settings (F1), Controls, Chat key: it shows red when the keyboard controls already use that key.
 
 Other keys: F1 opens the settings menu, Alt+Enter or F11 switches between windowed and full screen, F12 takes a
 screenshot, F7 cycles MSAA.
