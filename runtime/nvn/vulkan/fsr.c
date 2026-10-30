@@ -19,8 +19,9 @@
 //    so the HUD and the final draw happen at full resolution, and the present shows P' (vk_fsr_present).
 //  - Menus without a 3D scene that draw 3D models with the main camera over their 2D (Character Select's hunter): the
 //    first 2D draw into H started the HUD with no scene, so the models after it got no anti-aliasing. From the frame
-//    after one like that (>= 16 such depth-writing draws into H after its first 2D draw, < 16 before it), the start of
-//    the HUD waits until as many have been drawn (menu_models_late): they, and the 2D under them, go through FSR.
+//    after one like that (such depth-writing draws into H after its first 2D draw, < 16 before it), the start of the
+//    HUD waits until as many have been drawn (menu_models_late): they, and the 2D under them, go through FSR, as the
+//    frame's scene however few they are (character creation's hunter: 12 draws).
 //    Menus that draw 3D models with a camera of their own (the smithy's equipment preview, over the scene): its
 //    draws are found by its projection (camera_jitter.c camjit_menu_cameras), which gets the jitter in its viewport's
 //    pixels, and from the frame after one with such draws into H after its first 2D draw the HUD waits for as many
@@ -1371,7 +1372,7 @@ static bool menu_camera_draw(const FsrDraw *d) {
 
 static void frame_begin(void) {
     frame_open = true;
-    menu_models_late = menu_2d && menu_2d_scene < 16 && menu_models >= 16 ? menu_models : 0;
+    menu_models_late = menu_2d && menu_2d_scene < 16 ? menu_models : 0;
     menu_cams_late = menu_cams;
     menu_2d = false, menu_2d_scene = menu_models = menu_cams = 0;
     redirect = frame_fsr = false;
@@ -1584,7 +1585,8 @@ static void hud_start(const char *why) {
     NvnTexture *depth = scene_depth(&dn);
     CamRecord cam;
     bool have_cam = frame_camera(&cam);
-    bool scene = depth && dn >= 16 && have_cam;
+    // (a HUD that waited for a menu's 3D models: they are the scene, however few)
+    bool scene = depth && (dn >= 16 || (dn && (menu_models_late || menu_cams_late))) && have_cam;
     frame_fsr = scene && run_fsr(g_h, hs, depth, frame_mask(), &cam);
     if (!frame_fsr) scale_to_stand(g_h, hs);
     {  // every change between FSR and plain scaling, with the reason (always logged; at most 500 lines)
