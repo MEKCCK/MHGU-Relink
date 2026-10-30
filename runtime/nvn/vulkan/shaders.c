@@ -402,6 +402,22 @@ static const char *builtin_src(const char *name, int *stage) {
                "layout(location = 0) out vec4 o;\n"
                "void main() { o = texelFetch(c, ivec2(gl_FragCoord.xy), 0); }\n";
     }
+    if (!strcmp(name, "expand.frag.depth") || !strcmp(name, "expand.frag.depth.s")) {  // (the same for depth / stencil)
+        *stage = STAGE_FRAGMENT;
+        if (name[17] == '.')
+            return "#version 450\n"
+                   "#extension GL_ARB_shader_stencil_export : require\n"
+                   "layout(set = 0, binding = 0) uniform sampler2D d;\n"
+                   "layout(set = 0, binding = 1) uniform usampler2D s;\n"
+                   "void main() {\n"
+                   "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
+                   "  gl_FragDepth = texelFetch(d, p, 0).r;\n"
+                   "  gl_FragStencilRefARB = int(texelFetch(s, p, 0).r);\n"
+                   "}\n";
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D d;\n"
+               "void main() { gl_FragDepth = texelFetch(d, ivec2(gl_FragCoord.xy), 0).r; }\n";
+    }
     return NULL;
 }
 

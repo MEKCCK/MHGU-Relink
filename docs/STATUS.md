@@ -96,9 +96,11 @@ Fixed on the way (2026-10-20):
   straight into the finished picture, after the game's FXAA, in the same pass as the menu's 2D draws, so they had no
   MSAA. With MSAA on, a full-size colour target that gets depth-writing draws without MSAA past the game's FXAA pass
   is marked (TexBackend.ms_models, exec.c full_picture); from the next frame on, the first depth-testing draw (or depth
-  clear) into it copies the picture into every sample of its multisampled companion (ms_expand), and the rest of the
-  frame's draws into it stay there: the 2D draws after the models shaded per sample (else the seams between their quads
-  show), so a preview that switches between models and 2D costs one copy and one resolve a frame. The 3D scene's passes
+  clear) into it copies the picture, and the depth the models test against unless the pass clears it (the smithy's
+  preview doesn't), into every sample of the multisampled companions (ms_expand; without VK_EXT_shader_stencil_export
+  the stencil starts at 0, as vk_ms_resolve drops it), and the rest of the frame's draws into it stay there: the 2D
+  draws after the models shaded per sample (else the seams between their quads show), so a preview that switches
+  between models and 2D costs one copy and one resolve a frame. The 3D scene's passes
   (before the FXAA pass) keep their rules; with MSAA off, or without sampleRateShading, nothing changes.
 - FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.

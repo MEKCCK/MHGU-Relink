@@ -1091,8 +1091,11 @@ static uint32_t leading_clears(uint32_t w, uint32_t h, bool stencil) {
 static VkDescriptorSetLayout rs_set_layout;
 static VkPipelineLayout rs_layout;
 
-// kind 1 depth, 2 depth + stencil; 3 colour into a multisampled target of `samples` (ms_expand)
+// kind 1 depth, 2 depth + stencil; into a multisampled target of `samples` (ms_expand): 3 colour, 4 depth, 5 depth +
+// stencil
 static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) {
+    static const char *frag[] = {NULL, "resolve.frag.depth", "resolve.frag.depth.s", "expand.frag", "expand.frag.depth",
+                                 "expand.frag.depth.s"};
     static struct { VkRenderPass rp; int kind; VkPipeline p; } tab[32];
     static int n;
     for (int i = 0; i < n; i++) if (tab[i].rp == rp && tab[i].kind == kind) return tab[i].p;
@@ -1111,7 +1114,7 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) 
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vk_builtin_shader("resolve.vert"), .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = vk_builtin_shader(kind == 3 ? "expand.frag" : kind == 2 ? "resolve.frag.depth.s" : "resolve.frag.depth"),
+         .module = vk_builtin_shader(frag[kind]),
          .pName = "main"}};
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -1125,7 +1128,7 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) 
     VkStencilOpState so = {VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_REPLACE, VK_COMPARE_OP_ALWAYS, 0xFF, 0xFF, 0};
     VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
                                                 .depthTestEnable = kind != 3, .depthWriteEnable = kind != 3,
-                                                .depthCompareOp = VK_COMPARE_OP_ALWAYS, .stencilTestEnable = kind == 2,
+                                                .depthCompareOp = VK_COMPARE_OP_ALWAYS, .stencilTestEnable = kind == 2 || kind >= 4,
                                                 .front = so, .back = so};
     VkPipelineColorBlendAttachmentState all = {.colorWriteMask = 0xF};
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -1214,20 +1217,33 @@ void vk_ms_resolve(TexBackend *b) {
 // Guild Card) straight into the finished picture, after the game's FXAA and outside the 3D scene's passes, so they
 // had no anti-aliasing. Such a target (TexBackend.ms_models: depth-writing draws went into it lately, the first ones
 // without MSAA) gets its picture copied into every sample of its multisampled image m as the frame's first pass of its
-// depth-testing draws begins (pass_models), which then renders with MSAA like the scene's passes. f: the format the
-// pass renders it as. false: not possible (the pass goes without).
+// depth-testing draws begins (pass_models), which then renders with MSAA like the scene's passes. Its depth / stencil
+// target too, unless the pass clears it whole first (the smithy's preview draws over depth it doesn't clear). f: the
+// format the pass renders a colour target as. false: not possible (the pass goes without).
 static bool ms_expand(VkCommandBuffer cb, TexBackend *b, TexBackend *m, VkFormat f) {
     static const VkComponentMapping id = {0};
-    VkRenderPass rp = vk_render_pass(&f, 1, VK_FORMAT_UNDEFINED, m->samples);
-    VkPipeline p = resolve_pipeline(rp, 3, m->samples);
-    VkImageView src = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
-    VkImageView dst = vk_image_view(m, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
-    if (!p || !src || !dst) return false;
+    bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+    // (without stencil export, as vk_ms_resolve: depth only, the stencil set to 0)
+    bool sten = depth && (b->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) && g_vk.stencil_export;
+    VkFormat none = VK_FORMAT_UNDEFINED;
+    VkRenderPass rp = depth ? vk_render_pass(&none, 0, m->format, m->samples) : vk_render_pass(&f, 1, none, m->samples);
+    VkPipeline p = resolve_pipeline(rp, !depth ? 3 : sten ? 5 : 4, m->samples);
+    VkImageView src = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, depth ? b->format : f, 0, 1, 0, 1, id,
+                                    depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT);
+    VkImageView src_s = sten ? vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, b->format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_STENCIL_BIT)
+                             : VK_NULL_HANDLE;
+    VkImageView dst = vk_image_view(m, VK_IMAGE_VIEW_TYPE_2D, depth ? m->format : f, 0, 1, 0, 1, id,
+                                    depth ? m->aspect : VK_IMAGE_ASPECT_COLOR_BIT);
+    if (!p || !src || !dst || (sten && !src_s)) return false;  // (kind 4: the stencil test writes reference 0)
     VkDescriptorSet set = vk_alloc_set(rs_set_layout);
-    VkDescriptorImageInfo ii = {vk_default_sampler(false), src, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
-                              .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
-    vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);
+    VkDescriptorImageInfo ii[2] = {{vk_default_sampler(false), src, VK_IMAGE_LAYOUT_GENERAL},
+                                   {vk_default_sampler(false), src_s, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet w[2] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[0]},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}};
+    vkUpdateDescriptorSets(g_vk.dev, sten ? 2 : 1, w, 0, NULL);
     VkRect2D area = {{0, 0}, {b->width, b->height}};
     VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp,
                                 .framebuffer = vk_framebuffer(rp, &dst, 1, b->width, b->height), .renderArea = area};
@@ -1241,7 +1257,7 @@ static bool ms_expand(VkCommandBuffer cb, TexBackend *b, TexBackend *m, VkFormat
     vkCmdEndRenderPass(cb);
     vk_full_barrier(cb);
     ss_forget();
-    gp_mark("  MSAA: the picture into the samples (3D models over it)");
+    gp_mark(depth ? "  MSAA: depth into the samples (3D models)" : "  MSAA: the picture into the samples (3D models over it)");
     static bool logged;
     if (!logged) logged = true, LOG("[vk] MSAA %ux for 3D models drawn over a finished %ux%u picture (menus)\n", m->samples,
                                     b->width, b->height);
@@ -1359,8 +1375,8 @@ static void begin_pass(void) {
             TexBackend *b = att[k];
             bool clr = (cleared >> (att_index[k] < 0 ? 8 : att_index[k])) & 1;
             bool valid = b->ms && b->ms_valid && b->ms->samples == msaa;
-            // (its picture into the samples first, as the models begin)
-            expand[k] = pass_models && pass_want_depth && !clr && !valid && att_index[k] >= 0 && b->ms_models;
+            // (its picture, and the depth the models test against, into the samples first, as the models begin)
+            expand[k] = pass_models && pass_want_depth && !clr && !valid && (att_index[k] < 0 || b->ms_models);
             ok = b->width == minw && b->height == minh && (clr || valid || expand[k]);
         }
         VkImageView msv[9];
