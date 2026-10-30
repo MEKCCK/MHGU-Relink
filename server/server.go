@@ -26,6 +26,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	mrand "math/rand/v2"
 	"net"
 	"sort"
 	"sync"
@@ -79,7 +80,7 @@ type Config struct {
 	MaxConnsPerIP int     // connections from one IP address
 	MaxHubs       int     // hubs listed at once
 	MaxHubsPerIP  int     // hubs one IP address hosts
-	ListMax       int     // hubs in one LIST answer
+	ListMax       int     // hubs in one LIST answer (the game's Join Hub list shows 18: 3 pages of 6)
 	ReqRate       float64 // LIST / JOIN requests a second per IP address (burst: ReqBurst)
 	ReqBurst      float64
 	Bandwidth     float64       // bytes a second per pair and direction (TCP), and per pair (UDP)
@@ -90,7 +91,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 24,
+		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, HandshakeTime: 10 * time.Second, PingEvery: 15 * time.Second,
 	}
 }
@@ -369,6 +370,13 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	}
 	s.mu.Unlock()
 	free := func(e *entry) bool { return e.info[niNodeCount] < e.info[niNodeMax] }
+	// more hubs than one answer holds: a random ListMax of them, those with a free place before full ones, so each
+	// search (the game's Retry) can show others
+	if len(es) > s.cfg.ListMax {
+		mrand.Shuffle(len(es), func(i, j int) { es[i], es[j] = es[j], es[i] })
+		sort.SliceStable(es, func(i, j int) bool { return free(&es[i]) && !free(&es[j]) })
+		es = es[:s.cfg.ListMax]
+	}
 	sort.Slice(es, func(i, j int) bool {
 		a, b := &es[i], &es[j]
 		if free(a) != free(b) {
@@ -379,9 +387,6 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 		}
 		return a.created.After(b.created)
 	})
-	if len(es) > s.cfg.ListMax {
-		es = es[:s.cfg.ListMax]
-	}
 	out := u32(uint32(len(es)))
 	for i := range es {
 		out = append(out, u64(es[i].id)...)

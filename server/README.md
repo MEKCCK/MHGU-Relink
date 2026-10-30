@@ -40,7 +40,7 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-max-conns-per-ip` | 24 | connections at once from one IP address |
 | `-max-hubs` | 2000 | hubs listed at once |
 | `-max-hubs-per-ip` | 4 | hubs from one IP address |
-| `-list-max` | 24 | hubs in one search answer (with free places first, then the fullest, then the newest) |
+| `-list-max` | 18 | hubs in one search answer, as many as the game's Join Hub list shows (3 pages of 6). With more hubs than that, each search gets a random choice of them (hubs with a free place before full ones), so a Retry shows others. The answer is sorted: free places first, then the fullest, then the newest |
 | `-bandwidth` | 1048576 | bytes a second per player link and direction (a hub uses far less) |
 | `-v` | off | log hubs and joins (never IP addresses) |
 

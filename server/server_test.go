@@ -115,6 +115,48 @@ func TestKeysAndVersions(t *testing.T) {
 	}
 }
 
+// More hubs than ListMax: each answer is a random choice of hubs with a free place (full ones only when those run
+// out), sorted (the fullest first), and repeated searches see more than ListMax of them.
+func TestListRandomChoice(t *testing.T) {
+	s := start(t, func(c *Config) {
+		c.ListMax, c.MaxHubsPerIP, c.MaxConnsPerIP, c.ReqRate, c.ReqBurst = 4, 20, 100, 1000, 1000
+	})
+	full := map[uint64]bool{}
+	for i := 0; i < 8; i++ {
+		host(t, s, 0, byte(1+i%3))
+	}
+	for i := 0; i < 3; i++ {
+		_, id := host(t, s, 0, 4)
+		full[id] = true
+	}
+	seen := map[uint64]bool{}
+	for n := 0; n < 30; n++ {
+		c := dial(t, s)
+		send(t, c, tList, header(2, 0))
+		p := expect(t, c, tHubs)
+		c.Close()
+		if k := binary.LittleEndian.Uint32(p); k != 4 {
+			t.Fatalf("%d hubs in an answer, want 4", k)
+		}
+		last := byte(255)
+		for i := 0; i < 4; i++ {
+			e := p[4+i*(8+netInfoSize):]
+			id, players := binary.LittleEndian.Uint64(e), e[8+niNodeCount]
+			if full[id] {
+				t.Fatal("a full hub was listed while hubs with a free place were left out")
+			}
+			if players > last {
+				t.Fatalf("answer not sorted: %d players after %d", players, last)
+			}
+			last = players
+			seen[id] = true
+		}
+	}
+	if len(seen) <= 4 {
+		t.Fatalf("30 searches saw only %d hubs", len(seen))
+	}
+}
+
 func TestUpdateAndClose(t *testing.T) {
 	s := start(t, nil)
 	hc, id := host(t, s, 0, 1)

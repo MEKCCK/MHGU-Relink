@@ -224,7 +224,9 @@ Plan and security notes: docs/research/internet-hubs.md.
   answers 20 copies of a real hosted hub, each with its own session id, bssid and hunter name "Hunter NN") and two
   instances on copies of testsave\save_0 (ports 39500 / 39600, test key): pages 1-3 held Hunter 01-18. So the order
   matters: LAN / Join hubs first (ldn_scan), then the server's (server.go list: hubs with a free slot first, then
-  the fuller, then the newest; ListMax 24).
+  the fuller, then the newest). Since then (server.go list) the server's ListMax is 18 and, with more hubs than
+  that, each LIST is a random 18 (shuffled, hubs with a free place kept before full ones), then sorted as before: a
+  Retry shows others. Not done: passworded hubs also take places in the list (they could be sorted last).
 
 ## Event camera pans skippable with A (2026-10-21)
 
