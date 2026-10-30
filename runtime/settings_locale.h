@@ -44,6 +44,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Frame rate limit", "Límite de FPS"},
         {"VSync", "Sincronización vertical"},
         {"Shader prewarm", "Precarga de shaders"},
+        {"FXAA mode", "Modo de FXAA"},
         {"Application audio", "Audio de la aplicación"},
         {"Master volume", "Volumen general"},
         {"Face buttons", "Botones frontales"},
