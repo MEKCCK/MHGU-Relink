@@ -159,6 +159,28 @@ static bool format_supports(VkFormat f, VkFormatFeatureFlags want) {
     return (p.optimalTilingFeatures & want) == want;
 }
 
+// ---- wide render targets
+// The game renders into RGBA8 targets only. A night sky leaves the scene pass a few codes above black (here R 5-18,
+// G 12-28, B 15-32 over the whole sky) and the post passes after it (exposure, colour grading) brighten it several
+// times, so the codes end up 2-5 apart on screen: bands. Render targets the game made RGBA8 are rendered as RGBA16
+// UNORM instead (the same [0, 1] range, clamping and blending, 8 more bits), so only the final picture is rounded to
+// 8 bits. Every RGBA8 2D texture the game renders into is re-made wide before its first pass (vk_rt_widen), except
+// FSR's input (the post-processed picture: the brightening is done by then); exec.c's copies between such a target and
+// guest memory convert. [Graphics] SmoothGradients (off by default: it costs GPU time), live: targets are re-made at
+// their next pass.
+bool vk_wide_rt_on(void) {
+    static int supported = -1;
+    if (supported < 0) {
+        VkFormatFeatureFlags want = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+                                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+                                    VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+        supported = format_supports(VK_FORMAT_R16G16B16A16_UNORM, want);
+        if (!supported) LOG("[vk] RGBA16 UNORM render targets not supported: SmoothGradients has no effect\n");
+    }
+    return supported && config_live_smooth_gradients();
+}
+
 // ================================================================== images
 void vk_image_init_layout(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect) {
     VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = 0, .dstAccessMask = VK_ACCESS_ALL,
@@ -238,6 +260,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
             vf = VK_FORMAT_R8G8B8A8_UNORM;
         }
     }
+    if (b->wide) vf = VK_FORMAT_R16G16B16A16_UNORM;
     bool depthfmt = renderer_format_is_depth(t->format);
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (depthfmt) usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -557,6 +580,37 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
     return b;
 }
 
+// (exec.c begin_pass, outside a render pass, before t is rendered to) An RGBA8 2D target re-made wide or back to
+// RGBA8 (SmoothGradients turned off, or it turns out to be FSR's input), its contents blitted over.
+void vk_rt_widen(NvnTexture *t, bool on) {
+    if (t->format != 0x25 || t->target != 1) return;
+    TexBackend *b = tex_backend(t);
+    if (b->wide == on || b->format != (b->wide ? VK_FORMAT_R16G16B16A16_UNORM : VK_FORMAT_R8G8B8A8_UNORM)) return;
+    if (b->pending_rgba) upload_pending(b);
+    vk_ms_resolve(b);
+    if (b->ms) { destroy_image(b->ms); free(b->ms); b->ms = NULL; }
+    b->ms_valid = b->ms_dirty = false;
+    views_forget(b);
+    TexBackend old = *b;
+    b->wide = on;
+    create_image(t, b);
+    b->wide = b->format == VK_FORMAT_R16G16B16A16_UNORM;  // (creation failed: RGBA8 after all)
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    VkImageBlit r[16];
+    uint32_t n = b->levels < 16 ? b->levels : 16;
+    for (uint32_t lv = 0; lv < n; lv++) {
+        int32_t w = (int32_t)level_w(b, lv), h = (int32_t)level_h(b, lv);
+        r[lv] = (VkImageBlit){.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, b->layers}, .srcOffsets = {{0, 0, 0}, {w, h, 1}},
+                              .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, b->layers}, .dstOffsets = {{0, 0, 0}, {w, h, 1}}};
+    }
+    vkCmdBlitImage(cb, old.image, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, n, r, VK_FILTER_NEAREST);
+    vk_full_barrier(cb);
+    defer((Dead){.img = old.image, .mem = old.mem});
+    static int nlog;
+    if (nlog++ < 40) LOG("[vk] render target %ux%u (%u levels) %s\n", b->width, b->height, b->levels, b->wide ? "wide" : "RGBA8");
+}
+
 void renderer_mark_gpu_owned(NvnTexture *t) { tex_backend(t)->gpu_owned = true; }
 void renderer_mark_dynamic(NvnTexture *t) { tex_backend(t)->dynamic = true; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
@@ -636,6 +690,10 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
     if (v && (v->setmask & 4) && !(b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT))) {
         VkFormat vf = fmt_of(v->format).vf;
         if (vk_format(t->format) == b->format) fmt = vf;  // (fallback images keep their own format)
+        else if (b->wide && vf != VK_FORMAT_R8G8B8A8_UNORM) {
+            static int nlog;
+            if (nlog++ < 10) LOG("[vk] wide render target %ux%u read as nvn fmt %#x: as RGBA16 instead\n", b->width, b->height, v->format);
+        }
     }
     uint32_t lv0 = v && (v->setmask & 1) ? v->base_level : 0;
     uint32_t nlv = v && (v->setmask & 1) && v->num_levels ? v->num_levels : b->levels - (lv0 < b->levels ? lv0 : 0);
