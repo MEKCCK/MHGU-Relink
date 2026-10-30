@@ -330,15 +330,15 @@ make dist VERSION=0.10.4 BONUS=<path to the bonus savegame's system file>
 ```
 
 On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux (or in WSL, with `B=build-linux
-O=obj-linux`) `dist/ArchLinux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
+O=obj-linux`) `dist/Linux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
 with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the bundled DLLs, `licenses\`,
 `bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
 the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
 
 Upload both archives to a GitHub release whose tag is exactly that version (`0.10.4`, no `v`), as a normal release,
 not a pre-release. The updater only looks at GitHub's "latest" release, compares its tag with its own version as
-numbers (0.10.10 is newer than 0.10.9), and picks the asset starting with `Windows-` (`.zip`) or `ArchLinux-`
-(`.tar.gz`, else `.zip`). GitHub records each upload's SHA-256, which the updater checks. To hold a broken release
+numbers (0.10.10 is newer than 0.10.9), and picks the asset starting with `Windows-` (`.zip`) or `Linux-`
+(`.tar.gz`, else `.zip`; `ArchLinux-`, the name up to 0.11.4, as well). GitHub records each upload's SHA-256, which the updater checks. To hold a broken release
 back, make it a draft or pre-release: the updater then sees the previous one as the latest.
 
 The version comes from `git describe --tags`. A build that isn't exactly a tag (`0.10.3-4-gabc1234`) never updates

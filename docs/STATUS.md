@@ -572,7 +572,7 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
     `draft` / `prerelease` fields are checked as well), with a 5 s timeout and the last ETag (`update/latest.etag`,
     `latest.json`: a 304 reuses the saved JSON).
   - It compares the tag numerically with its own MHGU_VERSION and only installs a strictly newer one.
-  - It picks the asset by name prefix (`Windows-`, `ArchLinux-` / `Linux-`; `.tar.gz` before `.zip`), downloads it to
+  - It picks the asset by name prefix (`Windows-`, `Linux-` / `ArchLinux-`, the name up to 0.11.4; `.tar.gz` before `.zip`), downloads it to
     `update/<asset>.part` and checks the size and the `sha256:` digest GitHub keeps per asset. An asset without a
     digest is not installed.
   - It extracts to `update/new/`, dropping the archive's single top folder. Unsafe paths (`..`, absolute, `:`) are

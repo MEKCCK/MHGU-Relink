@@ -37,7 +37,7 @@
 #include <unistd.h>
 #define GAME_EXE "mhgurecomp"
 #define GAME_LIB "mhgugame.so"
-#define ASSET_PREFIXES "ArchLinux-,Linux-"
+#define ASSET_PREFIXES "Linux-,ArchLinux-"  // (ArchLinux-: up to 0.11.4)
 #endif
 #define LATEST_URL "https://api.github.com/repos/morerokk/MHGURecomp/releases/latest"
 

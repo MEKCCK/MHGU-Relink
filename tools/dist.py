@@ -2,7 +2,7 @@
 
 usage: python tools/dist.py <build dir> <out dir> <windows|linux> <version> [--bonus <file>]
 
-Windows: <out>/Windows-MHGURecomp.<version>.zip; Linux: <out>/ArchLinux-MHGURecomp.<version>.tar.gz (the programs
+Windows: <out>/Windows-MHGURecomp.<version>.zip; Linux: <out>/Linux-MHGURecomp.<version>.tar.gz (the programs
 keep their executable permission). Inside, one folder of the same name holds what a player copies: the game, its code
 library, the updater, the DLLs (Windows), pipelines.list, licenses/, bonus/system (--bonus: the donor save of the free downloads) and
 the empty data/, mods/ and cheats/ folders, with a note in data/ of what goes there. Nothing else of the build folder:
@@ -68,7 +68,8 @@ def main():
         sys.exit(__doc__)
     build, out_dir, platform, version = args
     check_version(build, platform, version)
-    top = ('Windows' if platform == 'windows' else 'ArchLinux') + '-MHGURecomp'
+    # (Linux-: up to 0.11.4 ArchLinux-, when it needed Arch's SDL3 and shaderc; every updater takes both)
+    top = ('Windows' if platform == 'windows' else 'Linux') + '-MHGURecomp'
     name = f'{top}.{version}' + ('.zip' if platform == 'windows' else '.tar.gz')
     entries = files(build, platform)
     if bonus:
