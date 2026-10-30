@@ -219,7 +219,8 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   modules (`exefs\subsdk1` and so on, as in the
   [MH4U Port](https://github.com/Scrimas/MH4U-port-to-MHGU)) are loaded and run in the interpreter too. The log says
   what was patched and loaded (`[mods]` lines).
-- Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with
+- Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's own loader (the `exefs\subsdk9` that
+  Forge and mods with Forge plugins include) is not needed and is passed over: the port runs the plugins itself. Forge's menu with the plugins' settings opens with
   Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
   use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions
   are kept in `forge_imgui.ini`.

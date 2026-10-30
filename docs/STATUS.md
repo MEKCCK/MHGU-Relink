@@ -720,6 +720,15 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
   (the user, a progressed save): listed at the Hub counter, departs, the monster fights. (MHGU_QUICKHUNT can't depart
   a Hub quest from the Village: a plain GU Hub quest stops the same way with no mods.) Not measured: the frame rate
   cost of the interpreted functions in a hunt.
+- Forge's own module (2026-10-30, a 0.11.6 regression): mods with Forge plugins bring Forge's loader as
+  exefs/subsdk9 (Forge itself, and e.g. a Sharpness Bar mod that bundles it with its plugin). 0.11.6 loaded it as a
+  code module: "no room for exefs/subsdk9 (0x1a6000 bytes)" and FATAL at the start. Now a mod's subsdk whose module
+  name (start of rodata: u32 0, u32 length, the name) is "mhguForge" is passed over with a log line, as before:
+  the port runs the plugins itself (runtime/forge.c). Checked (hidden window): MH4U Port + Forge + Sharpness Bar +
+  Key Quest Markers start, both Forge subsdk9s passed over, the sharpness bar on the HUD in quest 101. Key Quest
+  Markers then reports "MHGU 1.4.0 code mismatch at a required function" and stays off: MH4U Port's IPS patches the
+  same two instructions it hooks (main +0x3b2174 and +0xa4faf0), a conflict between the two mods on the console as
+  well (before 0.11.6 the port skipped MH4U Port's code patches, so they didn't meet). Without MH4U Port it loads.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
