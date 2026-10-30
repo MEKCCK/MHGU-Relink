@@ -14,6 +14,16 @@ enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/h
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
 
+// [Keybinds]: the keyboard and mouse controls (runtime/host_input.c), in the file's order. Each takes up to two keys
+// or mouse buttons: an SDL scancode, or KEY_MOUSE + SDL_BUTTON_* (0: none).
+enum {
+    BIND_MOVE_UP, BIND_MOVE_DOWN, BIND_MOVE_LEFT, BIND_MOVE_RIGHT, BIND_WALK,
+    BIND_A, BIND_B, BIND_X, BIND_Y, BIND_L, BIND_R, BIND_ZL, BIND_ZR, BIND_PLUS, BIND_MINUS,
+    BIND_DPAD_UP, BIND_DPAD_DOWN, BIND_DPAD_LEFT, BIND_DPAD_RIGHT, BIND_LSTICK, BIND_RSTICK, BINDS
+};
+#define BIND_KEYS 2
+#define KEY_MOUSE 0x1000
+
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
 #define HP_SCALE_MIN 0.05f
@@ -68,6 +78,7 @@ typedef struct {
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
+    int binds[BINDS][BIND_KEYS];  // [Keybinds]: BIND_* -> its keys (an SDL scancode or KEY_MOUSE + button; 0 none)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
@@ -92,7 +103,7 @@ void config_path(char *buf, size_t size);  // the settings file (MHGU_CONFIG, el
 
 // The settings of the file, one row each (config.c g_settings): what reads, writes and checks them, and what the
 // settings menu (settings_panel.cpp) marks as needing a restart. Quest<number> entries ([Monster HP]) are apart: hp.quest.
-enum { SET_BOOL, SET_INT, SET_FLOAT, SET_FACTOR, SET_CHOICE, SET_SIZE, SET_ASPECT, SET_TEXT };
+enum { SET_BOOL, SET_INT, SET_FLOAT, SET_FACTOR, SET_CHOICE, SET_SIZE, SET_ASPECT, SET_TEXT, SET_KEYS };
 typedef struct {
     const char *section, *key;  // [section] and key; "FPS|FrameRate": other spellings of the key it reads too
     int kind;                   // SET_*
@@ -115,6 +126,11 @@ bool config_equal(const ConfigSetting *s, const Config *a, const Config *b);
 bool config_restart_key(const char *key);  // the setting takes effect at the next start
 bool config_range(const char *key, float *min, float *max);  // a number setting's range
 bool config_help(const char *key, char *buf, size_t size);  // what the default ini's comments say of it (the menu's help)
+// [Keybinds]: a key's or mouse button's name as the file writes it and the menu shows it (SDL's, "Mouse Left"...;
+// "" for one that has none), and the code a name is for (0: none of them)
+const char *config_key_name(int code);
+int config_key_code(const char *name);
+const ConfigSetting *config_bind_setting(int bind);  // the [Keybinds] row of BIND_*
 
 // File values, before environment overrides and automatic resolution are resolved.
 void config_store_loaded(const Config *config);
@@ -136,6 +152,7 @@ int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
+int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds)
 int config_live_fxaa_mode(void);
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.

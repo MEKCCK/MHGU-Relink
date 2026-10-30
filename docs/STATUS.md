@@ -654,6 +654,25 @@ instead: it needs glibc 2.43 (sqrtf, acosf, asinf, atan2f, log10f).
   tests pass) and an Ubuntu 24.04.5 root file system with Ubuntu's own Mesa, where 0.11.3 stops with that same error.
   Not tested on a real Mint desktop or with a real GPU on Linux.
 
+## Keybinds (2026-10-30)
+
+The keyboard and mouse controls were fixed in runtime/host_input.c. Now each is a setting of the ini's `[Keybinds]`
+(MoveUp/Down/Left/Right, Walk, A..ZR, Plus, Minus, DpadUp..Right, LeftStickClick, RightStickClick; config.h BIND_*),
+up to two keys or mouse buttons each: `Plus = Return, Keypad Enter`, `X = Mouse Left`, `None`. The defaults are the old
+fixed keys. SDL's key names, but the file's own for the keys whose name has a ',' (the separator) or ';' / '#' (a
+comment): Comma, Keypad Comma, Semicolon, Keypad Hash; Mouse Left / Right / Middle / 4 / 5 (KEY_MOUSE + SDL_BUTTON_*).
+The recomp's own keys (keymap.h: Escape, Insert, F1, F7..F12) are refused, in the file and in the menu. Live: a save
+applies them at once (config_live_bind). An older ini gets the section added with the defaults (as other sections).
+- Settings (F1), Controls, Keybinds: a submenu with a row per keybind; Confirm: Set key / Add a second key / None, then
+  a key, or a mouse button clicked away from the menu's rows (ImGui counts the controller-focused row as hovered, so
+  this asks ImGuiHoveredFlags_NoNavOverride). A key that is also another keybind's, the chat key or the recomp's shows
+  red with what else uses it. The Chat key row moved there (still `[Controls] ChatKey`); Reset this tab and the
+  submenu's Reset keybinds reset both.
+- Any mouse button captures the mouse now (only left / right did); the capturing click is still not a button press.
+- Tests: test_settings (names, aliases, two keys, refused keys, save and reload, live values), test_settings_panel
+  (a key and a mouse button chosen for B, F12 refused, saved, reset). Not tried in the game by hand: the game started
+  with an older ini, which got the section.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
