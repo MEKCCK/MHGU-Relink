@@ -2,7 +2,8 @@
 // but a shoutout in a quest is sent as its text: one netChatTextData (0xac bytes: u8 type at +9, the sender's name
 // at +0xa, UTF-8 text at +0x32), the same message as Hub chat (type 1 + the sender's player index; a shoutout 6 +
 // index), shown in every player's chat window as it arrives. So "/" opens a line to type (runtime/textinput.c, drawn
-// by the overlay) and Enter sends it the way the game sends a shoutout, from the game's thread.
+// by the overlay) and Enter sends it the way the game sends a shoutout, from the game's thread. A longer line goes out
+// as several messages, split between words, each as long as the Hub's chat allows (one line of the chat window).
 #include "chat.h"
 
 #include <stdatomic.h>
@@ -21,8 +22,9 @@
 #define G_SPLAYER      0x1a85b58u
 #define CHAT_TYPE      6u         // + player index: a shoutout's type (shown in quests too)
 #define TEXT_BYTES     0x78u      // what the sender copies (the game's own texts are at most 0x68 bytes)
-#define MAX_CHARS      26         // as the Hub's chat entry
-#define MAX_BYTES      0x67
+#define MAX_CHARS      120        // a line typed; it goes out in messages of up to LINE_CHARS, split between words
+#define LINE_CHARS     26         // as the Hub's chat entry: what one line of the chat window shows
+#define LINE_BYTES     0x67
 
 static atomic_bool g_composing;
 
@@ -68,19 +70,45 @@ static void send_text(Cpu *c, const char *text) {
     memcpy(c->r, saved, sizeof saved);
 }
 
+static int utf8_len(const char *s) { return (*s & 0x80) == 0 ? 1 : (*s & 0xE0) == 0xC0 ? 2 : (*s & 0xF0) == 0xE0 ? 3 : 4; }
+
+// The next message of a line: up to LINE_CHARS characters (and LINE_BYTES bytes), ending before a space if there is
+// one (a word longer than that is cut); `*rest` is where the next one starts (spaces skipped)
+static size_t next_piece(const char *s, const char **rest) {
+    size_t n = 0, cut = 0;
+    int chars = 0;
+    while (s[n] && chars < LINE_CHARS) {
+        size_t k = (size_t)utf8_len(s + n);
+        if (n + k > LINE_BYTES) break;
+        if (s[n] == ' ') cut = n;
+        n += k, chars++;
+    }
+    if (s[n] && s[n] != ' ' && cut) n = cut;  // (the line goes on in the middle of a word: end before it)
+    const char *r = s + n;
+    while (*r == ' ') r++;
+    *rest = r;
+    while (n && s[n - 1] == ' ') n--;
+    return n;
+}
+
 void chat_tick(Cpu *c) {
     if (!atomic_load(&g_composing)) return;
-    char text[256];
+    char text[512];
     int chars, ev = textinput_poll(text, sizeof text, &chars);
     if (ev != TI_ENTER && ev != TI_CANCEL) return;
     textinput_end();
     atomic_store(&g_composing, false);
     if (ev == TI_CANCEL) return;
-    size_t n = strlen(text);
-    while (n > MAX_BYTES) {  // (whole characters only)
-        n--;
-        while (n && ((unsigned char)text[n] & 0xC0) == 0x80) n--;
+    const char *s = text;
+    while (*s == ' ') s++;
+    while (*s) {
+        const char *rest;
+        size_t n = next_piece(s, &rest);
+        char piece[LINE_BYTES + 1];
+        memcpy(piece, s, n);
+        piece[n] = 0;
+        if (n) send_text(c, piece);
+        if (rest == s) break;  // (nothing taken: can't happen, but never loop)
+        s = rest;
     }
-    text[n] = 0;
-    if (n) send_text(c, text);
 }
