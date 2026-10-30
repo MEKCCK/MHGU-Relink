@@ -442,6 +442,29 @@ PATCHES): the constant is -step / 2 updates (at most 1). Checked: at 120 fps X+A
 (67 ms) after the press; 30 fps unchanged. A lone attack button is read 67 ms after the press at any frame rate,
 as on the Switch (it was 17 ms at 120 fps).
 
+Mashing out of a stun and the frame rate (2026-10-30): fixed. Reported: at high frame rates mashing buttons and
+turning the stick ends a stun far sooner than at 30 fps. The stun (dizzy) is act 0x40:026 (update 0x4bcfd0, motion
+0x1a; the knockback before it is 1:085 / 1:087, not part of it): up to 4 rounds of 750 (60 fps frames, counted down
+by the step, so it lasts up to ~50 s untouched); every update 0x47f590 says the player mashed adds 1 to the round's
+count (byte 6 of player +4; rounds left: byte 7), and 13 (fewer in later rounds) end the round. 0x47f590 is 1 when
+the input state (player +0x13fc: buttons in the low half, the left stick's direction bits 16-19; +0x1400 the last
+update's) gained a button of 0x5f0 or a stick direction (+0x13f8 / +0x1406 = state & ~last), local player only
+(+0x13cc bit 0): at most once per update, so 30 a second on the Switch, where a quick press or stick turn between
+two updates isn't seen. 13 callers share it (other holds mashed out of: pins, snowman, paralysis, as the user
+describes them; only the stun checked). Found from the user's play (MHGU_PLSNAP: the player's memory every update,
+the act change at their two stuns; mashing visible as +0x13f8 / +0x1406 bursts). Fix (runtime/hle/mashrate.c, a
+hook of 0x47f590): below 2.0 of the player's step it looks at the input state once per 30 fps update (2.0 of the
+step) against its copy from the last look, as the 30 fps game does; nothing counts in between. Measured (forced
+stun, quest 101, mashing from the control file, time from the stun to the last round): input in whole 33 ms steps
+(A held 33 ms every 66 ms, the stick turned every 66 ms) 1.74 s at 30 fps, 1.66 s at 120 fps with the fix, 1.47 s
+without; faster input (stick every 17 ms) 1.5 s at 30 fps, 0.83 s at 120 without the fix. The first try (count at
+most once per 30 fps update, a mash in between kept for later) still ended them as fast as without it; the second
+(any new press within the 30 fps update counts) was in between. MHGU_NO_MASHRATE=1 turns it off. Debug aids added:
+MHGU_LOG_MOVES also logs every act change ("is", with the time) and the stun's rounds; the control file's
+"plact <act_st hex> <act_no> [param]" / "plsweep" start player actions; MHGU_PLSNAP=<file> + "plsnap [updates]"
+(also from a knockback) save the player's memory every update; "interpread" now also sees register-offset loads and
+VLDR (interp.c). Not tested yet: by the user at a high frame rate; the other holds.
+
 ## Fidelity audit (2026-10-20)
 
 Silent-bug sweep after the shimmer and shadow fixes (the two classes found: a driver needing explicit barriers, and a
@@ -776,6 +799,7 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
    wants them held at the same moment would still miss a quick finger roll at very high frame rates (30 Hz polling
    hid that); a 30 Hz input polling option would cover it at up to 33 ms of input latency - not needed so far.
    Still to check: other weapons' timed inputs (Charge Blade, Insect Glaive, Styles') for other per-update windows.
+   Mashing out of a stun at high frame rates: fixed (2026-10-30), see "Mashing out of a stun and the frame rate".
 12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
    machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
    mapped; what is left and how: docs/research/title-menu.md.

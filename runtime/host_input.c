@@ -243,6 +243,20 @@ static void control_poll(void) {
                 emtrace_sweep((uint32_t)atoi(arg), (uint32_t)atoi(arg2), (uint32_t)atoi(arg3));
                 continue;
             }
+            if (!strcmp(cmd, "plact") || !strcmp(cmd, "plsweep")) {  // plact <act_st hex> <act_no> [param] /
+                // plsweep <act_st hex> <first> <last>: start player actions (MHGU_LOG_MOVES, hle/movelog.c)
+                void movelog_request(uint32_t, uint32_t, uint32_t), movelog_sweep(uint32_t, uint32_t, uint32_t);
+                char arg3[16] = "";
+                sscanf(line, "%*s %*s %*s %15s", arg3);
+                (cmd[2] == 'a' ? movelog_request : movelog_sweep)((uint32_t)strtoul(arg, NULL, 16), (uint32_t)atoi(arg2),
+                                                                  (uint32_t)atoi(arg3));
+                continue;
+            }
+            if (!strcmp(cmd, "plsnap")) {  // plsnap [updates]: the player's memory every update (MHGU_PLSNAP, movelog.c)
+                void movelog_snap(int);
+                movelog_snap(atoi(arg));
+                continue;
+            }
             if (!strcmp(cmd, "poke")) {  // poke <guest hex address> <hex word>: write guest memory (reverse engineering)
                 uint32_t a = (uint32_t)strtoul(arg, NULL, 16) & ~3u, v = (uint32_t)strtoul(arg2, NULL, 16);
                 LOG("[poke] %08x: %08x -> %08x\n", a, LD32(a), v);
