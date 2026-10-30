@@ -5,6 +5,7 @@
 #include "overlay.h"
 #include "modorder.h"
 #include "imgui_internal.h"
+#include <SDL3/SDL.h>
 #include <cassert>
 #include <cstdio>
 #include <chrono>
@@ -204,6 +205,52 @@ int main() {
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(config_live_menu_confirm() == MENU_CONFIRM_ORIGINAL);
+    // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
+    press(ImGuiKey_Home);
+    down(6);
+    selected("keybinds");
+    confirm();
+    selected("bind.0");  // (past the section's title)
+    down(6);             // (past the Buttons title)
+    selected("bind.6");
+    confirm();
+    selected("choice.0");  // Set key
+    confirm();
+    selected("capture.cancel");
+    assert(settings_panel_key(SDL_SCANCODE_F12));
+    idle();
+    selected("capture.cancel");  // (refused: still choosing)
+    assert(settings_panel_key(SDL_SCANCODE_G));
+    idle();
+    selected("bind.6");
+    confirm();
+    down();
+    selected("choice.1");  // Add a second key
+    confirm();
+    assert(settings_panel_mouse(SDL_BUTTON_MIDDLE));
+    idle();
+    selected("bind.6");
+    assert(!settings_panel_mouse(SDL_BUTTON_LEFT));  // (not choosing: a click is the menu's)
+    back();
+    selected("keybinds");
+    assert(settings_panel_dirty());
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
+    press(ImGuiKey_Home);
+    down(6);
+    confirm();
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("bind.reset");
+    confirm();
+    back();
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    confirm();
+    assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_SPACE && !config_live_bind(BIND_B, 1));
     tab();
     selected("port");
     press(ImGuiKey_GamepadL1);

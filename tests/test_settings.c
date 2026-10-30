@@ -186,7 +186,34 @@ int main(int argc, char **argv) {
     fsr_saved.fsr=0;assert(config_save(&fsr_saved,error,sizeof error));
     assert(config_live_msaa()==1 && config_live_fxaa()==0); // Remains active until restart.
     g_config=initial;config_load();assert(config_live_msaa()==8 && config_live_fxaa()==1);
+    // [Keybinds]: SDL's key names, the mouse's, Comma for ','; up to two or None; the recomp's own keys refused
+    Config keys = config_editable();
+    assert(keys.binds[BIND_X][0] == KEY_MOUSE + SDL_BUTTON_LEFT && keys.binds[BIND_PLUS][1] == SDL_SCANCODE_KP_ENTER);
+    assert(config_live_bind(BIND_MOVE_UP, 0) == SDL_SCANCODE_W && config_live_bind(BIND_A, 0) == KEY_MOUSE + SDL_BUTTON_RIGHT);
+    const ConfigSetting *bind_b = config_bind_setting(BIND_B);
+    assert(bind_b && !strcmp(bind_b->key, "B") && config_setting("leftstickclick") == config_bind_setting(BIND_LSTICK));
+    char value[256];
+    assert(config_parse(bind_b, " comma ,Mouse 5", &keys) && keys.binds[BIND_B][0] == SDL_SCANCODE_COMMA &&
+           keys.binds[BIND_B][1] == KEY_MOUSE + SDL_BUTTON_X2);
+    config_format(bind_b, &keys, value, sizeof value); assert(!strcmp(value, "Comma, Mouse 5"));
+    Config parsed = keys;
+    assert(!config_parse(bind_b, "F12", &keys) && !config_parse(bind_b, "Escape", &keys) && !config_parse(bind_b, ",", &keys));
+    assert(!config_parse(bind_b, "A, B, C", &keys) && !config_parse(bind_b, "NoSuchKey", &keys));
+    assert(!memcmp(keys.binds, parsed.binds, sizeof keys.binds));  // (a value it doesn't take leaves the keys alone)
+    assert(config_parse(bind_b, "None", &keys) && !keys.binds[BIND_B][0] && !keys.binds[BIND_B][1]);
+    config_format(bind_b, &keys, value, sizeof value); assert(!strcmp(value, "None"));
+    keys.binds[BIND_B][0] = SDL_SCANCODE_F;
+    assert(config_save(&keys, error, sizeof error) && config_live_bind(BIND_B, 0) == SDL_SCANCODE_F);
+    text = read_file(path);
+    // (the section added to the file has the platform's line ends)
+    assert((strstr(text, "\nB = F\r\n") || strstr(text, "\nB = F\n")) && strstr(text, "\nPlus = Return, Keypad Enter"));
+    free(text);
+    bad = keys; bad.binds[BIND_A][1] = SDL_SCANCODE_F1; assert(!config_save(&bad, error, sizeof error));
+    bad = keys; bad.binds[BIND_A][1] = KEY_MOUSE + 9; assert(!config_save(&bad, error, sizeof error));
+    g_config = initial; config_load();
+    assert(config_editable().binds[BIND_B][0] == SDL_SCANCODE_F && !config_editable().binds[BIND_B][1]);
+    assert(config_editable().binds[BIND_RSTICK][1] == SDL_SCANCODE_RALT);
     remove(path);
-    puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish, icons, hot settings and restart classification.");
+    puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish, icons, hot settings, keybinds and restart classification.");
     return 0;
 }

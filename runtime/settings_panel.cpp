@@ -26,7 +26,7 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -71,6 +71,7 @@ struct State {
     Command command = Command::None;
     std::string focus, error;
     std::string help_row, hovered;  // the row whose help shows (the one focused or pointed at last); the one pointed at
+    bool pointing = false;          // the mouse pointer is on one of the view's rows (hovered: also the focused one)
     float help_height = 0;          // room for the longest help of the tab (last frame's)
     std::vector<Target> targets;
     std::vector<Origin> origins;
@@ -82,9 +83,12 @@ struct State {
     int focus_scroll_frames = 0;
     ImVec2 move_start = {}, move_position = {};
     bool position_override = false;
+    int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key
+    bool capture_add = false;  // the key chosen is that keybind's second, else its only one
 } s;
-std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing;
-std::atomic<int> captured_key{-1}; // (the key pressed while the chat key is being chosen; -1: none yet)
+std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse;
+// (the key pressed while a key is being chosen, or KEY_MOUSE + a mouse button; -1: none yet)
+std::atomic<int> captured_key{-1};
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
 std::string fmt(const char *text, ...) {
     char buffer[512];
@@ -238,6 +242,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(hp.village);
     SAME(hp.quests);
 #undef SAME
+    if (memcmp(a.binds, b.binds, sizeof a.binds))
+        return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
         strcmp(a.chat_key, b.chat_key))
         return false;
@@ -522,7 +528,31 @@ void hub_check(std::vector<Row> &rows) {
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
 }
-// The key that opens a line of chat; red when the keyboard controls already use it (keymap.h)
+// The keybinds' rows (config.h BIND_*): what each is called
+const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
+                                        "Y", "L", "R", "ZL", "ZR", "Plus", "Minus", "D-pad up", "D-pad down",
+                                        "D-pad left", "D-pad right", "Left stick click", "Right stick click"};
+// What else a key (or KEY_MOUSE + a mouse button) does: one of the recomp's own keys (keymap.h), a keybind other than
+// skip, or (for a keybind's) the chat key; nullptr: nothing
+const char *key_use(int code, int skip) {
+    if (const char *use = code < KEY_MOUSE ? key_reserved(code) : nullptr)
+        return tr(use);
+    for (int i = 0; i < BINDS; i++)
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (i != skip && s.draft.binds[i][k] == code)
+                return tr(bind_titles[i]);
+    if (skip >= 0 && code == (int)SDL_GetScancodeFromName(s.draft.chat_key))
+        return tr("Chat key");
+    return nullptr;
+}
+// Choosing a key: for a keybind (BIND_*, add: its second key) or the chat key (-1)
+void capture(int bind, bool add) {
+    s.capture_bind = bind;
+    s.capture_add = add;
+    captured_key = -1;
+    push(View::KeyCapture, "capture.cancel");
+}
+// The key that opens a line of chat; red when something else already uses it
 void chat_key_row(std::vector<Row> &rows) {
     Row r;
     r.id = "chat.key";
@@ -530,15 +560,60 @@ void chat_key_row(std::vector<Row> &rows) {
     keyed(r, ini("ChatKey"));
     SDL_Scancode key = SDL_GetScancodeFromName(s.draft.chat_key);
     r.value = key != SDL_SCANCODE_UNKNOWN ? s.draft.chat_key : tr("None");
-    if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_in_use((int)key) : nullptr) {
-        r.value += std::string(" (") + tr("in use:") + " " + tr(use) + ")";
+    if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_use((int)key, -1) : nullptr) {
+        r.value += std::string(" (") + tr("in use:") + " " + use + ")";
         r.warn = true;
     }
-    r.activate = []() {
-        captured_key = -1;
-        push(View::KeyCapture, "capture.cancel");
-    };
+    r.activate = []() { capture(-1, false); };
     rows.push_back(std::move(r));
+}
+// The Keybinds submenu: a row per keybind (its keys; red where one does something else too), the chat key
+void keybind_rows(std::vector<Row> &r) {
+    for (int i = 0; i < BINDS; i++) {
+        if (i == BIND_MOVE_UP)
+            header(r, "bind.movement", tr("Movement"));
+        if (i == BIND_A)
+            header(r, "bind.buttons", tr("Buttons"));
+        Row row;
+        row.id = "bind." + std::to_string(i);
+        row.title = tr(bind_titles[i]);
+        for (int k = 0; k < BIND_KEYS; k++) {
+            int code = s.draft.binds[i][k];
+            if (!code)
+                continue;
+            row.value += (row.value.empty() ? "" : ", ") + std::string(config_key_name(code));
+            if (const char *use = key_use(code, i)) {
+                row.value += std::string(" (") + tr("in use:") + " " + use + ")";
+                row.warn = true;
+            }
+        }
+        if (row.value.empty())
+            row.value = tr("None");
+        Row copy = row;
+        row.menu = true;
+        row.activate = [copy, i]() {
+            bool one = s.draft.binds[i][0] && !s.draft.binds[i][1];
+            std::vector<std::string> names = {tr("Set key")};
+            if (one)
+                names.push_back(tr("Add a second key"));
+            names.push_back(tr("None"));
+            choices(copy, names, -1, [i, one](int v) {
+                if (v == (one ? 2 : 1))
+                    s.draft.binds[i][0] = s.draft.binds[i][1] = 0;
+                else
+                    capture(i, v == 1);
+            });
+        };
+        r.push_back(std::move(row));
+    }
+    header(r, "bind.other", tr("Chat"));
+    chat_key_row(r);
+    action(r, "bind.reset", tr("Reset keybinds"), []() {
+        Config f = config_defaults();
+        memcpy(s.draft.binds, f.binds, sizeof f.binds);
+        SDL_strlcpy(s.draft.chat_key, f.chat_key, sizeof s.draft.chat_key);
+    });
+    action(r, "bind.back", tr("Back"), []() { pop(); });
 }
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
@@ -580,6 +655,7 @@ void reset_section() {
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
+        memcpy(c.binds, f.binds, sizeof c.binds);
         break;
     case 3:
         c.ldn_port = f.ldn_port;
@@ -897,7 +973,8 @@ std::vector<Row> main_rows() {
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
-        chat_key_row(r);
+        action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
+        r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons and for moving, and the chat key.");
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
@@ -1057,19 +1134,38 @@ std::vector<Row> rows_for_view(bool *open) {
     } else if (s.view == View::Conflicts) {
         conflict_rows(r);
         action(r, "conflicts.back", tr("Back"), []() { pop(); });
+    } else if (s.view == View::Keybinds) {
+        keybind_rows(r);
     } else if (s.view == View::KeyCapture) {
         int key = captured_key.exchange(-1);
-        const char *name = key > 0 ? SDL_GetScancodeName((SDL_Scancode)key) : "";
+        const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
+        const char *reserved = key > 0 && key < KEY_MOUSE ? key_reserved(key) : nullptr;
         if (key == SDL_SCANCODE_ESCAPE)
             pop();
-        else if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
+        else if (s.capture_bind >= 0 && key > 0) {
+            int *keys = s.draft.binds[s.capture_bind];
+            if (reserved)
+                s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+            else if (!*config_key_name(key))
+                s.error = tr("That key can't be used.");
+            else {
+                if (!s.capture_add)
+                    keys[0] = key, keys[1] = 0;
+                else if (keys[0] != key)
+                    keys[1] = key;
+                pop();
+            }
+        } else if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
             SDL_strlcpy(s.draft.chat_key, name, sizeof s.draft.chat_key);
             pop();
         } else if (key > 0)
             s.error = tr("That key can't be used for chat.");
         if (s.view == View::KeyCapture) {
             action(r, "capture.none", tr("None"), []() {
-                s.draft.chat_key[0] = 0;
+                if (s.capture_bind >= 0)
+                    s.draft.binds[s.capture_bind][0] = s.draft.binds[s.capture_bind][1] = 0;
+                else
+                    s.draft.chat_key[0] = 0;
                 pop();
             });
             action(r, "capture.cancel", tr("Cancel"), []() { pop(); });
@@ -1254,6 +1350,7 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
     if (!list) {
         s.targets.clear();
         s.hovered.clear();
+        s.pointing = false;
         s.dropdown.anchored = false;
     }
     std::function<void()> activate;
@@ -1292,6 +1389,8 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
         ImGui::PopStyleColor(4);
         if (!list && ImGui::IsItemHovered())
             s.hovered = r.id;
+        if (!list && ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride))
+            s.pointing = true;
         if (selected && r.enabled) {
             if (!passive)
                 own_focus(w, id, rect);
@@ -1377,6 +1476,12 @@ bool settings_panel_key(int scancode) {
     captured_key = scancode;
     return true;
 }
+bool settings_panel_mouse(int button) {
+    if (!capture_mouse.load() || button < 1 || button > SDL_BUTTON_X2)
+        return false;
+    captured_key = KEY_MOUSE + button;
+    return true;
+}
 // Ownership has to precede NewFrame: native cancel/windowing runs there.
 void settings_panel_before_frame(bool open) {
     if (!open && !request_exit.load())
@@ -1415,6 +1520,7 @@ void settings_panel(bool *open) {
         is_dirty = false;
         is_confirming = false;
         is_capturing = false;
+        capture_mouse = false;
         return;
     }
     if (!s.editing) {
@@ -1561,15 +1667,18 @@ void settings_panel(bool *open) {
                             window->ClipRect.Max, true);
         clipped_body = true;
     } else {
-        const char *title = s.view == View::Keyboard ? s.keyboard.title.c_str()
-                                                       : tr(s.view == View::Exit      ? "Exit game?"
-                                                            : s.view == View::Restart ? "Restart game?"
-                                                            : s.view == View::Reset   ? "Reset this tab?"
-                                                            : s.view == View::Move    ? "Move menu"
-                                                            : s.view == View::Conflicts ? "Mod conflicts"
-                                                            : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
-                                                                                      : "Unsaved changes");
-        ImGui::TextWrapped("%s", title);
+        std::string title = s.view == View::Keyboard ? s.keyboard.title
+                            : s.view == View::KeyCapture && s.capture_bind >= 0
+                                ? fmt("Press a key or mouse button for %s (Esc: cancel)", tr(bind_titles[s.capture_bind]))
+                                : tr(s.view == View::Exit         ? "Exit game?"
+                                     : s.view == View::Restart    ? "Restart game?"
+                                     : s.view == View::Reset      ? "Reset this tab?"
+                                     : s.view == View::Move       ? "Move menu"
+                                     : s.view == View::Conflicts  ? "Mod conflicts"
+                                     : s.view == View::Keybinds   ? "Keybinds"
+                                     : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
+                                                                  : "Unsaved changes");
+        ImGui::TextWrapped("%s", title.c_str());
     }
     if (s.view == View::Keyboard) {
         ImGuiIO &io = ImGui::GetIO();
@@ -1697,6 +1806,8 @@ void settings_panel(bool *open) {
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
     is_capturing = *open && s.view == View::KeyCapture;
+    // (a click on the capture view's buttons is theirs; anywhere else it is the mouse button chosen)
+    capture_mouse = is_capturing && s.capture_bind >= 0 && !s.pointing;
     if (!*open)
         s.editing = false;
 }

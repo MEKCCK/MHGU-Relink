@@ -110,7 +110,7 @@ To move an existing Switch save over, put its `system` and `system_backup` files
 
 Almost every controller under the sun should work, as long as it has SDL support. With more than one connected (a Steam Deck with a controller plugged in, say), press a button on the one you want to use. If you really want to swap the face buttons on non-Nintendo controllers, open the .ini file and set `FaceButtons = Label`.
 
-Keyboard and mouse support (not recommended):
+Keyboard and mouse support (not recommended). The default keys:
 
 | Key | Switch button |
 | --- | --- |
@@ -124,11 +124,17 @@ Keyboard and mouse support (not recommended):
 | Arrow keys | d-pad |
 | Ctrl / Alt | left / right stick click |
 
+Change them in Settings (F1), Controls, Keybinds: select a button, then Set key and press a key or click a mouse
+button (away from the menu's buttons), or Add a second key (each takes up to two). They are kept in the ini's
+`[Keybinds]` section (`B = Space`, `Plus = Return, Keypad Enter`, `X = Mouse Left`; key names as the menu shows
+them, `None` for none). A key that does something else too shows red. Escape, Insert, F1 and F7 to F12 are the
+recomp's own and can't be used.
+
 Click in the game window to capture the mouse for the camera; Escape lets it go (so does switching to another
 window). `MouseSensitivity` in the ini's `[Mouse]` section sets its speed; the game's own camera options (speed,
 inverted axes) apply to it too.
 
-When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes. `/` opens a line of chat anywhere, also in a quest (where the game itself only has shoutouts): type (up to 120 characters), Enter sends it to everyone as a shoutout is sent, split between words into lines of the chat window, Escape cancels. While typing, the mouse drags the box elsewhere (kept in `chat_box.txt`). Change the key in Settings (F1), Controls, Chat key: it shows red when the keyboard controls already use that key.
+When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes. `/` opens a line of chat anywhere, also in a quest (where the game itself only has shoutouts): type (up to 120 characters), Enter sends it to everyone as a shoutout is sent, split between words into lines of the chat window, Escape cancels. While typing, the mouse drags the box elsewhere (kept in `chat_box.txt`). Change the key in Settings (F1), Controls, Keybinds, Chat key: it shows red when a keybind already uses that key.
 
 Other keys: F1 opens the settings menu, Alt+Enter or F11 switches between windowed and full screen, F12 takes a
 screenshot, F7 cycles MSAA.
@@ -208,8 +214,11 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
   later load too, after the listed ones, until you turn them off; a mod turned off keeps its place in the order). It also compares the mods and lists the ones that change the same game files (and which of
   the two is used), and can apply a suggested order, with the mods that change the most files first.
-- exefs patches (`.pchtxt`, `.ips`) are applied when they change data. Patches to game code can't be applied, because
-  the code is precompiled; the log lists them.
+- exefs patches (`.pchtxt`, `.ips` / IPS32) are applied, to data and to code. The game's code is precompiled, so a
+  function a patch changes runs in an interpreter instead (a little slower, only that function). A mod's own code
+  modules (`exefs\subsdk1` and so on, as in the
+  [MH4U Port](https://github.com/Scrimas/MH4U-port-to-MHGU)) are loaded and run in the interpreter too. The log says
+  what was patched and loaded (`[mods]` lines).
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with
   Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
   use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions

@@ -1,9 +1,10 @@
 // Host controls -> the Switch controller the game reads (runtime/hle/input.c).
 //
-// Keyboard and mouse: WASD left stick (Left Shift held: half tilt, walking), mouse movement right stick (camera; click
-//   in the window to capture the mouse, Esc releases it), left click = X, right click = A, Space = B, R = Y, Q = L,
-//   E = R, Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right
-//   stick click. While the game shows a text entry (names, chat) the keyboard types instead
+// Keyboard and mouse: the keys and mouse buttons of the settings' [Keybinds] (runtime/config.c; by default WASD left
+//   stick, Left Shift held: half tilt, walking; left click = X, right click = A, Space = B, R = Y, Q = L, E = R,
+//   Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right stick
+//   click), mouse movement right stick (camera; click in the window to capture the mouse, Esc releases it). While the
+//   game shows a text entry (names, chat) the keyboard types instead
 //   (runtime/textinput.c). / ([Controls] ChatKey) opens a line of chat, Enter sends it, also in a quest (runtime/hle/chat.c).
 //   F11 switches windowed <-> full screen, F12 saves a screenshot, Shift+F12 the next 8
 //   frames (exact rendered pixels, run\shots\), F10 dumps every render pass of the next 2 frames (debug, slow), F9 toggles how colour clears are done (debug).
@@ -39,18 +40,27 @@ static SDL_Gamepad *pad;  // the controller read: of those open, the one a butto
 static struct { SDL_Gamepad *pad; uint64_t opened_ns; } pads[MAX_PADS];
 static int npads;
 
-static const struct { SDL_Scancode sc; int btn; } key_buttons[] = {
-    {SDL_SCANCODE_SPACE, BTN_B}, {SDL_SCANCODE_R, BTN_Y},
-    {SDL_SCANCODE_Q, BTN_L}, {SDL_SCANCODE_E, BTN_R}, {SDL_SCANCODE_TAB, BTN_ZL}, {SDL_SCANCODE_T, BTN_ZR},
-    {SDL_SCANCODE_RETURN, BTN_PLUS}, {SDL_SCANCODE_KP_ENTER, BTN_PLUS}, {SDL_SCANCODE_BACKSPACE, BTN_MINUS},
-    {SDL_SCANCODE_UP, BTN_UP}, {SDL_SCANCODE_LEFT, BTN_LEFT}, {SDL_SCANCODE_DOWN, BTN_DOWN}, {SDL_SCANCODE_RIGHT, BTN_RIGHT},
-    {SDL_SCANCODE_LCTRL, BTN_LSTICK}, {SDL_SCANCODE_RCTRL, BTN_LSTICK},
-    {SDL_SCANCODE_LALT, BTN_RSTICK}, {SDL_SCANCODE_RALT, BTN_RSTICK},
+// [Keybinds] (config.h BIND_*): the Switch button each presses (-1: the left stick's directions, walking)
+static const int bind_buttons[BINDS] = {
+    [BIND_MOVE_UP] = -1, [BIND_MOVE_DOWN] = -1, [BIND_MOVE_LEFT] = -1, [BIND_MOVE_RIGHT] = -1, [BIND_WALK] = -1,
+    [BIND_A] = BTN_A, [BIND_B] = BTN_B, [BIND_X] = BTN_X, [BIND_Y] = BTN_Y, [BIND_L] = BTN_L, [BIND_R] = BTN_R,
+    [BIND_ZL] = BTN_ZL, [BIND_ZR] = BTN_ZR, [BIND_PLUS] = BTN_PLUS, [BIND_MINUS] = BTN_MINUS, [BIND_DPAD_UP] = BTN_UP,
+    [BIND_DPAD_DOWN] = BTN_DOWN, [BIND_DPAD_LEFT] = BTN_LEFT, [BIND_DPAD_RIGHT] = BTN_RIGHT, [BIND_LSTICK] = BTN_LSTICK,
+    [BIND_RSTICK] = BTN_RSTICK,
 };
+static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), while captured
+static bool bind_held(int bind) {
+    for (int k = 0; k < BIND_KEYS; k++) {
+        int code = config_live_bind(bind, k);
+        if (code > 0 && code < SDL_SCANCODE_COUNT && keys[code]) return true;
+        if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2 && (mouse_held >> (code - KEY_MOUSE) & 1)) return true;
+    }
+    return false;
+}
 
 // ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. Its movement is the right stick:
 // the speed it moves at, smoothed over a few milliseconds, as the stick's tilt (full tilt at MOUSE_FULL_SPEED counts a
-// second, times the settings' MouseSensitivity). Left button X, right button A.
+// second, times the settings' MouseSensitivity). Its buttons press what [Keybinds] says.
 #define MOUSE_FULL_SPEED 1500.0f
 #define MOUSE_SMOOTH_S 0.025f  // (the averaging time: mice report at 125-8000 Hz, the game reads at its frame rate)
 // The camera ignores the right stick below about 39% tilt (any direction: a round dead zone; measured 2026-10-23, 38%
@@ -60,7 +70,6 @@ static bool mouse_grab;       // the player's choice: clicked in (true) or Esc /
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
 static float mouse_dx, mouse_dy;  // counts moved since the last update
-static uint64_t mouse_buttons;
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
 static uint64_t test_until;
@@ -545,21 +554,21 @@ void host_input_event(const SDL_Event *e) {
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
-        int btn = e->button.button == SDL_BUTTON_LEFT ? BTN_X : e->button.button == SDL_BUTTON_RIGHT ? BTN_A : -1;
-        if (btn < 0) break;
+        int btn = e->button.button;
+        if (btn < 1 || btn > SDL_BUTTON_X2) break;
         if (!e->button.down) {
-            mouse_buttons &= ~B(btn);
+            mouse_held &= ~(1u << btn);
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true;
         } else {
-            mouse_buttons |= B(btn);
+            mouse_held |= 1u << btn;
         }
         break;
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
-        mouse_buttons = 0, mouse_grab = false;
+        mouse_held = 0, mouse_grab = false;
         config_window_focus(false);  // ([Audio] MuteInBackground)
         if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
         break;
@@ -654,13 +663,12 @@ void host_input_update(void) {
         memset(keys, 0, sizeof keys);  // (keys held when the entry opened are typing now, or released)
     }
 
-    for (unsigned i = 0; i < sizeof key_buttons / sizeof *key_buttons; i++)
-        if (keys[key_buttons[i].sc]) b |= B(key_buttons[i].btn);
-    int kx = keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A], ky = keys[SDL_SCANCODE_W] - keys[SDL_SCANCODE_S];
-    int k = keys[SDL_SCANCODE_LSHIFT] ? 16000 : 32767;
+    for (int i = 0; i < BINDS; i++)
+        if (bind_buttons[i] >= 0 && bind_held(i)) b |= B(bind_buttons[i]);
+    int kx = bind_held(BIND_MOVE_RIGHT) - bind_held(BIND_MOVE_LEFT), ky = bind_held(BIND_MOVE_UP) - bind_held(BIND_MOVE_DOWN);
+    int k = bind_held(BIND_WALK) ? 16000 : 32767;
     if (kx && ky) k = k * 7071 / 10000;  // diagonals: same length as straight
     lx += kx * k, ly += ky * k;
-    b |= mouse_buttons;
     mouse_update(&rx, &ry);
 
     if (pad) {
@@ -761,7 +769,7 @@ void host_input_update(void) {
         if (menu) menu_face_release = true;
         menu = !menu;
         memset(keys, 0, sizeof keys);  // (keys held as it opened went to the menu: nothing stays pressed)
-        mouse_buttons = 0;
+        mouse_held = 0;
     }
     if (menu) {  // Forge's menu has the controller (as in Forge: A activates, B cancels, stick and d-pad move)
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
