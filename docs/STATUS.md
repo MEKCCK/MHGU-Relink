@@ -806,14 +806,16 @@ closes the connection, which clears the profile. No Discord: a try every 15 s. r
 once a second from the input polling (game thread): town / quest, map and zone, quest targets, hunter, party; field
 addresses are in its header comment. A town shows "Bherna Village" / "Hub (online)" and "Name, HR 83 - Long Sword";
 a quest "Hunting Great Maccao, Yian Kut-Ku, Malfestio" and "Jurassic Frontier, Area 1", the quest's name and the
-hunter in the (future) images' hover texts, the time since departing; (2 of 4) in a hub (ldn_party: the hub's
+hunter in the images' hover texts, the time since departing; (2 of 4) in a hub (ldn_party: the hub's
 NetworkInfo node count, its session id as the party id) or a multiplayer quest (sQuestSelector join count).
 Texts: monster and quest names from the game's English GMDs (romfs_host_path, so mods' copies count); map names and
 weapon type names are tables in presence.c (the game draws map names as pictures; stage 15 and town type 5 unknown).
 Tested on Windows (2026-10-31, test save, Discord running): town (Wycademy = town type 6), quest 404 (Volvidon, camp
 then Area 1 while walking), quest 521 (all large monsters: the large monster list), both settings toggled in the menu.
 Not tested yet: online hubs and the party size, Linux, the Hub / Pub / other villages' names in game.
-Next: images (weapon icons, maps) as assets of the Discord application or https URLs.
+Images are art assets of the Discord application (uploaded in its Developer Portal, used by key): "logo" as
+the large image, a pixel-art icon per weapon type as the small one (presence.c g_weapon_icons; a fan-made sprite
+sheet, used with permission). Next: map pictures as the large image in quests.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

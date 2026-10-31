@@ -2,8 +2,12 @@
 //   in a town: "Bherna Village" / "Hub (online)"; the hunter, HR and weapon type; (2 of 4) in a hub
 //   in a quest: "Hunting Khezu, Volvidon" (or the quest's name when it has no monster to hunt); "Jurassic Frontier,
 //   Area 4"; (2 of 4) in multiplayer; the time since departing
-// ini [Discord] ShowHunter = Off leaves the hunter's name and HR out. Names of monsters and quests are the game's
-// own English texts; the maps' names are not in the game's text files (the game draws them), so they are here.
+// The party (2 of 4) carries an id, the same in every player's game: Discord groups the players who share it. A hub's
+// is a hash of its session id (ldn_party); a quest's adds the quest number, so it holds only the quest's hunters.
+// Images: the large one is the "logo" art asset (maps later), the small one the weapon type's icon (g_weapon_icons),
+// its hover text the hunter. ini [Discord] ShowHunter = Off leaves the hunter's name and HR out. Names of monsters
+// and quests are the game's own English texts; the maps' names are not in the game's text files (the game draws
+// them), so they are here.
 //   MHGU_LOG_DISCORD=1   log every activity sent to Discord
 //
 // Where it comes from (main v1.4.0, runtime addresses):
@@ -50,6 +54,10 @@
 static const char *const g_weapons[] = {
     "Great Sword", "Sword & Shield", "Hammer", "Lance", "Heavy Bowgun", NULL, "Light Bowgun", "Long Sword",
     "Switch Axe", "Gunlance", "Bow", "Dual Blades", "Hunting Horn", "Insect Glaive", "Charge Blade"};
+// Their icons: art assets of the Discord application ("bowgun": the Heavy Bowgun)
+static const char *const g_weapon_icons[] = {
+    "great_sword", "sword_and_shield", "hammer", "lance", "bowgun", NULL, "light_bowgun", "long_sword",
+    "switch_axe", "gunlance", "bow", "dual_blades", "hunting_horn", "insect_glaive", "charge_blade"};
 // By quest stage (101-104: the first four at another time of day). Inferred from the quests' texts; 15 unknown.
 static const char *const g_stages[] = {
     NULL, "Jurassic Frontier", "Verdant Hills", "Arctic Ridge", "Misty Peaks", "Dunes", "Deserted Island",
@@ -173,6 +181,7 @@ void presence_tick(void) {
 
     DiscordActivity a;
     memset(&a, 0, sizeof a);
+    snprintf(a.large_image, sizeof a.large_image, "logo");  // (an art asset too; the weapon icon needs a large image)
     if (place == -1) {
         snprintf(a.details, sizeof a.details, "In the menus");
         discord_set_activity(&a);
@@ -186,6 +195,8 @@ void presence_tick(void) {
     }
     uint32_t w = LD32(pd + PD_WEAPON);
     const char *weapon = w < sizeof g_weapons / sizeof *g_weapons ? g_weapons[w] : NULL;
+    const char *icon = weapon ? g_weapon_icons[w] : NULL;
+    snprintf(a.small_image, sizeof a.small_image, "%s", icon ? icon : "");
     char who[160];
     snprintf(who, sizeof who, "%s%s%s", hunter, *hunter && weapon ? " - " : "", weapon ? weapon : "");
 
@@ -207,6 +218,8 @@ void presence_tick(void) {
         if (online && sane(sel)) {  // (the quest's hunters, not the hub's)
             party = (int)LD32(sel + 0xd750), party_max = (int)LD32(sel + 0xd74c);
             if (party < 1 || party > 4 || party_max < party || party_max > 4) party = 0;
+            size_t n = strlen(party_id);  // (the quest's own party: not the hunters who stayed in the hub)
+            snprintf(party_id + n, sizeof party_id - n, "-q%u", quest);
         }
     } else {
         const char *name = town < (int)(sizeof g_towns / sizeof *g_towns) ? g_towns[town] : NULL;
@@ -214,6 +227,7 @@ void presence_tick(void) {
         snprintf(a.details, sizeof a.details, "%s%s", name ? name : "In a village",
                  hub ? online ? " (online)" : " (offline)" : "");
         snprintf(a.state, sizeof a.state, "%s", who);
+        snprintf(a.small_text, sizeof a.small_text, "%s", who);
     }
     if (online && party > 0) {
         a.party = party, a.party_max = party_max;

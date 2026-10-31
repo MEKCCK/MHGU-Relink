@@ -362,8 +362,13 @@ bool ldn_party(int *n, int *max, char *id, size_t size) {
     bool up = ldn_net_up();
     if (up) {
         *n = L.info[NI_NODE_COUNT], *max = L.info[NI_NODE_MAX];
-        uint8_t *sid = L.info + NI_SESSION_ID;
-        snprintf(id, size, "%08x%08x%08x%08x", rd32(sid), rd32(sid + 4), rd32(sid + 8), rd32(sid + 12));
+        Sha256 h;  // (a hash of the session id: Discord shows the party id to others, the network's own id stays here)
+        char hex[65];
+        sha256_init(&h);
+        sha256_update(&h, "mhgu-party", 10);
+        sha256_update(&h, L.info + NI_SESSION_ID, 16);
+        sha256_hex(&h, hex);
+        snprintf(id, size, "%.32s", hex);
     }
     pthread_mutex_unlock(&L.mu);
     return up;

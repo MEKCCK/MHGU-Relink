@@ -34,7 +34,8 @@ typedef struct {
 // ldn.c
 bool ldn_net_up(void);           // a network exists (hosting with it created, or joined)
 bool ldn_hosting(void);          // we host it
-// The hub's players and their maximum, and its session id as text (the same in every player's game); false: no hub.
+// The hub's players and their maximum, and an id for it (a hash of its session id: the same in every player's
+// game); false: no hub.
 bool ldn_party(int *n, int *max, char *id, size_t size);
 uint32_t ldn_own_ip(void);        // 0 without a network
 uint32_t ldn_broadcast_ip(void);
