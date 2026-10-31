@@ -237,7 +237,7 @@ If you are newer to the game, I very strongly recommend the [Key Quest Markers](
 
 ### Cheats
 
-Put `.txt` files with cheat codes in `cheats\`. Every cheat in them is on from the start. Codes made for Ryujinx or a
+Put `.txt` files with cheat codes in `cheats\`. Every cheat in them is on from the start, unless you turned it off. Codes made for Ryujinx or a
 modded Switch work as they are, as long as they are for version 1.4.0. A file can hold any number of cheats, each
 starting with its name in square brackets:
 
@@ -246,6 +246,11 @@ starting with its name in square brackets:
 04000000 000DFAB4 E1A00080
 ```
 
+- Turn single cheats on and off in the settings menu (F1), on the Cheats tab: it takes effect when you press Save,
+  without a restart, and is remembered in `cheats\_off.txt`. Turning off a cheat that changes the game's code puts
+  the original code back; values a cheat already changed (money, items) stay as they are. Master codes (`{Name}`)
+  are always on. Cheats added to the folder show up after a restart. Online, only use cheats when everyone in the
+  lobby agrees to it.
 - To turn off a file without deleting it, start its name with `_`.
 - Cheats that change the game's code also work: the port runs each changed function in an interpreter. That
   function runs slower, which only matters for functions the game calls very often.
