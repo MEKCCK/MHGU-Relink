@@ -744,6 +744,43 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
   instructions. A laptop dual-core is perhaps 2-3x slower a thread: ~1 ms a frame in town, more in quests, on the
   game thread.
 
+## Loading screens (2026-10-31)
+
+Noticed: loading screens take about as long on this PC (Ryzen 7 9800X3D) as on the oldest one (the minimum spec), and
+longer with MH4U Port. Measured on quest 101 (Village, no large monster; MHGU_QUICKHUNT), seconds after Depart on
+Quest, from screenshots every 0.1 s, the logged file reads and a sampling profiler (below):
+- 0 - 0.4: fade to black. 0.4 - 1.9: black, the town area's depart states (aVillage, mode 4, 0x8bd720) waiting for
+  the departure's fade object (0x5f85fc) and the music to stop.
+- 1.9 - 4.2: the quest's card on the loading screen, and nothing loads: state 9 (0x8bdac0) counts area +0xe4 (150, 60 fps
+  frames, less the engine step each update: 2.5 s at any frame rate, on the Switch too) down to 0 before it jumps to
+  the quest's area.
+- 4.2 - 5.4: the loading itself (62 files). 5.5: the quest fades in.
+So 1.2 s of 5.5 is work; the rest is the game's own timing, the same on every PC. (A 2 s wait after the reads seen first
+was the measurement's: screenshots every 0.4 s, each a PNG encoded while the game ran.) The CPU is nearly idle outside
+the reads.
+- Of the loading, the loader thread (main 0xdc74e0) was the work: 80% in zlib's inflate (the archives are zlib streams;
+  the game's zlib is 1.2.8, "1.2.8.f-NINTENDO-SDK-v1"), 72% in inflate_fast (0x1422ce8) alone. Now inflate_fast and
+  adler32 (0x1422774) are host code (runtime/hle/inflate.c: zlib 1.2.8's on the game's structures, whose inflate_state
+  is 8 bytes shorter at the front; modes TYPE 11, BAD 27; no `sane` test, as the game's). The loader thread from start-
+  up to a quest: 9.3 -> 5.4 Gcycles (inflate_fast 7.1 -> 3.2, adler32 0.9 -> 0.45); the quest's reads 1.14 -> 0.86 s
+  here, more on a slower CPU. MHGU_INFLATE=check runs both on every call and compares (the output, z_stream and state):
+  16384 calls and as many adler32s from start-up to the quest, none different. MHGU_INFLATE=game: the game's.
+- MH4U Port: its hook quest_group_fix (module/quest.c, at the quest list loader step, the mod's 0x3b7de8 = main
+  0x5b7de8 here) runs quest_group_rename on every step: every entry of the quest list (~1500) against every monster's
+  12 quest slots, ~1 M instructions a call, in the interpreter (the mod's code). The town's load calls the step ~1000
+  times, on a thread of its own (from main 0x5b7cf8): 21 Gcycles, all of it in the interpreter (MHGU_INTERP_STATS:
+  up to 127 M instructions/s). The town's load (its first read to the town) took 7.4 s with MH4U Port, 2.5 s without:
+  5 s of it the mod's, here; a laptop's CPU several times that. The mod's to change (e.g. its slot IDs' range worked
+  out once, and an entry outside it skipped before the loops); the time is in the mod's own code, which only the
+  interpreter runs (~20 cycles an instruction: faster would take pre-decoding, not a quick change). Quest 101 itself
+  loads as fast with it as without.
+- Not changed: the game's waits. Skipping state 9's 2.5 s (the card shown with nothing loading) would be the biggest
+  cut, but it is the game's design: an option at most, Next steps 13 has the details. The town's load from the title
+  wasn't measured this way.
+- Tools: MHGU_SAMPLE=<file> (runtime/sampler.c, Windows): a sampling profiler, every thread's call stack about every
+  millisecond with the CPU cycles it used; tools/samples.py reads it (timeline / top / wait, game functions as their
+  guest addresses). Sleeping threads are sampled every 16th round, for where they wait.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
@@ -827,6 +864,21 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
 12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
    machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
    mapped; what is left and how: docs/research/title-menu.md.
+13. Option: skip the game's forced 2.5 s wait before a quest loads (on hold, 2026-10-31; see "Loading screens"). What is
+   known: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
+   +0xda = 1). Mode 4's handler 0x8bd720 switches on the state byte at area +5 (byte 1 of the word +4): states 1-3
+   start the fade, 4 (0x8bd8e0) waits for the fade object (0x5f85fc: its +0x54 object's +0x60 bit 0) and 0x6dee48
+   (the music), 5-7 one update each, 8 (0x8bda88) sets state 9 when +0xda is set (else mode 6), and state 9
+   (0x8bdac0) is the wait: area +0xe4 (an int, 150 = 0x96 already in state 4) less the engine step (G_SYSTEM
+   0x2326764 +0x68, f32) each update; while > 0 (0x8bdaf0) nothing else; at 0 it reads the stage (sGameControl
+   +0x48 / +0x4a), names the quest's area (0x15eff2c, 0x9aeebc -> area +0xc4) and goes to mode 6 (0x8bda98), and the
+   jump starts the quest's loading (0x8bdfd0 via 0x8bcc64, mode 7). The quest card's loading screen is up from about
+   state 9's start, so the 2.5 s are the card shown with nothing loading (the loader thread idle). Where +0xe4 gets
+   its 150 wasn't found (no store to +0xe4 in 0x8bc000-0x8c1000 but state 9's own): a peek showed it 150 from mode
+   4's start. A fix: at state 9 (an fnhook on 0x8bd720 seeing state 9, or on the countdown's caller), set +0xe4 to
+   0 (or a shorter time) when the option is on: the jump and the loads then start at once. Seen in the Village (the
+   area at 0x13800160 in those runs, aVillage); the Hub (aLobbyBase) presumably shares the class (quickhunt.c), not
+   checked; nor whether anything (sound, the card's own animation) expects the 2.5 s.
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
