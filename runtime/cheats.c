@@ -4,7 +4,8 @@
 // digits each. Lines starting with '#' or "//" are comments. Every cheat found is on, except those listed in
 // cheats/_off.txt (the settings' Cheats tab writes it: "<file>\t<cheat name>" per line; master codes are always on).
 // A cheat turned off while the game runs stops running; the words of the game's code it changed get their original
-// values back (so a code-changing cheat is undone), anything else it wrote stays as it is.
+// values back (so a code-changing cheat is undone), except those another cheat still on changed too, until that one
+// is turned off as well. Anything else it wrote stays as it is.
 // The codes run on Atmosphere's cheat virtual machine (every code type of its docs/features/cheats.md: written from
 // that description), once before the game starts and then once per frame the game presents, from the window loop
 // (as Atmosphere runs them beside the game). Memory regions: main is the main module (0x200000), heap, alias and aslr
@@ -41,7 +42,7 @@ typedef struct {
 } Op;
 
 typedef struct {
-    uint32_t addr, word;  // a word of the game's code and its value before this cheat first changed it
+    uint32_t addr, word;  // a word of the game's code and its value before any cheat changed it
 } Original;
 
 typedef struct {
@@ -50,12 +51,17 @@ typedef struct {
     Op *ops;
     int nops;
     int on, ran;          // on: wanted (the settings set it, any thread); ran: running (the window loop's)
-    Original *orig;       // the code words it changed, to put back when it is turned off
-    int norig;
+    bool stopping;        // (run_all: turned off this run)
+    uint32_t *words;      // the code words it changed, to put back when it is turned off
+    int nwords;
 } Cheat;
 
 static Cheat *cheats;
 static int ncheats;
+// Every code word a cheat changed, with its value from before any of them did: two cheats can change the same word,
+// and the second one's "before" would be the first one's value.
+static Original *orig;
+static int norig;
 static uint64_t reg[16], saved[16], statics[128];
 static uint64_t keys;
 static Cheat *cur;  // the one running (for the log, and the code words it changes)
@@ -268,16 +274,22 @@ static void wr(uint64_t a, uint32_t t, uint64_t v) {
         const Module *m = &g_modules[i];
         if (a < m->base + m->ro_off && a + t > m->base + m->text_off) code = true;
     }
-    if (code && !memcmp(p, &v, t)) return;
-    if (code && cur)  // (the original of each word, the first time this cheat changes it)
+    if (code && cur)  // (each word this cheat writes, and its original the first time any cheat does; also when
+                      // another cheat already wrote the same value: this one keeps it changed too)
         for (uint32_t w = (uint32_t)a & ~3u; w < a + t; w += 4) {
+            if (!kernel_mapped(w, 4)) continue;
             bool seen = false;
-            for (int i = 0; i < cur->norig && !seen; i++) seen = cur->orig[i].addr == w;
-            if (seen || !kernel_mapped(w, 4)) continue;
-            cur->orig = realloc(cur->orig, (cur->norig + 1) * sizeof *cur->orig);
-            cur->orig[cur->norig].addr = w;
-            memcpy(&cur->orig[cur->norig++].word, G2H(w), 4);
+            for (int i = 0; i < cur->nwords && !seen; i++) seen = cur->words[i] == w;
+            if (seen) continue;
+            cur->words = realloc(cur->words, (cur->nwords + 1) * sizeof *cur->words);
+            cur->words[cur->nwords++] = w;
+            for (int i = 0; i < norig && !seen; i++) seen = orig[i].addr == w;
+            if (seen) continue;
+            orig = realloc(orig, (norig + 1) * sizeof *orig);
+            orig[norig].addr = w;
+            memcpy(&orig[norig++].word, G2H(w), 4);
         }
+    if (code && !memcmp(p, &v, t)) return;
     memcpy(p, &v, t);
     if (code)
         for (uint32_t w = (uint32_t)a & ~3u; w < a + t; w += 4) code_changed(w);
@@ -494,30 +506,48 @@ static void run(Cheat *ch) {
     if (budget < 0) LOG("[cheats] %s: ran too long (a loop that never ends?): stopped for this frame\n", ch->name);
 }
 
-// A cheat turned off: the code words it changed get their values from before it back.
+// A cheat turned off: the code words it changed get their values from before any cheat changed them back, except
+// those a cheat still running changed too (it keeps them as it wants them; the last of them turned off puts them back).
 static void undo(Cheat *ch) {
     cur = NULL;  // (putting a word back is not a change to remember)
-    for (int i = ch->norig - 1; i >= 0; i--) {
-        uint8_t *p = G2H(ch->orig[i].addr);
-        if (memcmp(p, &ch->orig[i].word, 4)) {
-            memcpy(p, &ch->orig[i].word, 4);
-            code_changed(ch->orig[i].addr);  // (stays in the interpreter: now with the original code)
+    int back = 0, kept = 0;
+    for (int i = 0; i < ch->nwords; i++) {
+        uint32_t w = ch->words[i];
+        bool shared = false;
+        for (int k = 0; k < ncheats && !shared; k++)
+            if (cheats[k].ran)
+                for (int j = 0; j < cheats[k].nwords && !shared; j++) shared = cheats[k].words[j] == w;
+        if (shared) { kept++; continue; }
+        int o = 0;
+        while (o < norig && orig[o].addr != w) o++;
+        if (o == norig) continue;
+        uint8_t *p = G2H(w);
+        if (memcmp(p, &orig[o].word, 4)) {
+            memcpy(p, &orig[o].word, 4);
+            code_changed(w);  // (stays in the interpreter: now with the original code)
+            back++;
         }
+        orig[o] = orig[--norig];  // (the game's own again)
     }
-    if (ch->norig) LOG("[cheats] %s: off, %d word(s) of code put back\n", ch->name, ch->norig);
+    if (kept && back)
+        LOG("[cheats] %s: off, %d word(s) of code put back, %d kept by cheats still on\n", ch->name, back, kept);
+    else if (kept) LOG("[cheats] %s: off, %d word(s) of code kept by cheats still on\n", ch->name, kept);
+    else if (back) LOG("[cheats] %s: off, %d word(s) of code put back\n", ch->name, back);
     else LOG("[cheats] %s: off\n", ch->name);
-    free(ch->orig);
-    ch->orig = NULL, ch->norig = 0;
+    free(ch->words);
+    ch->words = NULL, ch->nwords = 0;
 }
 
 static void run_all(void) {
-    for (int i = 0; i < ncheats; i++) {
+    for (int i = 0; i < ncheats; i++) {  // (every cheat's new state first: undo asks which ones keep running)
         Cheat *ch = &cheats[i];
         bool on = ch->master || __atomic_load_n(&ch->on, __ATOMIC_ACQUIRE);
-        if (!on && ch->ran) undo(ch);
-        else if (on && !ch->ran && g_present_count) LOG("[cheats] %s: on\n", ch->name);
+        ch->stopping = !on && ch->ran;
+        if (on && !ch->ran && g_present_count) LOG("[cheats] %s: on\n", ch->name);
         ch->ran = on;
     }
+    for (int i = 0; i < ncheats; i++)
+        if (cheats[i].stopping) undo(&cheats[i]);
     for (int pass = 0; pass < 2; pass++)  // master codes first
         for (int i = 0; i < ncheats; i++)
             if (cheats[i].master == !pass && cheats[i].ran) run(&cheats[i]);
