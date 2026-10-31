@@ -3,6 +3,7 @@
 // agree; tools/test_lift.py --interp checks it against Unicorn the way it checks the lifter.
 #pragma STDC FP_CONTRACT OFF
 #include <math.h>
+#include <stdlib.h>
 
 #include "interp.h"
 #include "neon_rt.h"
