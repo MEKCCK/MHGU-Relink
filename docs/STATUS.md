@@ -796,6 +796,25 @@ the reads.
   millisecond with the CPU cycles it used; tools/samples.py reads it (timeline / top / wait, game functions as their
   guest addresses). Sleeping threads are sampled every 16th round, for where they wait.
 
+## Discord Rich Presence (2026-10-31, branch feat/discord-rich-presence)
+
+ini [Discord] RichPresence / ShowHunter (settings menu: Network tab), both live. runtime/net/discord.c talks to the
+Discord app over its local RPC (named pipe `\\.\pipe\discord-ipc-N`; on Linux the discord-ipc-N socket in
+$XDG_RUNTIME_DIR, Flatpak and Snap paths too) as application 1566091085493571724 ("Monster Hunter GU Recomp", owned by
+morerokk): handshake, then SET_ACTIVITY with the latest state at most every 4 s (Discord's rate limit); turning it off
+closes the connection, which clears the profile. No Discord: a try every 15 s. runtime/hle/presence.c reads the game
+once a second from the input polling (game thread): town / quest, map and zone, quest targets, hunter, party; field
+addresses are in its header comment. A town shows "Bherna Village" / "Hub (online)" and "Name, HR 83 - Long Sword";
+a quest "Hunting Great Maccao, Yian Kut-Ku, Malfestio" and "Jurassic Frontier, Area 1", the quest's name and the
+hunter in the (future) images' hover texts, the time since departing; (2 of 4) in a hub (ldn_party: the hub's
+NetworkInfo node count, its session id as the party id) or a multiplayer quest (sQuestSelector join count).
+Texts: monster and quest names from the game's English GMDs (romfs_host_path, so mods' copies count); map names and
+weapon type names are tables in presence.c (the game draws map names as pictures; stage 15 and town type 5 unknown).
+Tested on Windows (2026-10-31, test save, Discord running): town (Wycademy = town type 6), quest 404 (Volvidon, camp
+then Area 1 while walking), quest 521 (all large monsters: the large monster list), both settings toggled in the menu.
+Not tested yet: online hubs and the party size, Linux, the Hub / Pub / other villages' names in game.
+Next: images (weapon icons, maps) as assets of the Discord application or https URLs.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

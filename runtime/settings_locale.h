@@ -216,6 +216,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"The host did not answer through the hub server.", "El anfitrión no respondió a través del servidor de salas."},
         {"Sync small monsters", "Sincronizar monstruos pequeños"},
         {"Village quests in Hub", "Misiones de aldea en sala"},
+        {"Discord Rich Presence", "Presencia en Discord"},
+        {"Show hunter name and HR", "Mostrar nombre y RC del cazador"},
         {"Hunter", "Cazador"},
         {"Hunters", "Cazadores"},
         {"Monster HP Scaling", "Escalado de vida de los monstruos"},
