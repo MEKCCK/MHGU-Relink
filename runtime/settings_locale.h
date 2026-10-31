@@ -282,6 +282,10 @@ static inline const char *settings_text(int language, const char *english) {
         {"FSR overrides MSAA and FXAA while active.", "FSR sustituye MSAA y FXAA mientras está activo."},
         {"Invalid FSR quality, provider, sharpness or reactive mask.", "Calidad, escalador, nitidez o máscara reactiva de FSR no válidos."},
         {"Off (FSR)", "No (FSR)"},
+        {"FSR 3.1 in use", "FSR 3.1 en uso"},
+        {"This GPU can't run FSR 4, so FSR 3.1 is used.", "Esta GPU no puede usar FSR 4, así que se usa FSR 3.1."},
+        {"FSR 4 could not start, so FSR 3.1 is used. The [fsr4] lines in log.txt say why.",
+         "FSR 4 no pudo iniciarse, así que se usa FSR 3.1. Las líneas [fsr4] de log.txt dicen por qué."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;
