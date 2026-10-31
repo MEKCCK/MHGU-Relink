@@ -3922,7 +3922,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     vk_ms_resolve(b);
     b->ms_valid = false;
     renderer_mark_gpu_owned(t);
-    if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) || b->astc_bw) return;
+    if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return;
     bool array = b->layers > 1 && b->depth == 1;
     uint32_t hb = ((uint32_t)rg[4] + fi->bh - 1) / fi->bh, wb = ((uint32_t)rg[3] + fi->bw - 1) / fi->bw;
     uint32_t out_bpb = b->wide ? 8 : fi->bpb == 3 ? 4 : fi->bpb;  // (wide: RGBA8 texels widened to RGBA16)
@@ -3930,9 +3930,17 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     if (!guest_range_ok(src, img * nz)) return;
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
-    uint64_t out_row = (uint64_t)wb * out_bpb;
-    VkSpan s = vk_transient(out_row * hb * nz, 16);
-    for (uint32_t z = 0; z < nz; z++)
+    bool decode = vk_tex_decoded(b);  // (blocks the GPU can't read: decoded texels, the region's size)
+    uint64_t out_row = decode ? (uint64_t)rg[3] * vk_tex_texel_size(b) : (uint64_t)wb * out_bpb;
+    VkSpan s = vk_transient(out_row * (decode ? (uint32_t)rg[4] : hb) * nz, 16);
+    uint8_t *blocks = decode ? malloc((uint64_t)wb * fi->bpb * hb) : NULL;
+    for (uint32_t z = 0; z < nz; z++) {
+        if (decode) {
+            for (uint32_t y = 0; y < hb; y++)
+                memcpy(blocks + (uint64_t)y * wb * fi->bpb, G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row)), (uint64_t)wb * fi->bpb);
+            vk_tex_decode(b, blocks, (uint32_t)rg[3], (uint32_t)rg[4], (uint8_t *)s.ptr + (uint64_t)z * rg[4] * out_row);
+            continue;
+        }
         for (uint32_t y = 0; y < hb; y++) {
             const uint8_t *sr = (const uint8_t *)G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row));
             uint8_t *dr = (uint8_t *)s.ptr + ((uint64_t)z * hb + y) * out_row;
@@ -3940,7 +3948,10 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
             else if (b->wide) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = (uint16_t)(sr[x] * 257);
             else for (uint32_t x = 0; x < wb; x++) { memcpy(dr + x * 4, sr + x * 3, 3); dr[x * 4 + 3] = 255; }
         }
-    VkBufferImageCopy c = {.bufferOffset = s.off, .bufferRowLength = wb * fi->bw, .bufferImageHeight = hb * fi->bh,
+    }
+    free(blocks);
+    VkBufferImageCopy c = {.bufferOffset = s.off, .bufferRowLength = decode ? (uint32_t)rg[3] : wb * fi->bw,
+                           .bufferImageHeight = decode ? (uint32_t)rg[4] : hb * fi->bh,
                            .imageSubresource = {b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect,
                                                 (uint32_t)level, array ? (uint32_t)rg[2] : 0, array ? nz : 1},
                            .imageOffset = {rg[0], rg[1], array ? 0 : rg[2]},
