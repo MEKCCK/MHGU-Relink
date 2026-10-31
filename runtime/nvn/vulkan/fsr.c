@@ -26,6 +26,12 @@
 //    draws are found by its projection (camera_jitter.c camjit_menu_cameras), which gets the jitter in its viewport's
 //    pixels, and from the frame after one with such draws into H after its first 2D draw the HUD waits for as many
 //    (menu_cams_late), whether or not there is a scene before.
+//  - The quest rewards' picture: when a quest is cleared the game copies its picture into its screenshot buffer
+//    (sScreenShot's, marked by camera_jitter.c: NvnTexture.screenshot) and draws that behind the rewards menu, through
+//    its tonemapping but without the bloom and glare of gameplay frames. The copy is one jittered frame from before
+//    FSR, so the rewards stayed stair-stepped. At the start of the HUD of the frame the game copies in, if FSR ran, the
+//    buffer gets FSR's edges with the copy's own colours: FSR's picture + lowpass(copy) - lowpass(H) (screenshot_fill),
+//    and the game goes on drawing it as before.
 //  - Jitter (runtime/hle/camera_jitter.c) runs while frames are scene frames; after 3 frames in a row that are not,
 //    it stops (menus: no FSR, a steady picture), and starts again with the next scene frame.
 //  - The camera of a frame: the capture whose jittered projection the frame's scene draws read from their uniform
@@ -410,6 +416,48 @@ static const char BYPASS_GLSL[] =
     "    imageStore(img, p, vec4(mix(o.rgb, catmull_rom(rpos + pc.shift), w), o.a));\n"
     "}\n";
 
+// (quest rewards, see the top) the game's screenshot buffer with FSR's edges: FSR's picture + lowpass(copy - H). The
+// lowpass (a tent over 7 x 7 taps 2 texels apart, each between 4 texels: about 16 texels across) keeps what the copy
+// has that H has not (no bloom or glare: the rewards' own colours) and drops the edges of both, so FSR's are left.
+// FSR's picture is first kept within the colours of H's 3 x 3 texels around (its trail behind moving objects, the
+// Palicos dancing at the clear, is not in H; smoothed edges are), and the result within the copy's (the copy is of
+// the frame before).
+static const char SHOT_GLSL[] =
+    "#version 450\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(set = 0, binding = 0) uniform sampler2D shot;  // the game's copy\n"
+    "layout(set = 0, binding = 1) uniform sampler2D h;     // H: this frame's picture before FSR\n"
+    "layout(set = 0, binding = 2) uniform sampler2D hs;    // FSR's picture\n"
+    "layout(set = 0, binding = 3, rgba8) uniform writeonly image2D outp;\n"
+    "void main() {\n"
+    "    ivec2 p = ivec2(gl_GlobalInvocationID.xy), size = imageSize(outp);\n"
+    "    if (p.x >= size.x || p.y >= size.y) return;\n"
+    "    vec2 px = 1.0 / vec2(size), uv = (vec2(p) + 0.5) * px;\n"
+    "    vec3 low = vec3(0.0);\n"
+    "    float wsum = 0.0;\n"
+    "    for (int y = -3; y <= 3; y++)\n"
+    "        for (int x = -3; x <= 3; x++) {\n"
+    "            float w = (4.0 - abs(float(x))) * (4.0 - abs(float(y)));\n"
+    "            vec2 q = uv + (vec2(x, y) * 2.0 + 0.5) * px;\n"
+    "            low += w * (textureLod(shot, q, 0.0).rgb - textureLod(h, q, 0.0).rgb);\n"
+    "            wsum += w;\n"
+    "        }\n"
+    "    vec3 hmin = vec3(1.0), hmax = vec3(0.0), smin = vec3(1.0), smax = vec3(0.0);\n"
+    "    vec2 hpx = 1.0 / vec2(textureSize(h, 0));\n"
+    "    for (int y = -1; y <= 1; y++)\n"
+    "        for (int x = -1; x <= 1; x++) {\n"
+    "            vec3 a = textureLod(h, uv + vec2(x, y) * hpx, 0.0).rgb, b = textureLod(shot, uv + vec2(x, y) * px, 0.0).rgb;\n"
+    "            hmin = min(hmin, a), hmax = max(hmax, a), smin = min(smin, b), smax = max(smax, b);\n"
+    "        }\n"
+    "    vec3 c = clamp(textureLod(hs, uv, 0.0).rgb, hmin, hmax) + low / wsum;\n"
+    "    imageStore(outp, p, vec4(clamp(c, smin, smax), textureLod(shot, uv, 0.0).a));\n"
+    "}\n";
+
+static VkDescriptorSetLayout shot_set_layout;
+static VkPipelineLayout shot_layout;
+static VkPipeline shot_pipe;
+static TexBackend img_shot;  // the pass's output, copied into the buffer (made at the buffer's size)
+
 static bool own_image(TexBackend *b, VkFormat f, uint32_t w, uint32_t h, VkImageUsageFlags usage) {
     VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = f,
                             .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -524,6 +572,12 @@ static bool prep_init(void) {
         !own_image(&img_sil[0], VK_FORMAT_R32_SFLOAT, rw, rh, u) || !own_image(&img_sil[1], VK_FORMAT_R32_SFLOAT, rw, rh, u) ||
         !own_image(&img_vel, VK_FORMAT_R16G16B16A16_SFLOAT, rw, rh, u | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
         return false;
+    static const VkDescriptorType shot_types[] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+    if (!make_compute(SHOT_GLSL, "fsr_screenshot", shot_types, 4, 0, &shot_set_layout, &shot_layout, &shot_pipe)) {
+        LOG("[fsr] the quest rewards' pass could not be set up: their picture stays as the game makes it\n");
+        shot_pipe = VK_NULL_HANDLE;
+    }
     if (g_fsr_objvel && !objvel_init()) {
         LOG("[fsr] object motion could not be set up: camera motion only\n");
         g_fsr_objvel = false;
@@ -635,6 +689,38 @@ static void prev_store(VkCommandBuffer cb, TexBackend *h) {
     vkCmdCopyImage(cb, h->image, VK_IMAGE_LAYOUT_GENERAL, img_prev.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     vk_full_barrier(cb);
     prev_in_ok = true;
+}
+
+// (quest rewards, see the top) FSR's edges into the game's screenshot buffer, with its own colours: shot_pass into
+// img_shot, then copied over the buffer. h: H before FSR, hs: FSR's picture (this frame's).
+static void screenshot_fill(NvnTexture *shot, NvnTexture *h, NvnTexture *hs) {
+    TexBackend *b = shot->backend;
+    if (!shot_pipe || !b || !h->backend || !hs->backend || b->format != VK_FORMAT_R8G8B8A8_UNORM || b->samples > 1) {
+        LOG("[fsr] the game's screenshot %p left as it is (format %d)\n", (void *)shot, b ? b->format : -1);
+        return;
+    }
+    if (img_shot.image && (img_shot.width != b->width || img_shot.height != b->height)) {
+        vk_views_forget(&img_shot);
+        vk_defer_image(img_shot.image, img_shot.mem);
+        memset(&img_shot, 0, sizeof img_shot);
+    }
+    if (!img_shot.image && !own_image(&img_shot, VK_FORMAT_R8G8B8A8_UNORM, b->width, b->height,
+                                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+        return;
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    Bind bd[4] = {LINEAR(b), LINEAR(h->backend), LINEAR(hs->backend), STORAGE(&img_shot)};
+    VkDescriptorSet set = make_set(shot_set_layout, bd, 4);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, shot_pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, shot_layout, 0, 1, &set, 0, NULL);
+    vkCmdDispatch(cb, (b->width + 7) / 8, (b->height + 7) / 8, 1);
+    vk_full_barrier(cb);
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .extent = {b->width, b->height, 1}};
+    vkCmdCopyImage(cb, img_shot.image, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    vk_full_barrier(cb);
+    LOG("[fsr] frame %llu: FSR's edges into the game's screenshot %p (quest rewards)\n",
+        (unsigned long long)g_present_count + 1, (void *)shot);
 }
 
 // row-vector 4x4 helpers (double)
@@ -1051,6 +1137,7 @@ static bool jitter_on;
 // menu_models_late / menu_cams_late: the last frame's, when the HUD waits for them
 static bool menu_2d;
 static uint32_t menu_2d_scene, menu_models, menu_models_late, menu_cams, menu_cams_late;
+static NvnTexture *shot_taken;  // (quest rewards, see the top) the game's screenshot buffer, drawn into since the HUD
 static uint64_t last_dispatch_ns, frame_id;
 // per-second log (MHGU_FSR_LOG)
 static uint32_t n_fsr4, n_fsr, n_scaled, n_none, n_match, n_nomatch, n_reset, lag_hist[4], n_objv_frames, n_react_frames;
@@ -1588,6 +1675,12 @@ static void hud_start(const char *why) {
     // (a HUD that waited for a menu's 3D models: they are the scene, however few)
     bool scene = depth && (dn >= 16 || (dn && (menu_models_late || menu_cams_late))) && have_cam;
     frame_fsr = scene && run_fsr(g_h, hs, depth, frame_mask(), &cam);
+    if (shot_taken) {  // (quest rewards, see the top)
+        if (frame_fsr) screenshot_fill(shot_taken, g_h, hs);
+        else LOG("[fsr] frame %llu: the game's screenshot %p taken in a frame without FSR: left as it is\n",
+                 (unsigned long long)g_present_count + 1, (void *)shot_taken);
+        shot_taken = NULL;
+    }
     if (!frame_fsr) scale_to_stand(g_h, hs);
     {  // every change between FSR and plain scaling, with the reason (always logged; at most 500 lines)
         static int last = -1, nlog;
@@ -1613,6 +1706,7 @@ void vk_fsr_draw(const FsrDraw *d) {
     if (!frame_open) frame_begin();
     last_target = d->color0;
     last_src = d->ntex ? d->tex[0] : NULL;
+    if (d->color0 && d->color0->screenshot) shot_taken = d->color0;  // (quest rewards, see the top: the game's copy)
     if (d->depth && d->depth_write && d->depth->width == rw && d->depth->height == rh) {
         int i = 0;
         while (i < 4 && depths[i].t && depths[i].t != d->depth) i++;

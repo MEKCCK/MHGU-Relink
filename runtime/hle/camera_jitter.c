@@ -22,6 +22,10 @@
 // Cameras of another aspect are menus' (the smithy's equipment preview: 0.934, its panel): not captured, but kept as
 // menu cameras (menu_projection) and, once the renderer has found their draws and given their viewport, jittered the
 // same in that viewport's pixels, so FSR can smooth them too (fsr.c, menu cameras).
+// The quest rewards' picture: the game's screenshot buffers (MT Framework's sScreenShot: +0x1c the buffers, +0x20 how
+// many) are made by main+0x86F854, called only by the quest result's setup (one buffer, the render size, when a quest
+// starts); the game copies its picture into it when the quest is cleared and draws it behind the rewards. Hooked: the
+// textures NVN makes meanwhile, on that thread, are marked (NvnTexture.screenshot) for fsr.c.
 //
 //   MHGU_JITTER_TEST=<x>,<y>  (debug) a constant shift of the 3D picture by (x, y) render pixels (x right, y down),
 //                             with FSR on or off: shows the sign convention in screenshots
@@ -35,11 +39,13 @@
 #include "../camera_jitter.h"
 #include "../config.h"
 #include "../hle.h"
+#include "../nvn/nvn.h"
 
 #define FN_LOOKAT     0x21c33cu  // look-at: r0 = out view matrix, r1 = camera
 #define FN_PROJECTION 0x21c358u  // projection: r0 = out matrix, r1 = camera
 #define FN_EVENT_LOOKAT     0xb57a10u  // the same for event cameras (cutscenes: the meal), their class's own
 #define FN_EVENT_PROJECTION 0xb57fa4u
+#define FN_SCREENSHOT_BUFFERS 0xa6f854u  // sScreenShot's buffers made: r0 = sScreenShot, r1 = how many, r2 / r3 size
 #define CAM_FAR       0x30u
 #define CAM_NEAR      0x34u
 #define CAM_ASPECT    0x38u
@@ -207,6 +213,15 @@ bool camjit_get(uint64_t seq, CamRecord *out) {
     return ok;
 }
 
+// (the quest rewards' picture, see the top) the textures NVN makes during the game's screenshot buffer setup
+static void screenshot_buffers(Cpu *c) {
+    uint32_t n = c->r[1];
+    g_nvn_making_screenshot = true;
+    fnhook_call_original(c, FN_SCREENSHOT_BUFFERS);
+    g_nvn_making_screenshot = false;
+    LOG("[camjit] the game's screenshot buffers made (%u): FSR's edges go into its copies\n", n);
+}
+
 void camjit_init(void) {
     const char *e = getenv("MHGU_JITTER_TEST");
     g_test = e && sscanf(e, "%f,%f", &g_test_xy[0], &g_test_xy[1]) == 2;
@@ -217,6 +232,7 @@ void camjit_init(void) {
     fnhook_set(FN_PROJECTION, hle_register("camjit:projection", projection));
     fnhook_set(FN_EVENT_LOOKAT, hle_register("camjit:event_lookat", event_lookat));
     fnhook_set(FN_EVENT_PROJECTION, hle_register("camjit:event_projection", event_projection));
+    fnhook_set(FN_SCREENSHOT_BUFFERS, hle_register("camjit:screenshot_buffers", screenshot_buffers));
     if (g_test) LOG("[camjit] test: the 3D picture shifted by (%g, %g) render pixels (x right, y down)\n", g_test_xy[0], g_test_xy[1]);
     else LOG("[camjit] main camera hooked (main+0x1C33C view, main+0x1C358 projection): jitter while FSR runs\n");
 }
