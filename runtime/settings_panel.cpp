@@ -1620,6 +1620,7 @@ void mouse_drag(ImGuiViewport *vp, float width) {
 void settings_panel_request_close() { request_exit.store(true); }
 void settings_panel_request_back() { request_back.store(true); }
 bool settings_panel_dirty() { return is_dirty.load(); }
+int settings_panel_theme() { return s.editing ? s.draft.menu_theme : config_editable().menu_theme; }
 bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
 bool settings_panel_key(int scancode) {
     if (!is_capturing.load())
