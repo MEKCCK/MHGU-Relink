@@ -3547,7 +3547,8 @@ static void draw(CmdRec *r, bool indexed) {
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
     if (g_fsr_on) {  // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c)
         FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
-                      .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18};
+                      .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
+                      .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
         for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
         vk_fsr_draw(&fd);
     }
