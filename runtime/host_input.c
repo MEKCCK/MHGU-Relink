@@ -3,7 +3,8 @@
 // Keyboard and mouse: the keys and mouse buttons of the settings' [Keybinds] (runtime/config.c; by default WASD left
 //   stick, Left Shift held: half tilt, walking; left click = X, right click = A, Space = B, R = Y, Q = L, E = R,
 //   Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right stick
-//   click), mouse movement right stick (camera; click in the window to capture the mouse, Esc releases it). While the
+//   click), mouse movement the camera (in a hunt its angles directly, elsewhere the right stick; click in the window
+//   to capture the mouse, Esc releases it). While the
 //   game shows a text entry (names, chat) the keyboard types instead
 //   (runtime/textinput.c). / ([Controls] ChatKey) opens a line of chat, Enter sends it, also in a quest (runtime/hle/chat.c).
 //   F11 switches windowed <-> full screen, F12 saves a screenshot, Shift+F12 the next 8
@@ -28,6 +29,7 @@
 #include "forge.h"
 #include "hle/chat.h"
 #include "hle/input.h"
+#include "hle/mousecam.h"
 #include "overlay.h"
 #include "rt.h"
 #include "textinput.h"
@@ -58,9 +60,10 @@ static bool bind_held(int bind) {
     return false;
 }
 
-// ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. Its movement is the right stick:
-// the speed it moves at, smoothed over a few milliseconds, as the stick's tilt (full tilt at MOUSE_FULL_SPEED counts a
-// second, times the settings' MouseSensitivity). Its buttons press what [Keybinds] says.
+// ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. In a hunt its movement turns the
+// camera itself, a fixed angle per count (runtime/hle/mousecam.c). Elsewhere it is the right stick: the speed it moves
+// at, smoothed over a few milliseconds, as the stick's tilt (full tilt at MOUSE_FULL_SPEED counts a second, times the
+// settings' MouseSensitivity). Its buttons press what [Keybinds] says.
 #define MOUSE_FULL_SPEED 1500.0f
 #define MOUSE_SMOOTH_S 0.025f  // (the averaging time: mice report at 125-8000 Hz, the game reads at its frame rate)
 // The camera ignores the right stick below about 39% tilt (any direction: a round dead zone; measured 2026-10-23, 38%
@@ -601,7 +604,7 @@ void host_input_event(const SDL_Event *e) {
 
 static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 32767 : v; }
 
-// Capture or release the mouse as wanted, and add its movement to the right stick.
+// Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
 static void mouse_update(int *rx, int *ry) {
     bool want = mouse_grab && !overlay_menu_open() && !chat_active();  // (Forge's menu, the chat box: the pointer is theirs)
     SDL_Window *w = ui_window();
@@ -627,6 +630,11 @@ static void mouse_update(int *rx, int *ry) {
     last = now;
     if (dt > 0.1f) dt = 0.1f;
     if (now < test_until) mouse_dx += test_vx * dt, mouse_dy += test_vy * dt;
+    if (mousecam_active()) {  // (the hunt camera turns by the counts themselves)
+        if (mouse_dx != 0 || mouse_dy != 0) mousecam_add(mouse_dx, mouse_dy);
+        mouse_dx = mouse_dy = vx = vy = 0;
+        return;
+    }
     if (dt > 0.0f) {
         float a = 1.0f - expf(-dt / MOUSE_SMOOTH_S);
         vx += (mouse_dx / dt - vx) * a, vy += (mouse_dy / dt - vy) * a;

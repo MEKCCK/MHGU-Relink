@@ -817,6 +817,29 @@ Images are art assets of the Discord application (uploaded in its Developer Port
 the large image, a pixel-art icon per weapon type as the small one (presence.c g_weapon_icons; a fan-made sprite
 sheet, used with permission). Next: map pictures as the large image in quests.
 
+## Mouse look on the camera's angles (2026-10-31)
+
+In a hunt the captured mouse turns the camera itself (runtime/hle/mousecam.c): each count is 0.08 degrees x
+[Mouse] MouseSensitivity, at once (no dead zone, no speed curve, no smoothing lag), where the stick emulation it
+replaces had a minimum turn speed. The quest camera (uQuestCamera, DTI 0x184d8b8, 0xb00 bytes; code 0x218000-0x22a400)
+keeps its angles as 16-bit units: +0x9e8 / +0x9ec the pitch / yaw it heads for, +0x9e0 / +0x9e4 the smoothed ones
+(0x225308: stepped toward those by 0x21c3cc), +0x9d8 / +0x9dc the ones the eye is placed by (the smoothed ones, the
+pitch then lifted off the ground, 0x223d80). Its right stick handler 0x2255cc (r0 = camera, r1 = invert bits; called
+by the normal update 0x224e54 with +0x97c, and at 0x22713c with +0x980) reads the player's camera actions 1-4 (up,
+down, left, right: vfunc 0x2e8 of the player at camera +0x85c, bits of player +0x1434) and the stick's tilt (vfunc
+0x238), turns by a speed from the camera's parameters at options byte +0x65 (camera speed), and clamps the pitch to
++-0x3f00; later code clamps it again to -0x2f00..0x2800 (down 66, up 56 degrees, measured). The game only calls it
+while the player may turn the camera, so it is hooked: after it, the counts moved since the last update are added to
+the heading and smoothed angles together. The game's invert option (options byte +0x64: bit 0 up / down, bit 1 left /
+right; copied to camera +0x97c by 0x2220f8, and +0x68 to +0x980) is applied from r1. The game's camera speed is not
+(MouseSensitivity is). Options object: *0x1a8ca48 (+0x63, 0-4, is copied to camera +0x434 too; not identified).
+host_input.c gives the mouse to the camera while the handler ran in the last 200 ms (mousecam_active); otherwise
+(villages, whose camera doesn't turn; other cameras; cutscenes) to the right stick as before.
+Tested 2026-10-31 in quest 101 with the control file's mousemove: 500 counts = 40 degrees left and right, 20 counts
+turn 1.6 degrees, 1 count a second still turns; pitch stops at the game's limits and comes back at once; all four
+invert settings; the in-quest start menu (the camera turns there with the stick too). Not tried by hand with a real
+mouse, nor with a gunner's aim, mounting or the second camera type (+0x980).
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
@@ -1109,7 +1132,8 @@ G Rank), Chamberlyne > Downloadable Content > Claim Items lists the packs and cl
 Slickaxe x20). Palico downloads not checked. The quest ARCs equal the RomFS files byte for byte, so a donor-free
 version (building the regions from the RomFS) is possible once the flag bits and the pack / Palico records are known.
 
-Controls: see `runtime/host_input.c` (keyboard and mouse: WASD, mouse look (relative mode after a click, Esc releases; the mouse speed smoothed
+Controls: see `runtime/host_input.c` (keyboard and mouse: WASD, mouse look (relative mode after a click, Esc releases; in a
+hunt the camera's angles directly, runtime/hle/mousecam.c; elsewhere the mouse speed smoothed
 over 25 ms as the right stick tilt, offset past the camera's round ~39% stick dead zone; ini [Mouse] MouseSensitivity), clicks = X / A, Space / R = B / Y, Tab / T = ZL / ZR,
 arrows = d-pad, Ctrl / Alt = stick clicks, Enter = Plus; SDL gamepads (all open, the one a button was last pressed on is
 read: a Steam Deck with a controller plugged in has two, and taking the first one SDL listed left the player's pad dead;

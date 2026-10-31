@@ -8,6 +8,7 @@
 #include "camera_jitter.h"
 #include "gamelib.h"
 #include "hle.h"
+#include "hle/mousecam.h"
 #include "kernel.h"
 #include "mods.h"
 #include "app_actions.h"
@@ -63,6 +64,7 @@ static void boot(const char *root) {
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
+    mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
