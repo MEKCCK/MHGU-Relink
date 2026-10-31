@@ -729,6 +729,20 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
   Markers then reports "MHGU 1.4.0 code mismatch at a required function" and stays off: MH4U Port's IPS patches the
   same two instructions it hooks (main +0x3b2174 and +0xa4faf0), a conflict between the two mods on the console as
   well (before 0.11.6 the port skipped MH4U Port's code patches, so they didn't meet). Without MH4U Port it loads.
+- Its cost (2026-10-31, a report: much slower from 0.11.3 to 0.11.7 on a laptop, GeForce 920MX, with MH4U Port and
+  7 Forge plugins; the lag gone while talking to an NPC or in the item box). MHGU_INTERP_STATS=1 (interp.c: every 5 s
+  the interpreted instructions a second, and per function a run started in, callees included, with the calls) on the
+  Ryzen 7 9800X3D, MH4U Port only: town 3.7 M instructions/s, 26 ms/s in the interpreter (60 fps), all of it in one
+  function: main 0x2e0da0, the game's "has skill" bit test (14 instructions), called 87 times a frame in town and
+  142 in quest 101 (6.1 M instructions/s). MH4U Port hooks its entry (gear_has_skill_c, module/gear.c: Enlightened
+  Blade answering for the GU skills it grants) and that looks up every ported monster's SKIL section on each call
+  (port_section: a scan of the data file's section table, 7 monsters): ~715 instructions a call, almost always "no".
+  Before 0.11.6 the hook didn't run (and the mod's monsters didn't work). Port side: interp_owns, asked after every
+  interpreted instruction, scanned all ~180 interpreted ranges (MH4U Port's 170 functions and its subsdk1, the
+  plugins): it now tries the last hit's range first, 26 -> 22 ms/s. The rest is the mod's: keeping the 7 SKIL
+  pointers after the first lookup (the data never changes once loaded) would cut the hook to a few dozen
+  instructions. A laptop dual-core is perhaps 2-3x slower a thread: ~1 ms a frame in town, more in quests, on the
+  game thread.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

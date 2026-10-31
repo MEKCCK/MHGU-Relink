@@ -1459,10 +1459,17 @@ void interp_add_range(uint32_t lo, uint32_t hi) {
     pthread_mutex_unlock(&range_lock);
 }
 
+// Asked after every interpreted instruction: the range of the last hit first (the next instruction is nearly always
+// in the same function). With a code mod's patched functions there are a couple of hundred ranges to scan otherwise.
+static volatile int owns_last;
 int interp_owns(uint32_t pc) {
-    int n = __atomic_load_n(&nranges, __ATOMIC_ACQUIRE);
+    int n = __atomic_load_n(&nranges, __ATOMIC_ACQUIRE), last = owns_last;
+    if (last < n && pc >= ranges[last].lo && pc < ranges[last].hi) return 1;
     for (int i = 0; i < n; i++)
-        if (pc >= ranges[i].lo && pc < ranges[i].hi) return 1;
+        if (pc >= ranges[i].lo && pc < ranges[i].hi) {
+            owns_last = i;
+            return 1;
+        }
     return 0;
 }
 
@@ -1513,25 +1520,72 @@ static void read_check(const Cpu *c, uint32_t pc, uint32_t w) {
 }
 
 static void interp_run_inner(Cpu *c);
+// (debug) MHGU_INTERP_STATS=1: every 5 s, the instructions the interpreter ran a second (all of them, and per function
+// a run started in, its callees included) and how often each was entered: what interpreted code costs.
+static int stats_on = -1;
+static __thread uint64_t t_insns;
+static __thread int t_depth;
+static struct { uint32_t entry; uint64_t insns, calls; } stats[512];
+static uint64_t stats_total, stats_since, stats_ns;
+static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
+static void stats_add(uint32_t entry, uint64_t n, bool top, uint64_t ns) {
+    pthread_mutex_lock(&stats_lock);
+    unsigned h = (entry >> 2) % 512, k = 0;
+    while (k < 512 && stats[h].entry && stats[h].entry != entry) h = (h + 1) % 512, k++;
+    if (k < 512) stats[h].entry = entry, stats[h].insns += n, stats[h].calls++;
+    if (top) stats_total += n, stats_ns += ns;
+    uint64_t now = plat_now_ns();
+    if (!stats_since) stats_since = now;
+    if (now - stats_since >= 5000000000ull) {
+        double s = (now - stats_since) / 1e9;
+        LOG("[interp] %.1f M instructions/s, %.1f ms/s in the interpreter\n", stats_total / s / 1e6, stats_ns / s / 1e6);
+        for (int r = 0; r < 12; r++) {
+            int best = -1;
+            for (int i = 0; i < 512; i++)
+                if (stats[i].entry && stats[i].insns && (best < 0 || stats[i].insns > stats[best].insns)) best = i;
+            if (best < 0) break;
+            LOG("[interp]   %08x %8.0f calls/s %10.0f instructions/s\n", stats[best].entry, stats[best].calls / s,
+                stats[best].insns / s);
+            stats[best].insns = 0;
+        }
+        memset(stats, 0, sizeof stats);
+        stats_total = stats_ns = 0, stats_since = now;
+    }
+    pthread_mutex_unlock(&stats_lock);
+}
+
 void interp_run(Cpu *c) {
-    interp_run_inner(c);
+    if (stats_on < 0) stats_on = getenv("MHGU_INTERP_STATS") != NULL;
+    if (!stats_on) {
+        interp_run_inner(c);
+    } else {
+        uint32_t entry = c->pc;
+        if (code_word(entry) == 0xE51FF004u) entry = LD32(entry + 4);  // (dispatch_interpret's stub: its function)
+        uint64_t before = t_insns, t0 = plat_now_ns();
+        t_depth++;
+        interp_run_inner(c);
+        t_depth--;
+        stats_add(entry, t_insns - before, t_depth == 0, plat_now_ns() - t0);
+    }
     g_ip_pc = 0;  // (back in recompiled code or the host: a fault there is not the plugin's)
 }
 
 static void interp_run_inner(Cpu *c) {
     g_ip_cpu = c;
     uint32_t ret = c->r[14], pc = c->pc, sp = c->r[13];
+    uint64_t n = 0;  // (MHGU_INTERP_STATS: added to t_insns when the run ends)
     for (;;) {
         int link;
         g_ip_pc = g_ip_last = pc;
         uint32_t wa = g_interp_watch, before = wa ? LD32(wa) : 0;
         if (read_hi) read_check(c, pc, code_word(pc));
+        n++;
         uint32_t next = interp_exec(c, pc, code_word(pc), &link);
         if (wa && LD32(wa) != before && watch_left > 0) {
             watch_left--;
             LOG("[watch] %08x: %08x -> %08x by %08x (r0 %08x lr %08x)\n", wa, before, LD32(wa), pc, c->r[0], c->r[14]);
         }
-        if (next == ret && !link && c->r[13] >= sp) return;
+        if (next == ret && !link && c->r[13] >= sp) break;
         if (interp_owns(next)) {
             pc = next;
             continue;
@@ -1543,12 +1597,13 @@ static void interp_run_inner(Cpu *c) {
             pc += 4;
             continue;
         }
-        if (next == ret) return;
+        if (next == ret) break;
         uint32_t lr = c->r[14];
         c->pc = next;
         g_ip_pc = 0;
         rt_dispatch(c);
-        if (lr == ret || !interp_owns(lr)) return;
+        if (lr == ret || !interp_owns(lr)) break;
         pc = lr;
     }
+    if (stats_on > 0) t_insns += n;
 }
