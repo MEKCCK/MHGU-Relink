@@ -181,8 +181,10 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
   game's window is in the background)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
-  Auto / Off: what `mhgurecomp-updater` does, see "Staying up to date")
+  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Gold / Blue / Hunter: the settings menu's colours) and
+  `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
+  to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right
+  corner to size it; Menu Options > Attach menu puts it back in place.
 
 ### Multiplayer
 

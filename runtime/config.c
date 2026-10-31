@@ -24,7 +24,7 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_GOLD
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -277,8 +277,13 @@ static const char DEFAULT_INI[] =
     "; Default: Xbox\n"
     "ButtonIcons = Xbox\n"
     "\n"
+    "; Colours of the settings menu\n"
+    "; Gold, Blue, Hunter\n"
+    "; Default: Gold\n"
+    "Theme = Gold\n"
+    "\n"
     "; Size of the settings menu, in percent\n"
-    "; Between 100 and 200\n"
+    "; Between 50 and 200\n"
     "; Default: 100\n"
     "MenuScale = 100\n"
     "\n"
@@ -438,7 +443,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
     {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
-    {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 100, 200, NULL, NULL, false, ERR_SCALE},
+    {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
+    {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
 };
 #undef ON_OFF

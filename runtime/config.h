@@ -58,7 +58,7 @@ typedef struct {
     int volume;               // host master volume, 0..100; independent of the game's music / SFX settings
     int button_icons;         // 0: Xbox, 1: Switch, 2: PlayStation (visual guides only)
     int language;             // 0: English, 1: Spanish (host menu only)
-    int menu_scale;           // host UI text/layout scale, 100..200 percent
+    int menu_scale;           // host UI text/layout scale, 50..200 percent
     int menu_confirm;         // independent confirmation policy for the host settings menu
     int confirm_exit;         // ask before closing the application
     int fsr;                  // [Upscaler] FSR 3.1: 1 on (runtime/nvn/vulkan/fsr.c), 0 off
@@ -80,11 +80,13 @@ typedef struct {
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
     int smooth_gradients;     // [Graphics] SmoothGradients: the game's RGBA8 render targets as RGBA16 (nvn/vulkan/textures.c)
     int binds[BINDS][BIND_KEYS];  // [Keybinds]: BIND_* -> its keys (an SDL scancode or KEY_MOUSE + button; 0 none)
+    int menu_theme;           // [Application] Theme: THEME_*, the settings menu's colours (runtime/settings_panel.cpp)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
 #define LDN_DEFAULT_SERVER "morerokk-mhgurecomp-ldnserver.duckdns.org"
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
+enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_UP_3, FSR_UP_4 };  // [Upscaler] Upscaler
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3

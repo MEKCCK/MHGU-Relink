@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     assert(strstr(text, "Language = Spanish") && strstr(text, "ButtonIcons = PlayStation"));
     // Invalid edits must leave both the file and the live audio setting intact.
     Config bad=c;bad.menu_confirm=3;assert(!config_save(&bad,error,sizeof error));
-    bad=c;bad.menu_scale=99;assert(!config_save(&bad,error,sizeof error));
+    bad=c;bad.menu_scale=49;assert(!config_save(&bad,error,sizeof error));
     bad.menu_scale=201;assert(!config_save(&bad,error,sizeof error));
     bad = c; bad.button_icons = 3;
     assert(!config_save(&bad, error, sizeof error));

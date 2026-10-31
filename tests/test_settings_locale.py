@@ -24,7 +24,7 @@ class SettingsLocaleTest(unittest.TestCase):
         self.assertTrue(all(en.strip() and es.strip() for en, es in pairs))
         self.assertNotIn(chr(0xfffd), catalog)
         translations = dict(pairs)
-        self.assertEqual(translations["Miscellaneous"], "Misceláneos")
+        self.assertEqual(translations["Misc"], "Varios")
         self.assertEqual(translations["Hunter"], "Cazador")
         self.assertEqual(translations["Reset this tab"], "Restablecer esta pestaña")
 
