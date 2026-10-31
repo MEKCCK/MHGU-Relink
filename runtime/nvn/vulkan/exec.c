@@ -306,22 +306,29 @@ static VkSpan guest_copy(uint64_t addr, uint64_t size) {
 }
 
 // Vertex streams: a draw binds the rest of a vertex pool from where its own vertices start, so the draws of one pool
-// (the equipment box's icons, one quad each) bind ranges that share their end. The first copy serves the later ones
-// that start inside it, at their offset.
+// (the equipment box's icons, one quad each) bind ranges that share their end. The first copy (or vertex cache buffer)
+// serves the later ones that start inside it, at their offset, until guest memory changes.
 #define VTAIL_TAB 1024
 static struct { uint64_t addr, end, gen; VkSpan span; } vtail[VTAIL_TAB];
+static uint32_t vtail_slot(uint64_t end) { uint64_t h = end * 0x9E3779B97F4A7C15ull; return (uint32_t)(h ^ (h >> 32)) & (VTAIL_TAB - 1); }
+static bool vtail_find(uint64_t addr, uint64_t size, VkSpan *out) {
+    uint32_t slot = vtail_slot(addr + size);
+    if (vtail[slot].gen != gcopy_gen || vtail[slot].end != addr + size || vtail[slot].addr > addr) return false;
+    uint64_t d = addr - vtail[slot].addr;
+    *out = vtail[slot].span;
+    out->off += d;
+    if (out->ptr) out->ptr = (uint8_t *)out->ptr + d;
+    return true;
+}
+static void vtail_put(uint64_t addr, uint64_t size, VkSpan span) {
+    uint32_t slot = vtail_slot(addr + size);
+    vtail[slot].addr = addr; vtail[slot].end = addr + size; vtail[slot].gen = gcopy_gen; vtail[slot].span = span;
+}
 static VkSpan guest_copy_vertex(uint64_t addr, uint64_t size) {
-    uint64_t end = addr + size, h = end * 0x9E3779B97F4A7C15ull;
-    uint32_t slot = (uint32_t)(h ^ (h >> 32)) & (VTAIL_TAB - 1);
-    if (vtail[slot].gen == gcopy_gen && vtail[slot].end == end && vtail[slot].addr <= addr) {
-        VkSpan s = vtail[slot].span;
-        uint64_t d = addr - vtail[slot].addr;
-        s.off += d;
-        s.ptr = (uint8_t *)s.ptr + d;
-        return s;
-    }
-    VkSpan s = guest_copy(addr, size);
-    vtail[slot].addr = addr; vtail[slot].end = end; vtail[slot].gen = gcopy_gen; vtail[slot].span = s;
+    VkSpan s;
+    if (vtail_find(addr, size, &s)) return s;
+    s = guest_copy(addr, size);
+    vtail_put(addr, size, s);
     return s;
 }
 
@@ -3790,8 +3797,11 @@ static void draw(CmdRec *r, bool indexed) {
             if (v.size && (need > v.size || v.size <= (4u << 20))) need = v.size;
             VkBuffer cached;
             if (!v.addr || !guest_range_ok(v.addr, need)) { static const uint8_t zero[256]; sp = vk_transient_copy(zero, 256, 16); }
-            else if (v.size && guest_range_ok(v.addr, v.size) && vcache(v.addr, v.size, &cached)) sp = (VkSpan){cached, 0, NULL};
-            else sp = guest_copy_vertex(v.addr, need ? need : 16);
+            else if (v.size && guest_range_ok(v.addr, v.size) && vtail_find(v.addr, v.size, &sp)) {}
+            else if (v.size && guest_range_ok(v.addr, v.size) && vcache(v.addr, v.size, &cached)) {
+                sp = (VkSpan){cached, 0, NULL};
+                vtail_put(v.addr, v.size, sp);
+            } else sp = guest_copy_vertex(v.addr, need ? need : 16);
         }
         VkDeviceSize off = sp.off;
         if ((ss.vb_known >> s & 1) && ss.vb[s] == sp.buf && ss.vo[s] == off) continue;
