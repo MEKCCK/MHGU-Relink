@@ -298,6 +298,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_scale);
     SAME(menu_confirm);
     SAME(confirm_exit);
+    SAME(show_fps);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -748,6 +749,7 @@ void reset_section() {
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
         c.confirm_exit = f.confirm_exit;
+        c.show_fps = f.show_fps;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
         break;
@@ -826,7 +828,26 @@ void conflict_rows(std::vector<Row> &r) {
         }
     }
 }
+// "Add a cheat": a text box to paste one into (Ctrl+V); Accept checks it, adds it to cheats/added.txt and turns it on
+void add_cheat() {
+    keyboard(tr("Paste a cheat (Ctrl+V): its [Name] line and its codes. Enter or Accept adds it."), "", 65536,
+             [](const std::string &text, std::string &error) {
+                 int before = cheats_count();
+                 char err[256];
+                 if (!cheats_add(text.c_str(), err, sizeof err)) {
+                     error = tr(err);
+                     return false;
+                 }
+                 for (int i = before; i < cheats_count(); ++i) {  // (on, and running from the next frame)
+                     cheat_tab.draft.push_back(1);
+                     cheat_tab.saved.push_back(1);
+                 }
+                 return true;
+             });
+}
 void cheat_rows(std::vector<Row> &r) {
+    action(r, "cheats.add", tr("Add a cheat"), []() { add_cheat(); });
+    r.back().help = tr("Paste a cheat code (Atmosphere format, as for Ryujinx). It is saved in cheats/added.txt and turns on right away.");
     if (cheat_tab.draft.empty())
         action(r, "cheats.none", tr("No cheats found in the cheats folder"), []() {});
     for (int i = 0; i < (int)cheat_tab.draft.size(); ++i) {
@@ -1169,6 +1190,7 @@ std::vector<Row> main_rows() {
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
+        add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
@@ -2052,7 +2074,7 @@ void settings_panel(bool *open) {
             ImGui::PushStyleColor(ImGuiCol_Text, vec(theme().warn));
             ImGui::TextWrapped("%s", tr("Online: only use cheats when everyone in the lobby agrees to it."));
             ImGui::PopStyleColor();
-            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. New cheat files show up after a restart."));
+            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; new cheat files in the folder show up after a restart."));
         }
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
