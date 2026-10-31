@@ -1,91 +1,116 @@
-# TODO: Android build (planned 2026-10-25, assessed 2026-10-31, started 2026-10-31: BC textures)
+# Android build (planned 2026-10-25, assessed and started 2026-10-31: runs in the emulator)
 
 Goal: the port on Android phones / tablets, played with a controller (Bluetooth or USB). No touch controls: the game
 doesn't suit them, so none are planned. Players bring their own dump as on PC; the APK holds no game files.
 
-Verdict (2026-10-31): viable. The CPU / OS side is small and well defined; the open-ended part is the GPU side
-(phone drivers, tile-based GPUs). Four things below stop it booting or drawing correctly ("Must fix").
+Status (2026-10-31, branch feat/android-build): the APK builds (x86_64 for the emulator, arm64-v8a for phones), and in
+the Android 15 emulator the game boots, translates its shaders, and quick-hunts into quest 101 with everything drawn
+as on PC (also with BC textures decoded on the CPU, as a phone needs). Not yet tried: a real phone, controls by hand,
+sound, movies, multiplayer, pausing / resuming the app.
 
-## What carries over
+## Building and running
 
-- The recompiled game code and the runtime are plain C (the lifter's output, interpreter, NEON emulation): no x86
-  intrinsics anywhere. Only the build flag `GENARCH ?= -march=x86-64-v3` (Makefile) is x86; arm64 needs its own
-  (e.g. `-march=armv8.2-a`). The guest's NEON / VFP could even map to the host's NEON later, for speed.
-- The guest's memory ordering carries over: the lifter turns DMB / DSB into `__atomic_thread_fence` and LDREX / STREX
-  into seq_cst helpers, so a weakly ordered arm64 host is safe (x86's TSO never tested that, but the guest itself was
-  ARM). Float behaviour (NaN, conversions) is if anything closer to the guest's on arm64 than on x86.
-- No JIT: nothing needs executable memory at run time.
-- runtime/platform/linux.c is the starting point: Android is Linux with bionic (mmap, signals, threads).
-- SDL3 supports Android (its Java activity glue, gamepads, audio, text input with the system keyboard for names and
-  item set names). Controller-only fits SDL's gamepad API as it is.
-- Vulkan is Android's graphics API, and mobile GPUs decode ASTC natively (the port's ASTC decoder can be skipped
-  there).
-- The settings menu (F1 / Plus + Minus) already works with a controller: no ini editing needed on a phone.
+Needs the Android SDK (default /c/Android/Sdk, or ANDROID_HOME) with `ndk`, `cmake`, `build-tools`,
+`platforms/android-35`, and for testing `platform-tools`, `emulator` and an x86_64 system image; a JDK 17+ (default
+/c/Android/jdk-21, or JAVA_HOME). No Gradle: android/apk.mk packages the APK with the SDK's own tools.
 
-## Must fix (it doesn't start, or draws wrong, without these)
+    make PLATFORM=android ABI=x86_64 -j16        # the emulator's ABI: build-android/lib/x86_64, the APK
+    make PLATFORM=android ABI=arm64-v8a -j16     # phones; the APK then holds both ABIs
+    make PLATFORM=android ABI=x86_64 install     # adb install -r build-android/mhgurecomp.apk
 
-1. GUEST_BASE (runtime/cpu.h) is 1 TB. Most Android kernels have a 39-bit address space: user space ends at 512 GB,
-   so plat_reserve_guest fails at startup. Pick a lower constant (e.g. 64 GB, 0x1000000000) the platform leaves
-   free. G2H is a macro: recompiling the generated code is enough, no new `make gen`.
-2. BC textures: Adreno and Mali drivers on Android have no textureCompressionBC. textures.c decoded only ASTC on the
-   CPU when the GPU lacks a format; anything else got an empty RGBA8 image (black). DONE for BC1-BC5: see "BC
-   textures" below.
-3. Shader int64: every translated shader has `#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require`
+The first build of an ABI also builds SDL3 (shared, for SDL's Java activity), shaderc and FFmpeg for it (~3 min);
+objects go to obj-android/<abi>/. The APK is ~115 MB per ABI, nearly all of it the game code (libmhgugame.so).
+
+On the device everything lives in the app's folder, /sdcard/Android/data/io.github.morerokk.mhgurecomp/files (Android
+creates it at the first start, which then says the game files are missing): the game files in `data/exefs` and
+`data/romfs`, and beside them mhgurecomp.ini, log.txt, save/, mods/, cheats/, cache/, shots/. Copying the game files
+with adb (from MSYS2: `MSYS_NO_PATHCONV=1`, Windows paths for the local side):
+
+    adb push C:/MHGURecompile/mhgu/game/exefs /sdcard/Android/data/io.github.morerokk.mhgurecomp/files/data/
+    adb push C:/MHGURecompile/mhgu/game/romfs /sdcard/Android/data/io.github.morerokk.mhgurecomp/files/data/
+
+(12.3 GB: ~3 minutes into the emulator.) Android starts apps without environment variables, so the debug ones come
+from `env.txt` in that folder, one `NAME=value` per line (runtime/platform/android.c): e.g. `MHGU_QUICKHUNT=101`,
+`MHGU_SHOT_AT=...`, `MHGU_NO_BC=1`, `MHGU_FPS=1`, `MHGU_SAVE_DIR=<a folder adb made>` for a test save. Screenshots:
+`adb exec-out screencap -p > shot.png`.
+
+The emulator used here (avdmanager, `system-images/android-35/google_apis/x86_64`, device "mhgu"): 8 GB RAM, a
+48 GB data partition (`disk.dataPartition.size`), 1920x1080 landscape, `hw.gpu.mode=host`, `hw.keyboard=yes`; started
+with `emulator -avd mhgu -gpu host -no-snapshot`. Its Vulkan is the host GPU's through gfxstream (here the RTX 5070 Ti:
+Vulkan 1.3, BC included, so MHGU_NO_BC=1 stands in for a phone's GPU).
+
+The emulator is for seeing things work, not for speed: the game ran at ~11 fps in a hunt. Its render thread spends
+its time in the emulator's GPU pipe (goldfish_pipe, copying every Vulkan call to the host), and its only clock is the
+HPET, so every clock read traps to the hypervisor (the event loop's thread: 100% of a core in read_hpet, at 234
+loops a second as on PC). A phone has neither cost. Measure on a phone.
+
+## How it is put together
+
+- The APK: SDL's own Java activity (org.libsdl.app.SDLActivity, from SDL's android-project, compiled with javac + d8)
+  loads libSDL3.so and libmain.so (the runtime with shaderc and FFmpeg linked in) and calls SDL_main (main.c includes
+  SDL_main.h on Android). The runtime then loads libmhgugame.so by name (runtime/gamelib.c), which is linked against
+  libmain.so for the runtime's functions. Libraries are stored uncompressed and 16 KB aligned
+  (extractNativeLibs="false", zipalign -P 16, linked with max-page-size 16384), without their debug info (the build
+  folder keeps them whole). android/AndroidManifest.xml: landscape, controller / keyboard, Vulkan 1.2, network
+  permissions for multiplayer. Signed with the SDK's debug key (~/.android/debug.keystore).
+- minSdk 29 (Android 10), targetSdk the newest installed platform (35). What decides whether a phone runs the game is
+  its GPU driver (Vulkan 1.2, timeline semaphores, shaderInt64), not the Android version; nothing in the runtime needs
+  a newer API (execinfo's backtrace() is Android 13+: the unwinder's _Unwind_Backtrace instead).
+- runtime/platform/linux.c serves Android too, with android.c for the app's folder (SDL_GetAndroidExternalStoragePath),
+  env.txt and the message box. `umask(007)` at start: Android gives apps 077, and folders the game made (save, mods,
+  cheats...) could then not be written over USB or adb.
+- GUEST_BASE is 64 GB on Android (runtime/cpu.h): most Android kernels give a process 512 GB (39-bit addresses).
+- The fault handler (backing guest pages on first touch) reads the interrupted registers per architecture: x86-64's
+  gregs, arm64's pc / sp / x30 and the write bit from the signal frame's ESR record. Android's libsigchain runs ART's
+  handler first; guest page faults reach ours (seen working on x86_64; arm64 not yet run).
+- Relative paths given to SDL's file functions open the APK's assets on Android: the screenshot writer makes its path
+  absolute (device.c vk_save_png). Other file access goes through stdio from the app's folder (the working directory).
+
+## Left to do
+
+1. A real phone (arm64): the fault handler's arm64 path, performance, thermal throttling, a mobile GPU's driver.
+2. Shader int64: every translated shader has `#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require`
    (maxwell/translate.c), while device.c only logs a warning without shaderInt64. Not every phone driver has it: there
    every pipeline would fail. Check the target GPUs (gpuinfo.org), or make the translator do without int64.
-4. The fault handler (linux.c, the SIGSEGV handler that backs guest pages on first touch) reads x86 registers
-   (REG_ERR, REG_RIP, REG_RSP). arm64: uc_mcontext.pc / sp / regs[30], and the write bit from the ESR record in
-   __reserved. Android's runtime chains its own signal handlers in front of the app's (libsigchain): emulators live
-   with it, but test it.
+3. Controls by hand. Note: SDL took the emulator's keyboard ("qwerty2", 0627:0001) for a gamepad ("[input] gamepad
+   in use"); a real controller should be preferred over it.
+4. pipelines.list: looked for beside the executable (exec.c), which on Android is the system's app_process64, so the
+   pipeline prewarm list isn't used. Ship it in the APK's assets and copy it to the app's folder (android.c).
+5. Getting the game files onto a phone: Android/data can't be reached from a phone's own file managers since
+   Android 11, only over USB (MTP) or adb. For players: an in-app import from a folder they pick (Storage Access
+   Framework), or the "All files access" permission and a folder of their choosing.
+6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill a
+   backgrounded app, the back button.
+7. LAN multiplayer: broadcast discovery needs Android's WifiManager.MulticastLock (a Java call). The hub server should
+   work as it is.
+8. Left in but useless on Android: Discord Rich Presence (finds no Discord), the settings menu's Restart (can't start a
+   new process: it reports failure). The updater isn't built.
+9. 16 KB pages: PLAT_PAGE is fixed at 4 KB. The libraries are 16 KB aligned, but a 16 KB page kernel would also need
+   plat_protect / commit at that granularity.
+10. Movies: FFmpeg is built in (as on PC); not yet seen playing on Android.
 
-Smaller, for bionic: runtime/platform/linux_glibc.c (glibc symbol versions) doesn't apply; execinfo's backtrace()
-needs API 33 (or use the unwinder); posix_spawn needs API 28.
-
-## Work
-
-1. Build: NDK clang for arm64-v8a, the generated code as a shared library (mhgugame.so, as on Linux; ~90 MB like the
-   Windows DLL, so build time and APK size need watching), a Gradle project around SDL3's Android template, an APK.
-   FFmpeg, shaderc and SDL3 cross-built for arm64 as the Makefile already builds them for Linux.
-2. Game files (12.3 GB): Android's scoped storage. Simplest for a sideloaded APK: the "All files access" permission
-   (MANAGE_EXTERNAL_STORAGE): the player copies exefs / romfs to e.g. /sdcard/MHGURecomp/data and the runtime keeps
-   opening paths as now. (The Play Store would refuse that permission; we don't use it.) The alternatives: copy them
-   into the app's own storage (doubles the space), or Storage Access Framework file descriptors (rework of romfs.c and
-   the fs service). Saves, ini, cache, mods and cheats beside them.
-3. Vulkan on mobile drivers (Adreno, Mali, Xclipse): "Must fix" 2 and 3; shaderc on Android (it compiles the game's
-   shaders at run time: slower on a phone, the prewarm takes longer); memory (phones share RAM between CPU and GPU).
-   Adreno's stock drivers are known for bugs (emulators offer Mesa's Turnip instead).
-4. Movies: ffmpeg's avformat / avcodec built for Android, or MediaCodec.
-5. 16 KB pages: PLAT_PAGE is fixed at 4 KB. Some newer devices (Android 15+) run 16 KB page kernels: plat_protect /
-   commit granularity. Fine for a first version on 4 KB devices.
-6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill
-   a backgrounded app, the back button.
-7. LAN multiplayer: broadcast discovery needs Android's WifiManager.MulticastLock (one JNI call). The hub server works
-   as it is.
-8. Left out on Android: Discord Rich Presence, the updater (an APK updates otherwise).
-
-## Performance
+## Performance (expectations, not measured)
 
 - CPU: the Switch runs the game on Cortex-A57 cores at ~1 GHz. Ahead-of-time compiled C on a recent 2.4-3 GHz phone
   core has a lot of headroom: expected 30 fps comfortable on 2021+ mid / high range, 60 plausible on flagships.
-  Not measured.
+  The arm64 build uses the ABI's baseline (ARMv8.0; Makefile GENARCH): `-march=armv8.2-a` would allow more.
 - GPU, the real risk: every render pass loads and stores its attachments (exec.c: LOAD_OP_LOAD / STORE_OP_STORE).
   Cheap on desktop GPUs; on tile-based phone GPUs each pass reads and writes every attachment through memory. Levers:
   RenderResolution, the FPS cap, CLEAR / DONT_CARE where the game clears anyway.
 - Thermal throttling over a long hunt.
 
-## BC textures (started 2026-10-31)
+## BC textures
 
-Prototyped on PC first, where it can be tested with the game as it is: `MHGU_NO_BC=1` makes the renderer act as if
-the GPU had no textureCompressionBC (what an Android phone reports), so BC textures take the CPU decode path. The
-game uses BC1, BC3, BC4 and BC5 (no BC6H / BC7 / ASTC seen); runtime/nvn/bcn.c decodes them, and the hunt and the
-village look the same as with the GPU's decode. Details: docs/STATUS.md "BC textures without GPU support". Left for a
-phone: the decode costs CPU time at loads (not measured on a phone), and the decoded images take 2x (BC4 / BC5) to
-8x (BC1) the memory of the compressed ones. If that hurts: transcode to ETC2 (which every phone GPU samples), or
-decode in a compute shader.
+Phone GPUs (Adreno and Mali on Android) have no textureCompressionBC. `MHGU_NO_BC=1` makes a desktop GPU act the
+same. The game uses BC1, BC3, BC4 and BC5 (no BC6H / BC7 / ASTC seen); runtime/nvn/bcn.c decodes them on upload, and
+the hunt and the village look the same as with the GPU's decode, on PC and in the emulator. Details: docs/STATUS.md
+"BC textures without GPU support". Left for a phone: the decode costs CPU time at loads, and the decoded images take
+2x (BC4 / BC5) to 8x (BC1) the memory of the compressed ones. If that hurts: transcode to ETC2 (which every phone GPU
+samples), or decode in a compute shader.
 
 ## Open questions
 
-- Minimum device: arm64 only; Android 10 / 11+, Vulkan 1.2 with timeline semaphores and shaderInt64; roughly
-  Snapdragon 865 / Adreno 650 class or better, 6 GB RAM.
-- Distribution: an APK on the releases page (sideloaded), like the PC zips.
+- Minimum device: arm64; Android 10+, Vulkan 1.2 with timeline semaphores and shaderInt64; roughly Snapdragon 865 /
+  Adreno 650 class or better, 6 GB RAM.
+- Distribution: an APK on the releases page (sideloaded), like the PC zips; a release key instead of the debug key.
 - Multiplayer works the same over Wi-Fi (Local Play over IP; the internet hubs plan in internet-hubs.md).

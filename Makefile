@@ -5,20 +5,24 @@
 #   make -j4                                        build build/mhgurecomp(.exe) and the game code library, with its
 #                                                   DLLs and the game files (build/data): start build/mhgurecomp.exe
 # build/ holds only the game folder (what a player copies); the compiler's files go to obj/.
+#   make PLATFORM=android ABI=arm64-v8a|x86_64      the Android APK instead (android/android.mk): build-android/
 UNAME := $(shell uname -s)
 ifneq ($(filter MINGW% MSYS% CYGWIN% Windows_NT,$(UNAME) $(OS)),)
 PLATFORM := windows
 else
 PLATFORM := linux
 endif
+ANDROID  := $(filter android,$(PLATFORM))
+ABI      ?= arm64-v8a
 
 GAME     ?= ../mhgu/game
 GEN      ?= generated
-B        ?= build
-O        ?= obj
+B        ?= $(if $(ANDROID),build-android,build)
+O        ?= $(if $(ANDROID),obj-android/$(ABI),obj)
 CC       := clang
 CXX      := clang++
-GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA (Haswell or newer)
+# AVX2 + FMA (Haswell or newer); Android: the ABI's baseline (arm64-v8a: ARMv8.0, x86_64: SSE4.2)
+GENARCH  ?= $(if $(ANDROID),,-march=x86-64-v3)
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
 
@@ -49,6 +53,7 @@ FFMPEG_CONF   := --disable-everything --disable-programs --disable-doc --disable
                  --enable-parser=h264,aac --enable-decoder=h264,aac
 # (nasm: FFmpeg's assembly for x86; without it the plain C versions, fast enough for 960x540 movies)
 FFMPEG_CONF   += $(if $(shell command -v nasm 2>/dev/null),,--disable-x86asm)
+FFMPEG_CC      = $(CC)
 ifeq ($(FFMPEG),system)
 AV_LIBS  := -lavformat -lavcodec -lavutil
 AV_DEPS  :=
@@ -119,6 +124,8 @@ GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
 UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
+else ifeq ($(PLATFORM),android)
+include android/android.mk
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
@@ -211,7 +218,8 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
+all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
+     $(if $(ANDROID),apk,data licenses pipelist)
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -296,7 +304,7 @@ $(UPDATER): $(UPD_OBJ)
 # (Linux: a program starts with glibc GLIBC_MAX and libstdc++ GLIBCXX_MAX or later, see LDFLAGS; this checks the one
 # just linked. GLIBCXX_MAX: GCC 13's, the oldest of those distributions.)
 GLIBCXX_MAX := 3.4.32
-ifneq ($(PLATFORM),windows)
+ifeq ($(PLATFORM),linux)
 define GLIBC_CHECK
 @new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) -v cxx=$(GLIBCXX_MAX) ' \
 	  match($$0, /GLIBC_[0-9.]+/) { split(substr($$0, RSTART + 6, RLENGTH - 6), v, "."); split(max, m, "."); \
@@ -328,7 +336,7 @@ $(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https:
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	rm -rf $(FFMPEG_DIR) && mkdir -p $(FFMPEG_DIR)/src
 	tar -xJf $< -C $(FFMPEG_DIR)/src --strip-components=1
-	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc=$(CC) $(FFMPEG_CONF) > ../configure.log \
+	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc=$(FFMPEG_CC) $(FFMPEG_CONF) > ../configure.log \
 	    || { tail -20 ../configure.log; exit 1; }
 	$(MAKE) -C $(FFMPEG_DIR)/src install > $(FFMPEG_DIR)/build.log || { tail -30 $(FFMPEG_DIR)/build.log; exit 1; }
 	touch $@
@@ -467,6 +475,10 @@ dist: all
 	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
 
 .PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
+
+ifeq ($(PLATFORM),android)
+include android/apk.mk
+endif
 
 # Exercise real ImGui navigation without a game dump or graphics device.
 .PHONY: test-settings-panel

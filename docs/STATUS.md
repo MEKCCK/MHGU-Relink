@@ -886,6 +886,19 @@ GPU report no BC (g_vk.bc; format_supports refuses the BC formats), to test it o
   (two native runs: 0.2, 4%, 0.1%). That is rounding: NVIDIA interpolates BC1 / BC4 with its own precision, bcn.c
   with the spec's rounded 8-bit formula. With BC on, the build matches the previous one within run-to-run noise.
 
+## Android build (2026-10-31, branch feat/android-build)
+
+`make PLATFORM=android ABI=x86_64|arm64-v8a` builds an APK (android/android.mk, android/apk.mk: the NDK, the SDK's
+CMake and build tools, no Gradle). In the Android 15 x86_64 emulator the game boots, translates its shaders and
+quick-hunts into quest 101, drawn as on PC, also with MHGU_NO_BC=1. Build and test instructions, how it is put
+together and what is left: docs/research/android.md. Runtime changes for it, all under `__ANDROID__` (or per
+architecture) except the shared ones noted: GUEST_BASE 64 GB on Android (cpu.h: the desktop game library's id changes
+once with it); libmhgugame.so loaded by name; SDL_main; runtime/platform/android.c (the app's folder, env.txt for the
+debug variables, the message box) beside linux.c; linux.c's fault handler reads arm64 registers too, and bionic gets
+the unwinder's backtrace; umask 007; the startup messages name the Android folder; screenshots by absolute path.
+VulkanMemoryAllocator 3.4.0's header vendored in third_party/vk_mem_alloc (the Windows build keeps MSYS2's). Windows
+rebuilt and quick-hunted after it: unchanged.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
