@@ -25,6 +25,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
 - Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open, will be replaced with a real settings menu in the future)
 - Working online multiplayer servers, in public or with friends (use "Local Wireless" menu)
+- Discord Rich Presence: your Discord profile shows where you are, the quest's monsters and your party (can be turned off)
 
 ## Requirements
 
@@ -177,6 +178,9 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
   multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
+- `[Discord]`: `RichPresence` (default On: your Discord profile shows where you are, the monsters you're hunting
+  and the map, how many are in your hub or quest; Discord must be running on the same computer), `ShowHunter`
+  (default On: your hunter's name, HR and weapon type too)
 - `[Bonus Content]`: `BonusContent` (default On), see below
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
   game's window is in the background)

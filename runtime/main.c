@@ -11,6 +11,7 @@
 #include "kernel.h"
 #include "mods.h"
 #include "app_actions.h"
+#include "net/discord.h"
 
 #ifndef MHGU_VERSION
 #define MHGU_VERSION "unknown"  // (the Makefile gives the build's release: VERSION)
@@ -65,6 +66,7 @@ static void boot(const char *root) {
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
+    discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
     { void sampler_init(void); sampler_init(); }  // (debug, Windows, MHGU_SAMPLE: runtime/sampler.c)
 
     uint32_t stack_size = 0x100000;

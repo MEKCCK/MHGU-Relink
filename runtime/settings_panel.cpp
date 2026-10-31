@@ -292,6 +292,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(mute_in_background);
     SAME(button_icons);
     SAME(menu_theme);
+    SAME(discord);
+    SAME(discord_hunter);
     SAME(language);
     SAME(menu_scale);
     SAME(menu_confirm);
@@ -1081,6 +1083,9 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
+        header(r, "discord.header", "Discord");
+        add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
+        add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
         break;
     case 4: {
         const char *per_quest =
