@@ -4,6 +4,7 @@
 #include "settings_locale.h"
 #include "settings_icons.h"
 #include "app_actions.h"
+#include "cheats.h"
 #include "overlay.h"
 #include "keymap.h"
 #include "modorder.h"
@@ -140,7 +141,7 @@ const Theme &theme() {
 }
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
-constexpr int PAGES = 7, MODS_PAGE = 5;
+constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
     ModScan scan = {};
@@ -161,6 +162,17 @@ bool same_mods(const std::vector<ModEntry> &a, const std::vector<ModEntry> &b) {
     return true;
 }
 bool mods_dirty() { return !same_mods(mods.draft, mods.saved); }
+// The Cheats tab: each cheat on or off (cheats.h), applied while the game runs when the settings are saved
+struct Cheats {
+    std::vector<char> draft, saved;
+} cheat_tab;
+bool cheats_dirty() { return cheat_tab.draft != cheat_tab.saved; }
+void load_cheats() {
+    cheat_tab.draft.assign(cheats_count(), 0);
+    for (int i = 0; i < cheats_count(); ++i)
+        cheat_tab.draft[i] = cheats_on(i);
+    cheat_tab.saved = cheat_tab.draft;
+}
 bool mods_restart() { return !same_mods(mods.saved, mods.boot); }
 void load_mods() {
     ModEntry all[MODS_MAX];
@@ -305,7 +317,7 @@ bool equal(const Config &a, const Config &b) {
     }
     return true;
 }
-bool dirty() { return !equal(s.draft, s.saved) || mods_dirty(); }
+bool dirty() { return !equal(s.draft, s.saved) || mods_dirty() || cheats_dirty(); }
 bool pending_text() {
     bool editing = s.view == View::Keyboard;
     for (const auto &o : s.origins)
@@ -368,6 +380,7 @@ void first_page(int page) {
 void discard() {
     s.draft = s.saved;
     mods.draft = mods.saved;
+    cheat_tab.draft = cheat_tab.saved;
     quest_keys();
     s.error.clear();
     s.saved_notice = false;
@@ -721,7 +734,11 @@ void reset_section() {
         std::sort(mods.draft.begin(), mods.draft.end(),
                   [](const ModEntry &a, const ModEntry &b) { return strcasecmp(a.name, b.name) < 0; });
         break;
-    case 6:
+    case CHEATS_PAGE:
+        for (int i = 0; i < (int)cheat_tab.draft.size(); ++i)
+            cheat_tab.draft[i] = 1;
+        break;
+    case APP_PAGE:
         c.language = f.language;
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
@@ -802,6 +819,31 @@ void conflict_rows(std::vector<Row> &r) {
                 });
             };
         }
+    }
+}
+void cheat_rows(std::vector<Row> &r) {
+    if (cheat_tab.draft.empty())
+        action(r, "cheats.none", tr("No cheats found in the cheats folder"), []() {});
+    for (int i = 0; i < (int)cheat_tab.draft.size(); ++i) {
+        Row row;
+        row.id = "cheat." + std::to_string(i);
+        row.title = cheats_name(i);
+        row.help = cheats_file(i);
+        if (cheats_master(i)) {
+            row.value = tr("Always on");
+            row.enabled = false;
+        } else {
+            row.value = tr(cheat_tab.draft[i] ? "On" : "Off");
+            row.adjust = [i](int d) {
+                cheat_tab.draft[i] = d > 0;
+                s.saved_notice = false;
+            };
+            row.activate = [i]() {
+                cheat_tab.draft[i] = !cheat_tab.draft[i];
+                s.saved_notice = false;
+            };
+        }
+        r.push_back(std::move(row));
     }
 }
 void mods_rows(std::vector<Row> &r) {
@@ -1104,7 +1146,10 @@ std::vector<Row> main_rows() {
     case MODS_PAGE:
         mods_rows(r);
         break;
-    case 6:
+    case CHEATS_PAGE:
+        cheat_rows(r);
+        break;
+    case APP_PAGE:
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
@@ -1160,6 +1205,16 @@ bool save() {
             return false;
         }
         mods.saved = mods.draft;
+    }
+    if (cheats_dirty()) {
+        std::unique_ptr<bool[]> on(new bool[cheat_tab.draft.size() + 1]);
+        for (size_t i = 0; i < cheat_tab.draft.size(); ++i)
+            on[i] = cheat_tab.draft[i] != 0;
+        if (!cheats_set(on.get(), (int)cheat_tab.draft.size(), error, sizeof error)) {
+            s.error = settings_text(s.draft.language, error);
+            return false;
+        }
+        cheat_tab.saved = cheat_tab.draft;
     }
     s.saved = s.draft;
     s.saved_notice = true;
@@ -1690,6 +1745,7 @@ void settings_panel(bool *open) {
         s.help_row.clear();
         quest_keys();
         load_mods();
+        load_cheats();
     }
     if (request_exit.exchange(false) && s.view != View::Exit)
         push(View::Exit, "dialog.cancel");
@@ -1778,7 +1834,7 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Menu Options"};
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"};
         float avail = ImGui::GetContentRegionAvail().x;
         float fw = ImGui::GetFontSize();
         ImVec2 scrolling_start = ImGui::GetCursorScreenPos();
@@ -1973,6 +2029,12 @@ void settings_panel(bool *open) {
             ImGui::TextWrapped("%s", tr("FSR overrides MSAA and FXAA while active."));
         if (s.page == MODS_PAGE)
             ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Select a conflict to choose which mod is used. Press Save, then restart."));
+        if (s.page == CHEATS_PAGE) {
+            ImGui::PushStyleColor(ImGuiCol_Text, vec(theme().warn));
+            ImGui::TextWrapped("%s", tr("Online: only use cheats when everyone in the lobby agrees to it."));
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. New cheat files show up after a restart."));
+        }
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
         ImGui::Dummy(ImVec2(1, guides.height + help_area + ImGui::GetStyle().ItemSpacing.y));

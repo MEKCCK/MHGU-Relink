@@ -1,7 +1,10 @@
 // Cheat codes in Atmosphere's format (the one Ryujinx and a modded Switch use): every .txt file in cheats/ (beside
 // mods/; MHGU_CHEATS_DIR overrides), in name order; a file whose name starts with '_' is skipped. A file holds any
 // number of cheats: "[Name]" starts one, "{Name}" a master code (run before the others), then its code words, 8 hex
-// digits each. Lines starting with '#' or "//" are comments. Every cheat found is on.
+// digits each. Lines starting with '#' or "//" are comments. Every cheat found is on, except those listed in
+// cheats/_off.txt (the settings' Cheats tab writes it: "<file>\t<cheat name>" per line; master codes are always on).
+// A cheat turned off while the game runs stops running; the words of the game's code it changed get their original
+// values back (so a code-changing cheat is undone), anything else it wrote stays as it is.
 // The codes run on Atmosphere's cheat virtual machine (every code type of its docs/features/cheats.md: written from
 // that description), once before the game starts and then once per frame the game presents, from the window loop
 // (as Atmosphere runs them beside the game). Memory regions: main is the main module (0x200000), heap, alias and aslr
@@ -19,6 +22,7 @@
 #include <sys/stat.h>
 
 #include "hle/input.h"
+#include "cheats.h"
 #include "interp.h"
 #include "mods.h"
 #include "rt.h"
@@ -37,17 +41,24 @@ typedef struct {
 } Op;
 
 typedef struct {
+    uint32_t addr, word;  // a word of the game's code and its value before this cheat first changed it
+} Original;
+
+typedef struct {
     char name[96], file[64];
     bool master;
     Op *ops;
     int nops;
+    int on, ran;          // on: wanted (the settings set it, any thread); ran: running (the window loop's)
+    Original *orig;       // the code words it changed, to put back when it is turned off
+    int norig;
 } Cheat;
 
 static Cheat *cheats;
 static int ncheats;
 static uint64_t reg[16], saved[16], statics[128];
 static uint64_t keys;
-static const Cheat *cur;  // the one running (for the log)
+static Cheat *cur;  // the one running (for the log, and the code words it changes)
 
 const char *cheats_dir(void) {
     const char *e = getenv("MHGU_CHEATS_DIR");
@@ -258,6 +269,15 @@ static void wr(uint64_t a, uint32_t t, uint64_t v) {
         if (a < m->base + m->ro_off && a + t > m->base + m->text_off) code = true;
     }
     if (code && !memcmp(p, &v, t)) return;
+    if (code && cur)  // (the original of each word, the first time this cheat changes it)
+        for (uint32_t w = (uint32_t)a & ~3u; w < a + t; w += 4) {
+            bool seen = false;
+            for (int i = 0; i < cur->norig && !seen; i++) seen = cur->orig[i].addr == w;
+            if (seen || !kernel_mapped(w, 4)) continue;
+            cur->orig = realloc(cur->orig, (cur->norig + 1) * sizeof *cur->orig);
+            cur->orig[cur->norig].addr = w;
+            memcpy(&cur->orig[cur->norig++].word, G2H(w), 4);
+        }
     memcpy(p, &v, t);
     if (code)
         for (uint32_t w = (uint32_t)a & ~3u; w < a + t; w += 4) code_changed(w);
@@ -474,10 +494,79 @@ static void run(Cheat *ch) {
     if (budget < 0) LOG("[cheats] %s: ran too long (a loop that never ends?): stopped for this frame\n", ch->name);
 }
 
+// A cheat turned off: the code words it changed get their values from before it back.
+static void undo(Cheat *ch) {
+    cur = NULL;  // (putting a word back is not a change to remember)
+    for (int i = ch->norig - 1; i >= 0; i--) {
+        uint8_t *p = G2H(ch->orig[i].addr);
+        if (memcmp(p, &ch->orig[i].word, 4)) {
+            memcpy(p, &ch->orig[i].word, 4);
+            code_changed(ch->orig[i].addr);  // (stays in the interpreter: now with the original code)
+        }
+    }
+    if (ch->norig) LOG("[cheats] %s: off, %d word(s) of code put back\n", ch->name, ch->norig);
+    else LOG("[cheats] %s: off\n", ch->name);
+    free(ch->orig);
+    ch->orig = NULL, ch->norig = 0;
+}
+
 static void run_all(void) {
+    for (int i = 0; i < ncheats; i++) {
+        Cheat *ch = &cheats[i];
+        bool on = ch->master || __atomic_load_n(&ch->on, __ATOMIC_ACQUIRE);
+        if (!on && ch->ran) undo(ch);
+        else if (on && !ch->ran && g_present_count) LOG("[cheats] %s: on\n", ch->name);
+        ch->ran = on;
+    }
     for (int pass = 0; pass < 2; pass++)  // master codes first
         for (int i = 0; i < ncheats; i++)
-            if (cheats[i].master == !pass) run(&cheats[i]);
+            if (cheats[i].master == !pass && cheats[i].ran) run(&cheats[i]);
+}
+
+// ------------------------------------------------------------------ on / off (the settings' Cheats tab)
+#define OFF_FILE "_off.txt"  // (a '_' name: not read as cheats)
+static void off_path(char *out, size_t n) { snprintf(out, n, "%s/" OFF_FILE, cheats_dir()); }
+
+static void load_off(void) {
+    char path[1024], line[256];
+    off_path(path, sizeof path);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *tab = strchr(line, '\t');
+        if (line[0] == '#' || !tab) continue;
+        *tab = 0;
+        for (int i = 0; i < ncheats; i++)
+            if (!strcmp(cheats[i].file, line) && !strcmp(cheats[i].name, tab + 1)) cheats[i].on = 0;
+    }
+    fclose(f);
+}
+
+int cheats_count(void) { return ncheats; }
+const char *cheats_name(int i) { return i >= 0 && i < ncheats ? cheats[i].name : ""; }
+const char *cheats_file(int i) { return i >= 0 && i < ncheats ? cheats[i].file : ""; }
+bool cheats_master(int i) { return i >= 0 && i < ncheats && cheats[i].master; }
+bool cheats_on(int i) { return i >= 0 && i < ncheats && (cheats[i].master || __atomic_load_n(&cheats[i].on, __ATOMIC_ACQUIRE)); }
+
+bool cheats_set(const bool *on, int n, char *err, size_t errsz) {
+    char path[1024], tmp[1040];
+    off_path(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    cheats_make_dir();
+    FILE *f = fopen(tmp, "wb");
+    if (!f) { snprintf(err, errsz, "Could not write %s", path); return false; }
+    fputs("# Cheats turned off in the settings (the Cheats tab writes this file): <file><tab><cheat name>\n", f);
+    for (int i = 0; i < ncheats && i < n; i++)
+        if (!on[i] && !cheats[i].master) fprintf(f, "%s\t%s\n", cheats[i].file, cheats[i].name);
+    bool ok = !ferror(f);
+    ok = !fclose(f) && ok;
+#ifdef _WIN32
+    if (ok) remove(path);  // (Windows' rename won't replace a file; this one is small and rewritten whole)
+#endif
+    if (!ok || rename(tmp, path)) { remove(tmp); snprintf(err, errsz, "Could not write %s", path); return false; }
+    for (int i = 0; i < ncheats && i < n; i++) __atomic_store_n(&cheats[i].on, on[i] ? 1 : 0, __ATOMIC_RELEASE);
+    return true;
 }
 
 // ------------------------------------------------------------------ entry points
@@ -500,6 +589,10 @@ void cheats_init(void) {
         load_file(path, names[i]);
         free(names[i]);
     }
+    for (int i = 0; i < ncheats; i++) cheats[i].on = 1;
+    load_off();
+    for (int i = 0; i < ncheats; i++)
+        if (!cheats[i].master && !cheats[i].on) LOG("[cheats] %s: off (turned off in the settings)\n", cheats[i].name);
     if (ncheats) run_all();  // (before the game starts: changes to its code are in place from the start)
 }
 
