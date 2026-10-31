@@ -118,7 +118,8 @@ Keyboard and mouse support (not recommended). The default keys:
 | W A S D | left stick (hold Left Shift to walk) |
 | Mouse | camera |
 | Left click / Right click | X / A |
-| Space / R | B / Y |
+| Space / R or middle click | B / Y |
+| Mouse wheel | item bar: up = the item to the left, down = to the right (in a hunt, no need to hold L) |
 | Q / E | L / R |
 | Tab / T | ZL / ZR |
 | Enter / Backspace | Plus / Minus |

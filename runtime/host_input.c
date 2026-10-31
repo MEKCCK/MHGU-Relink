@@ -1,10 +1,11 @@
 // Host controls -> the Switch controller the game reads (runtime/hle/input.c).
 //
 // Keyboard and mouse: the keys and mouse buttons of the settings' [Keybinds] (runtime/config.c; by default WASD left
-//   stick, Left Shift held: half tilt, walking; left click = X, right click = A, Space = B, R = Y, Q = L, E = R,
-//   Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right stick
-//   click), mouse movement the camera (in a hunt its angles directly, elsewhere the right stick; click in the window
-//   to capture the mouse, Esc releases it). While the
+//   stick, Left Shift held: half tilt, walking; left click = X, right click = A, Space = B, R / middle click = Y, Q = L,
+//   E = R, Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right
+//   stick click), mouse movement the camera (in a hunt its angles directly, elsewhere the right stick; click in the
+//   window to capture the mouse, Esc releases it), the wheel the item bar (up: left, down: right; in a hunt,
+//   runtime/hle/itembar.c). While the
 //   game shows a text entry (names, chat) the keyboard types instead
 //   (runtime/textinput.c). / ([Controls] ChatKey) opens a line of chat, Enter sends it, also in a quest (runtime/hle/chat.c).
 //   F11 switches windowed <-> full screen, F12 saves a screenshot, Shift+F12 the next 8
@@ -29,6 +30,7 @@
 #include "forge.h"
 #include "hle/chat.h"
 #include "hle/input.h"
+#include "hle/itembar.h"
 #include "hle/mousecam.h"
 #include "overlay.h"
 #include "rt.h"
@@ -145,6 +147,7 @@ static void script_parse(void) {
 //   frame                  log the current frame number
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
+//   wheel <notches>        the mouse wheel turned that far (up > 0: the item bar to the left)
 char g_shot_request[256];  // (runtime/nvn/vulkan/device.c saves it)
 char g_burst_name[200];
 int g_burst_left, g_burst_index;
@@ -400,6 +403,10 @@ static void control_poll(void) {
                 test_until = plat_now_ns() + (uint64_t)atoi(arg3) * 1000000ull;
                 continue;
             }
+            if (!strcmp(cmd, "wheel")) {  // wheel <notches>: the mouse wheel turned (< 0 down), captured or not
+                itembar_scroll(-atoi(arg));
+                continue;
+            }
             if (!strcmp(cmd, "textkey")) {
                 textinput_key(!strcmp(arg, "enter") ? TI_ENTER : !strcmp(arg, "escape") ? TI_CANCEL : TI_NONE);
                 continue;
@@ -570,6 +577,11 @@ void host_input_event(const SDL_Event *e) {
     case SDL_EVENT_MOUSE_MOTION:
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         break;
+    case SDL_EVENT_MOUSE_WHEEL: {  // up: the item to the left, down: to the right (runtime/hle/itembar.c)
+        int n = e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
+        if (mouse_captured && n) itembar_scroll(-n);
+        break;
+    }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
         int btn = e->button.button;
         if (btn < 1 || btn > SDL_BUTTON_X2) break;

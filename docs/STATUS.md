@@ -840,6 +840,24 @@ turn 1.6 degrees, 1 count a second still turns; pitch stops at the game's limits
 invert settings; the in-quest start menu (the camera turns there with the stick too). Not tried by hand with a real
 mouse, nor with a gunner's aim, mounting or the second camera type (+0x980).
 
+## Mouse wheel on the item bar (2026-10-31)
+
+The captured mouse's wheel turns the item bar directly (runtime/hle/itembar.c): up the item to the left, down to the
+right, one item per notch, without holding L; middle click is a second default key for Y (use the item / sheathe;
+existing ini files keep their `Y = R` until changed). The player keeps the selected pouch slot at +0x3298 (u16; 0x28
+the empty "(No Item)" place at the bar's left end, else the pouch slot). Found by diffing the player's memory around
+L+A / L+Y (control file `memsave`), then the writers of +0x3298 in the lifted code: the item bar handler 0x4f7f38
+(r0 = the player, every update from 0x49baf4) checks f_47bcd0 == 1, f_47b918 == 0 and vfunc +0x230(player, 1) == 1,
+then, with the bar open (vfunc +0x25c(player, 1); L held) or for the actions 0x43 / 0x44 (vfunc +0x2e8; no L
+needed), actions 0xa / 0x44 go right and 9 / 0x43 left: +0x3298 = f_4880fc(player, slot, 0 right / 1 left) (through
+0x39bfcc on the pouch: skips empty and unusable slots, stops at the left end) and +0x253c |= 2 (right) / 4 (left).
+The handler is hooked; after it a waiting notch does the same past the same checks (one per update, at most 4
+waiting; dropped when the player may not pick an item or outside a hunt). Note: vtables are in main's image (below
+0x08000000), so a heap-range check on them fails. Tested 2026-10-31 in quest 101 (test save, John Rise) with the
+control file's new `wheel <notches>`: 0x28 -> 0 Potion -> 1 Mega Potion -> 2 3 4 -> 7 (5 and 6 empty, skipped) -> 8
+-> 9 and back, the HUD's item and count following. Not tried with a real mouse wheel (the SDL event path), nor
+mid-attack.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
