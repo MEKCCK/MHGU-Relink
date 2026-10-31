@@ -15,14 +15,18 @@ enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
 
 // [Keybinds]: the keyboard and mouse controls (runtime/host_input.c), in the file's order. Each takes up to two keys
-// or mouse buttons: an SDL scancode, or KEY_MOUSE + SDL_BUTTON_* (0: none).
+// or mouse buttons: an SDL scancode, KEY_MOUSE + SDL_BUTTON_*, or the wheel's KEY_WHEEL_UP / KEY_WHEEL_DOWN (0: none).
+// BIND_ITEM_LEFT / RIGHT turn the item bar directly (runtime/hle/itembar.c), not a Switch button.
 enum {
     BIND_MOVE_UP, BIND_MOVE_DOWN, BIND_MOVE_LEFT, BIND_MOVE_RIGHT, BIND_WALK,
     BIND_A, BIND_B, BIND_X, BIND_Y, BIND_L, BIND_R, BIND_ZL, BIND_ZR, BIND_PLUS, BIND_MINUS,
-    BIND_DPAD_UP, BIND_DPAD_DOWN, BIND_DPAD_LEFT, BIND_DPAD_RIGHT, BIND_LSTICK, BIND_RSTICK, BINDS
+    BIND_DPAD_UP, BIND_DPAD_DOWN, BIND_DPAD_LEFT, BIND_DPAD_RIGHT, BIND_LSTICK, BIND_RSTICK,
+    BIND_ITEM_LEFT, BIND_ITEM_RIGHT, BINDS
 };
 #define BIND_KEYS 2
 #define KEY_MOUSE 0x1000
+#define KEY_WHEEL_UP (KEY_MOUSE + 0x10)
+#define KEY_WHEEL_DOWN (KEY_MOUSE + 0x11)
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256

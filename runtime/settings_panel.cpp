@@ -93,7 +93,7 @@ struct State {
     int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key
     bool capture_add = false;  // the key chosen is that keybind's second, else its only one
 } s;
-std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse;
+std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel;
 // (the key pressed while a key is being chosen, or KEY_MOUSE + a mouse button; -1: none yet)
 std::atomic<int> captured_key{-1};
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
@@ -592,7 +592,8 @@ void hub_check(std::vector<Row> &rows) {
 // The keybinds' rows (config.h BIND_*): what each is called
 const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
                                         "Y", "L", "R", "ZL", "ZR", "Plus", "Minus", "D-pad up", "D-pad down",
-                                        "D-pad left", "D-pad right", "Left stick click", "Right stick click"};
+                                        "D-pad left", "D-pad right", "Left stick click", "Right stick click",
+                                        "Item left", "Item right"};
 // What else a key (or KEY_MOUSE + a mouse button) does: one of the recomp's own keys (keymap.h), a keybind other than
 // skip, or (for a keybind's) the chat key; nullptr: nothing
 const char *key_use(int code, int skip) {
@@ -635,6 +636,8 @@ void keybind_rows(std::vector<Row> &r) {
             header(r, "bind.movement", tr("Movement"));
         if (i == BIND_A)
             header(r, "bind.buttons", tr("Buttons"));
+        if (i == BIND_ITEM_LEFT)
+            header(r, "bind.items", tr("Item bar"));
         Row row;
         row.id = "bind." + std::to_string(i);
         row.title = tr(bind_titles[i]);
@@ -1070,7 +1073,7 @@ std::vector<Row> main_rows() {
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
-        r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons and for moving, and the chat key.");
+        r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
@@ -1699,6 +1702,12 @@ bool settings_panel_mouse(int button) {
     captured_key = KEY_MOUSE + button;
     return true;
 }
+bool settings_panel_wheel(int notches) {
+    if (!capture_wheel.load() || !notches)
+        return false;
+    captured_key = notches > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
+    return true;
+}
 // Ownership has to precede NewFrame: native cancel/windowing runs there.
 void settings_panel_before_frame(bool open) {
     if (!open && !request_exit.load())
@@ -2081,6 +2090,7 @@ void settings_panel(bool *open) {
     is_capturing = *open && s.view == View::KeyCapture;
     // (a click on the capture view's buttons is theirs; anywhere else it is the mouse button chosen)
     capture_mouse = is_capturing && s.capture_bind >= 0 && !s.pointing;
+    capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
     if (!*open)
         s.editing = false;
 }

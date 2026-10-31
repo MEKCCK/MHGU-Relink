@@ -196,6 +196,16 @@ int main(int argc, char **argv) {
     assert(config_parse(bind_b, " comma ,Mouse 5", &keys) && keys.binds[BIND_B][0] == SDL_SCANCODE_COMMA &&
            keys.binds[BIND_B][1] == KEY_MOUSE + SDL_BUTTON_X2);
     config_format(bind_b, &keys, value, sizeof value); assert(!strcmp(value, "Comma, Mouse 5"));
+    {  // the wheel: a key of its own, on the item bar by default
+        Config wheel = keys;
+        assert(config_editable().binds[BIND_ITEM_LEFT][0] == KEY_WHEEL_UP && !config_editable().binds[BIND_ITEM_LEFT][1]);
+        assert(config_editable().binds[BIND_ITEM_RIGHT][0] == KEY_WHEEL_DOWN);
+        assert(config_editable().binds[BIND_Y][1] == KEY_MOUSE + SDL_BUTTON_MIDDLE);
+        assert(config_setting("itemleft") == config_bind_setting(BIND_ITEM_LEFT));
+        assert(config_parse(bind_b, "wheel down, Mouse 4", &wheel) && wheel.binds[BIND_B][0] == KEY_WHEEL_DOWN &&
+               wheel.binds[BIND_B][1] == KEY_MOUSE + SDL_BUTTON_X1);
+        config_format(bind_b, &wheel, value, sizeof value); assert(!strcmp(value, "Wheel Down, Mouse 4"));
+    }
     Config parsed = keys;
     assert(!config_parse(bind_b, "F12", &keys) && !config_parse(bind_b, "Escape", &keys) && !config_parse(bind_b, ",", &keys));
     assert(!config_parse(bind_b, "A, B, C", &keys) && !config_parse(bind_b, "NoSuchKey", &keys));

@@ -855,8 +855,17 @@ The handler is hooked; after it a waiting notch does the same past the same chec
 waiting; dropped when the player may not pick an item or outside a hunt). Note: vtables are in main's image (below
 0x08000000), so a heap-range check on them fails. Tested 2026-10-31 in quest 101 (test save, John Rise) with the
 control file's new `wheel <notches>`: 0x28 -> 0 Potion -> 1 Mega Potion -> 2 3 4 -> 7 (5 and 6 empty, skipped) -> 8
--> 9 and back, the HUD's item and count following. Not tried with a real mouse wheel (the SDL event path), nor
-mid-attack.
+-> 9 and back, the HUD's item and count following. Tried by hand with a real mouse by the user: works.
+
+Rebindable since: [Keybinds] ItemLeft / ItemRight (BIND_ITEM_LEFT / RIGHT, defaults Wheel Up / Wheel Down) turn the
+bar one item per press of their keys or buttons, or per notch of the wheel. The wheel is a key of its own
+(KEY_WHEEL_UP / DOWN = KEY_MOUSE + 0x10 / 0x11, "Wheel Up" / "Wheel Down"), usable on any keybind: on the others a
+notch is a 70 ms press. The settings menu takes a turn of the wheel when choosing a key (settings_panel_wheel).
+Existing ini files get the two lines when the settings are next saved, and keep their defaults until then. The
+default ini text now has `Y = R, Mouse Middle` (the first commit changed only the built-in default). Tested in quest
+101: defaults, and ItemLeft = Wheel Down / ItemRight = Wheel Up from the ini, through the control file's `wheel`.
+The menu shows the Item bar rows. Not tested: choosing the wheel in the menu (needs a real wheel event), a keyboard
+key on ItemLeft / ItemRight, the wheel on a button keybind.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

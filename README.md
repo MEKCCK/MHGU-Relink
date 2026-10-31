@@ -126,11 +126,12 @@ Keyboard and mouse support (not recommended). The default keys:
 | Arrow keys | d-pad |
 | Ctrl / Alt | left / right stick click |
 
-Change them in Settings (F1), Controls, Keybinds: select a button, then Set key and press a key or click a mouse
-button (away from the menu's buttons), or Add a second key (each takes up to two). They are kept in the ini's
-`[Keybinds]` section (`B = Space`, `Plus = Return, Keypad Enter`, `X = Mouse Left`; key names as the menu shows
-them, `None` for none). A key that does something else too shows red. Escape, Insert, F1 and F7 to F12 are the
-recomp's own and can't be used.
+Change them in Settings (F1), Controls, Keybinds: select a button, then Set key and press a key, click a mouse
+button (away from the menu's buttons) or turn the wheel, or Add a second key (each takes up to two). Item left /
+Item right turn the item bar one item per press (by default the wheel; any key works too). The wheel on any other
+button is a short press of it. They are kept in the ini's `[Keybinds]` section (`B = Space`, `Plus = Return, Keypad
+Enter`, `X = Mouse Left`, `ItemLeft = Wheel Up`; key names as the menu shows them, `None` for none). A key that does
+something else too shows red. Escape, Insert, F1 and F7 to F12 are the recomp's own and can't be used.
 
 Click in the game window to capture the mouse for the camera; Escape lets it go (so does switching to another
 window). In a hunt the mouse turns the camera directly, like in a PC game: the same distance always turns it the same

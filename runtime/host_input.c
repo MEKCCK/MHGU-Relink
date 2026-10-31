@@ -4,8 +4,8 @@
 //   stick, Left Shift held: half tilt, walking; left click = X, right click = A, Space = B, R / middle click = Y, Q = L,
 //   E = R, Tab = ZL, T = ZR, Enter = Plus, Backspace = Minus, arrow keys = d-pad, Ctrl = left stick click, Alt = right
 //   stick click), mouse movement the camera (in a hunt its angles directly, elsewhere the right stick; click in the
-//   window to capture the mouse, Esc releases it), the wheel the item bar (up: left, down: right; in a hunt,
-//   runtime/hle/itembar.c). While the
+//   window to capture the mouse, Esc releases it), wheel up / down = item bar left / right (ItemLeft / ItemRight: in a
+//   hunt, one item per press or notch without holding L, runtime/hle/itembar.c). While the
 //   game shows a text entry (names, chat) the keyboard types instead
 //   (runtime/textinput.c). / ([Controls] ChatKey) opens a line of chat, Enter sends it, also in a quest (runtime/hle/chat.c).
 //   F11 switches windowed <-> full screen, F12 saves a screenshot, Shift+F12 the next 8
@@ -44,22 +44,41 @@ static SDL_Gamepad *pad;  // the controller read: of those open, the one a butto
 static struct { SDL_Gamepad *pad; uint64_t opened_ns; } pads[MAX_PADS];
 static int npads;
 
-// [Keybinds] (config.h BIND_*): the Switch button each presses (-1: the left stick's directions, walking)
+// [Keybinds] (config.h BIND_*): the Switch button each presses (-1: the left stick's directions, walking; -2: the item
+// bar, turned directly)
 static const int bind_buttons[BINDS] = {
     [BIND_MOVE_UP] = -1, [BIND_MOVE_DOWN] = -1, [BIND_MOVE_LEFT] = -1, [BIND_MOVE_RIGHT] = -1, [BIND_WALK] = -1,
     [BIND_A] = BTN_A, [BIND_B] = BTN_B, [BIND_X] = BTN_X, [BIND_Y] = BTN_Y, [BIND_L] = BTN_L, [BIND_R] = BTN_R,
     [BIND_ZL] = BTN_ZL, [BIND_ZR] = BTN_ZR, [BIND_PLUS] = BTN_PLUS, [BIND_MINUS] = BTN_MINUS, [BIND_DPAD_UP] = BTN_UP,
     [BIND_DPAD_DOWN] = BTN_DOWN, [BIND_DPAD_LEFT] = BTN_LEFT, [BIND_DPAD_RIGHT] = BTN_RIGHT, [BIND_LSTICK] = BTN_LSTICK,
-    [BIND_RSTICK] = BTN_RSTICK,
+    [BIND_RSTICK] = BTN_RSTICK, [BIND_ITEM_LEFT] = -2, [BIND_ITEM_RIGHT] = -2,
 };
 static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), while captured
-static bool bind_held(int bind) {
+// A wheel notch on a keybind other than the item bar's is a short press of it (WHEEL_PRESS_NS: long enough for the
+// game to see at 30 updates a second; notches closer together than that are one press)
+#define WHEEL_PRESS_NS 70000000ull
+static uint64_t wheel_until[2];  // up, down: pressed until then
+static bool bind_held(int bind, bool wheel) {
+    uint64_t now = wheel ? plat_now_ns() : 0;
     for (int k = 0; k < BIND_KEYS; k++) {
         int code = config_live_bind(bind, k);
         if (code > 0 && code < SDL_SCANCODE_COUNT && keys[code]) return true;
         if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2 && (mouse_held >> (code - KEY_MOUSE) & 1)) return true;
+        if (wheel && (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) && now < wheel_until[code - KEY_WHEEL_UP])
+            return true;
     }
     return false;
+}
+// The wheel turned n notches (> 0 up): the item bar's keybinds turn it a notch each, others are pressed briefly
+static void wheel_turn(int n) {
+    int code = n > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
+    for (int i = 0; i < BINDS; i++)
+        for (int k = 0; k < BIND_KEYS; k++) {
+            if (config_live_bind(i, k) != code) continue;
+            if (i == BIND_ITEM_LEFT || i == BIND_ITEM_RIGHT) itembar_scroll((i == BIND_ITEM_LEFT ? -1 : 1) * abs(n));
+            else wheel_until[code - KEY_WHEEL_UP] = plat_now_ns() + WHEEL_PRESS_NS;
+            break;
+        }
 }
 
 // ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. In a hunt its movement turns the
@@ -147,7 +166,7 @@ static void script_parse(void) {
 //   frame                  log the current frame number
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
-//   wheel <notches>        the mouse wheel turned that far (up > 0: the item bar to the left)
+//   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
 char g_shot_request[256];  // (runtime/nvn/vulkan/device.c saves it)
 char g_burst_name[200];
 int g_burst_left, g_burst_index;
@@ -404,7 +423,7 @@ static void control_poll(void) {
                 continue;
             }
             if (!strcmp(cmd, "wheel")) {  // wheel <notches>: the mouse wheel turned (< 0 down), captured or not
-                itembar_scroll(-atoi(arg));
+                if (atoi(arg)) wheel_turn(atoi(arg));
                 continue;
             }
             if (!strcmp(cmd, "textkey")) {
@@ -577,9 +596,9 @@ void host_input_event(const SDL_Event *e) {
     case SDL_EVENT_MOUSE_MOTION:
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         break;
-    case SDL_EVENT_MOUSE_WHEEL: {  // up: the item to the left, down: to the right (runtime/hle/itembar.c)
+    case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
-        if (mouse_captured && n) itembar_scroll(-n);
+        if (mouse_captured && n) wheel_turn(n);
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -698,9 +717,16 @@ void host_input_update(void) {
     }
 
     for (int i = 0; i < BINDS; i++)
-        if (bind_buttons[i] >= 0 && bind_held(i)) b |= B(bind_buttons[i]);
-    int kx = bind_held(BIND_MOVE_RIGHT) - bind_held(BIND_MOVE_LEFT), ky = bind_held(BIND_MOVE_UP) - bind_held(BIND_MOVE_DOWN);
-    int k = bind_held(BIND_WALK) ? 16000 : 32767;
+        if (bind_buttons[i] >= 0 && bind_held(i, true)) b |= B(bind_buttons[i]);
+    static bool item_held[2];  // ItemLeft / ItemRight's keys and buttons: a press turns the item bar once
+    for (int i = 0; i < 2; i++) {  // (their wheel notches turn it in wheel_turn)
+        bool held = bind_held(BIND_ITEM_LEFT + i, false);
+        if (held && !item_held[i]) itembar_scroll(i ? 1 : -1);
+        item_held[i] = held;
+    }
+    int kx = bind_held(BIND_MOVE_RIGHT, true) - bind_held(BIND_MOVE_LEFT, true);
+    int ky = bind_held(BIND_MOVE_UP, true) - bind_held(BIND_MOVE_DOWN, true);
+    int k = bind_held(BIND_WALK, true) ? 16000 : 32767;
     if (kx && ky) k = k * 7071 / 10000;  // diagonals: same length as straight
     lx += kx * k, ly += ky * k;
     mouse_update(&rx, &ry);
