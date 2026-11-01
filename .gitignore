@@ -1,0 +1,28 @@
+# never commit: the game, keys, saves, the game code made from it, signing keys
+exefs/
+romfs/
+game/
+generated/
+*.keystore
+keystore.properties
+keys/
+prod.keys
+title.keys
+libmhgugame.so
+libmhgugame.id
+system
+system_backup
+
+# built
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/jniLibs/
+android/local.properties
+native/build/
+deps/src/
+deps/out/
+deps/tmp/
+__pycache__/
+*.apk
+*.log
