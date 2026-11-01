@@ -362,7 +362,7 @@ If the game isn't the poster's (0x5ae3b4: online, and sQuestSelector +0xd788 != 
 say no if 0x74af8c(quest, 0xff, 0) says the quest is unlocked, the counters' own check for showing a quest. It runs the
 quest's unlock script (0x5b2174). That script reads no clear flags: for an Urgent one progress flag decides (found by
 zeroing each byte in turn: +0x501 of the object at GOT 0x1a390e0 for 206 and 303, +0x50c 10216, +0x50d 10307, +0x5af
-11204), and clearing every quest's flag on a new hunter unlocks nothing. Which event sets those flags isn't known. The
+11204), and clearing every quest's flag on a new hunter unlocks nothing. Which code sets those flags isn't known; 10216's appeared after a new hunter's 1-star key quests were cleared. The
 script module (vm +0x8d0) is not loaded during a hunt, when the script always says no; it is again on the result
 screen, where 0x588d40 runs. 0x74af8c also goes by a table of quest variants (0x182cde4, bits at +0x35d4): Sky Render
 11401 and 1005 read locked after their clear, when their replay versions take their place. In the quest files mFlag is the file's last u16 (the language references before it have variable length): bit 0
@@ -375,9 +375,13 @@ Tested (2026-11-01) with a temporary harness, not committed: a quest loaded by M
 +0x50 set to 3 in the hunt (the game's own clear and result flow then runs), the bit forced to 0 at the start of 0x588d40,
 0x5ae3b4 made to answer "not the poster". Quest 206: testsave/save_0 On (key absent from the ini) -> set; the same with
 the progress byte +0x501 zeroed -> not set; a new hunter (testsave/newsave) -> not set; save_0 Off -> not set, as in the
-original; the new hunter as the poster -> set. Quest 101 (not Urgent), the new hunter -> set. Not checked yet: a real
-clear by two players, a Hub-numbered Urgent in game, a hunter partway through the ranks (no such save here), and what the
-clear unlocks afterwards for the joiner.
+original; the new hunter as the poster -> set. Quest 101 (not Urgent), the new hunter -> set. 
+Tested in a Local Play hub (2026-11-01, two instances on one PC, the user driving): host John Rise (HR83) posted The New
+Tenant (10216), joined by a new hunter whose 1-star Hub key quests were cleared solo, so that it had appeared at their
+counter. An insta-clear cheat (sQuest +0xec = 0x29) on the host ended the quest for both. The joiner's log: "[urgent]
+quest 0010216 cleared, posted by someone else: it counts here too"; back in the Hub "Hunter Rank 2 unlocked!", the 2-star
+quests unlocked, and new NPC dialogue. Not checked yet: a joiner who hasn't unlocked the Urgent, in a real hub (only
+through the harness above; the board may refuse them first).
 
 ## Save data safety (2026-10-22)
 
