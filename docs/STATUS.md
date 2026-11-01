@@ -211,7 +211,9 @@ Plan and security notes: docs/research/internet-hubs.md.
   "Check hub server" row: LIST with the server / key being edited (ldn_hub_check, a thread), showing "Online, N ms,
   N hub(s)" or the failure; before a check it shows the last state the game's own searches / hub saw for that server.
 - Key -> room: first 16 bytes of SHA-256("MHGURecomp matchmaking key:" + key, spaces around it trimmed), all zero
-  without a key (updater/sha256.c is linked into the game for it). The server lists a hub only for requests with the
+  without a key (updater/sha256.c is linked into the game for it). Android without a key: the room of the key
+  `public-phone`, so phones don't meet PCs in public, and no key reaches the all-zero room; PCs can still enter that
+  key by hand, and the check is only in the client. The server lists a hub only for requests with the
   same room and link PROTO_VERSION; JOIN with another room answers "not found".
 - Host (ldn.c lobby_thread): Create Hub also lists the hub (HOST with its NetworkInfo; UPDATE on every
   push_info_locked change; PING every 15 s; reconnects after 10 / 30 s). For each INCOMING ticket it opens a second

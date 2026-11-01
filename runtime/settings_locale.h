@@ -188,6 +188,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Default", "Predeterminado"},
         {"Matchmaking key", "Clave de emparejamiento"},
         {"Public", "Pública"},
+        {"Public (Android players only)", "Pública (solo jugadores de Android)"},
         {"Check hub server", "Comprobar servidor de salas"},
         {"Asks the hub server above whether it answers, with the matchmaking key above: how long it takes, and how many hubs it lists.",
          "Pregunta al servidor de salas de arriba si responde, con la clave de emparejamiento de arriba: cuánto tarda y cuántas salas muestra."},

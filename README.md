@@ -159,6 +159,9 @@ To bring a save over, put its `system` and `system_backup` files in `save/save_0
 contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGURecomp/save/save_0/`). From a Switch,
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 
+Public internet hubs on Android are shared with other Android players only. To play with friends on PC, all enter the
+same matchmaking key (settings menu, Multiplayer).
+
 To update, install the newer APK over the old one: your game files, saves and settings stay. **Don't uninstall it
 first.** Uninstalling deletes the whole `files` folder, game files and saves included. Android may offer to keep the
 app's data; say yes if you mean to reinstall.
@@ -232,7 +235,7 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Mouse]`: `MouseSensitivity` (1 = default, 0.1 to 10)
 - `[Multiplayer]`: `Port`, `Join` (addresses of hosts outside your LAN), `Server` (hub server for internet hubs:
   empty = the default, `Off` = none, or `host[:port]`), `Key` (matchmaking key: only players with the same key see
-  each other's hubs; empty = public), `SyncSmallMonsters`
+  each other's hubs; empty = public, on Android public among Android players only), `SyncSmallMonsters`
 - `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
