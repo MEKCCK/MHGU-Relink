@@ -37,6 +37,7 @@ void movelog_init(void);  // (debug) MHGU_LOG_MOVES: the player's command table 
 void quickhunt_init(void);  // (debug) MHGU_QUICKHUNT: start-up straight into a quest (runtime/hle/quickhunt.c)
 void emtrace_init(void);  // (debug) MHGU_EMTRACE: large monster actions and their durations (runtime/hle/emtrace.c)
 void kotrace_init(void);  // (debug) MHGU_KOTRACE: large monster KO (stun) events (runtime/hle/kotrace.c)
+void dummy_init(void);  // (debug) MHGU_DUMMY: a large monster held in front of the hunter, for testing attacks (runtime/hle/dummy.c)
 
 // Cheat codes (Atmosphere's format) from the .txt files in cheats/, beside mods/ (runtime/cheats.c)
 const char *cheats_dir(void);
