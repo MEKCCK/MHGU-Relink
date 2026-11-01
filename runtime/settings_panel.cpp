@@ -743,10 +743,10 @@ void reset_section() {
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
-        c.sync_small_monsters = f.sync_small_monsters;
-        c.village_in_hub = f.village_in_hub;
         break;
     case 4:
+        c.sync_small_monsters = f.sync_small_monsters;
+        c.village_in_hub = f.village_in_hub;
         c.hp = f.hp;
         quest_keys();
         break;
@@ -1125,8 +1125,6 @@ std::vector<Row> main_rows() {
              ini("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
-        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
-        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         header(r, "discord.header", "Discord");
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
@@ -1134,6 +1132,9 @@ std::vector<Row> main_rows() {
     case 4: {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
+        header(r, "hub.header", tr("Hub"));
+        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
+        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
