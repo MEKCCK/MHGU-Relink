@@ -63,6 +63,7 @@ struct Keyboard {
     size_t cursor = 0, capacity = 255;
     bool upper = false, select_all = false;
     std::function<bool(const std::string &, std::string &)> commit;
+    bool paste_only = false;  // (Add a cheat: Paste / Clear / Add / Cancel instead of the on-screen keys)
 };
 struct State {
     Config draft = {}, saved = {};
@@ -406,6 +407,18 @@ void keyboard(const std::string &title, const std::string &initial, size_t cap,
               std::function<bool(const std::string &, std::string &)> commit) {
     s.keyboard = {title, initial, initial, initial.size(), cap, false, false, std::move(commit)};
     push(View::Keyboard, "key.0");
+}
+void insert(const std::string &text);
+void paste_box(const std::string &title, size_t cap, std::function<bool(const std::string &, std::string &)> commit) {
+    s.keyboard = {title, "", "", 0, cap, false, false, std::move(commit), true};
+    push(View::Keyboard, "key.paste");
+}
+void paste_clipboard() {
+    char *clip = SDL_GetClipboardText();
+    if (clip) {
+        insert(clip);
+        SDL_free(clip);
+    }
 }
 void insert(const std::string &text) {
     if (s.keyboard.select_all) {
@@ -830,7 +843,7 @@ void conflict_rows(std::vector<Row> &r) {
 }
 // "Add a cheat": a text box to paste one into (Ctrl+V); Accept checks it, adds it to cheats/added.txt and turns it on
 void add_cheat() {
-    keyboard(tr("Paste a cheat (Ctrl+V): its [Name] line and its codes. Enter or Accept adds it."), "", 65536,
+    paste_box(tr("Copy a cheat (its [Name] line and its codes), then Paste and Add."), 65536,
              [](const std::string &text, std::string &error) {
                  int before = cheats_count();
                  char err[256];
@@ -1260,7 +1273,15 @@ std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main)
         return main_rows();
     std::vector<Row> r;
-    if (s.view == View::Keyboard) {
+    if (s.view == View::Keyboard && s.keyboard.paste_only) {
+        action(r, "key.paste", tr("Paste"), []() { paste_clipboard(); });
+        action(r, "key.clear", tr("Clear"), []() {
+            s.keyboard.buffer.clear();
+            s.keyboard.cursor = 0;
+        });
+        action(r, "key.accept", tr("Add"), []() { accept_keyboard(); });
+        action(r, "key.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Keyboard) {
         std::string chars = "1234567890abcdefghijklmnopqrstuvwxyz.:,-_/@";
         if (s.keyboard.upper)
             for (char &c : chars)
@@ -1983,13 +2004,8 @@ void settings_panel(bool *open) {
         }
         if (pressed(ImGuiKey_Backspace, true))
             erase_previous();
-        if (io.KeyCtrl && pressed(ImGuiKey_V)) {
-            char *clip = SDL_GetClipboardText();
-            if (clip) {
-                insert(clip);
-                SDL_free(clip);
-            }
-        }
+        if (io.KeyCtrl && pressed(ImGuiKey_V))
+            paste_clipboard();
         if (io.KeyCtrl && pressed(ImGuiKey_A))
             s.keyboard.select_all = true;
         if (pressed(ImGuiKey_Delete, true) && s.keyboard.select_all)
