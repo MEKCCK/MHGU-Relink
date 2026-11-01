@@ -1017,6 +1017,10 @@ std::vector<Row> main_rows() {
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
         break;
     case 1:
+        header(r, "audio.header", tr("Audio"));
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
@@ -1073,8 +1077,6 @@ std::vector<Row> main_rows() {
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
-        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.fsr) {
             add_choice(

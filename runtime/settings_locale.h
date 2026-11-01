@@ -263,6 +263,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Strict", "Estricto"},
         {"Confirm exit", "Confirmar salida"},
         {"FPS counter", "Contador de FPS"},
+        {"Audio", "Audio"},
+        {"Graphics", "Gráficos"},
         {"Add a cheat", "Añadir un truco"},
         {"Copy a cheat (its [Name] line and its codes), then Paste and Add.",
          "Copia un truco (su línea [Nombre] y sus códigos) y luego Pegar y Añadir."},
