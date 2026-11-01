@@ -235,7 +235,8 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Multiplayer]`: `Port`, `Join` (addresses of hosts outside your LAN), `Server` (hub server for internet hubs:
   empty = the default, `Off` = none, or `host[:port]`), `Key` (matchmaking key: only players with the same key see
   each other's hubs; empty = public, on Android public among Android players only), `SyncSmallMonsters`,
-  `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it)
+  `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it, if you
+  have unlocked it yourself)
 - `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
