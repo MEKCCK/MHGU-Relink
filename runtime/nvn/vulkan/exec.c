@@ -2648,12 +2648,16 @@ static void plist_load(void) {
     if (e && *e) {
         snprintf(path, sizeof path, "%s", e);
     } else {
+#ifdef __ANDROID__
+        snprintf(path, sizeof path, "pipelines.list");  // (the APK's copy, unpacked into the app's folder: android.c)
+#else
         char exe[1024];
         if (!plat_exe_path(exe, sizeof exe)) return;
         char *s = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
         if (bs > s) s = bs;
         if (s) s[1] = 0; else exe[0] = 0;
         snprintf(path, sizeof path, "%spipelines.list", exe);
+#endif
     }
     FILE *f = fopen(path, "rb");
     if (!f) return;

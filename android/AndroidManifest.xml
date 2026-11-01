@@ -22,6 +22,7 @@
 
     <application android:label="MHGU Recomp"
         android:allowBackup="false"
+        android:hasFragileUserData="true"
         android:isGame="true"
         android:appCategory="game"
         android:extractNativeLibs="false"

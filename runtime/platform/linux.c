@@ -36,6 +36,7 @@
 #ifdef __ANDROID__
 const char *android_home(void);  // runtime/platform/android.c
 void android_load_env(void);
+void android_unpack_assets(void);
 void android_error_box(const char *msg);
 // (bionic has execinfo's backtrace() only from Android 13 on: the unwinder's)
 #include <unwind.h>
@@ -225,6 +226,9 @@ void plat_standalone(void) {
         char *s = strrchr(exe, '/');
         if (s) { *s = 0; if (chdir(exe) != 0) { /* the folder we are in will do */ } }
     }
+#ifdef __ANDROID__
+    android_unpack_assets();  // (pipelines.list and bonus/system, which a PC release has beside the exe)
+#endif
     if (!isatty(STDERR_FILENO)) {
         if (freopen("log.txt", "w", stderr)) { setvbuf(stderr, NULL, _IONBF, 0); g_own_log = true; }
     }

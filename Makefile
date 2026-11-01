@@ -389,8 +389,9 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
-          $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
+              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+licenses: $(LICENSE_TXT)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
 	cp $< $@
@@ -404,7 +405,7 @@ $(B)/licenses/FFmpeg.txt: $(FFMPEG_DIR)/.built
 
 $(B)/licenses/SDL3.txt: $(SDL3_DIR)/.built
 	@mkdir -p $(dir $@)
-	@{ echo "This program contains SDL $(SDL3_VER), linked statically, under the zlib license (below). Its source code is"; \
+	@{ echo "This program contains SDL $(SDL3_VER), $(if $(ANDROID),as libSDL3.so,linked statically), under the zlib license (below). Its source code is"; \
 	   echo "https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz."; \
 	   echo; cat $(SDL3_DIR)/src/LICENSE.txt; } > $@
 $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
@@ -467,12 +468,19 @@ clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game
 # Windows-MHGURecomp.<version>.zip or Linux-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
 # the game code, the DLLs, licenses/, BONUS (the donor save for bonus/system, when given) and the empty folders the
 # player fills; never the game files, mods, settings or caches of $(B). It prints each archive's size and SHA-256.
+# On Windows, with the Android SDK installed (android/android.mk), it then makes the Android one too (android/apk.mk):
+# Android-MHGURecomp.<version>.apk, arm64 only, signed with the release key. ANDROID_DIST= leaves it out.
 DIST  ?= dist
 BONUS ?= $(wildcard $(B)/bonus/system)
+ANDROID_DIST ?= $(if $(filter windows,$(PLATFORM)),$(wildcard $(if $(ANDROID_HOME),$(shell cygpath -u '$(ANDROID_HOME)'),/c/Android/Sdk)/ndk/*))
+CHECK_VERSION = @echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
+	{ echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
+ifndef ANDROID
 dist: all
-	@echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
-	  { echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
+	$(CHECK_VERSION)
 	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
+	$(if $(ANDROID_DIST),$(MAKE) PLATFORM=android ABI=arm64-v8a dist $(if $(BONUS),BONUS="$(abspath $(BONUS))"),@echo "dist: no Android SDK: no APK")
+endif
 
 .PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
 

@@ -5,8 +5,9 @@ doesn't suit them, so none are planned. Players bring their own dump as on PC; t
 
 Status (2026-10-31, branch feat/android-build): the APK builds (x86_64 for the emulator, arm64-v8a for phones), and in
 the Android 15 emulator the game boots, translates its shaders, and quick-hunts into quest 101 with everything drawn
-as on PC (also with BC textures decoded on the CPU, as a phone needs). Not yet tried: a real phone, controls by hand,
-sound, movies, multiplayer, pausing / resuming the app.
+as on PC (also with BC textures decoded on the CPU, as a phone needs); the intro movie plays. Not yet tried: a real
+phone, controls by hand, sound, multiplayer, pausing / resuming the app. Released from 0.13.0 on (make dist, below);
+the player's side is README.md "Android".
 
 ## Building and running
 
@@ -17,6 +18,12 @@ Needs the Android SDK (default /c/Android/Sdk, or ANDROID_HOME) with `ndk`, `cma
     make PLATFORM=android ABI=x86_64 -j16        # the emulator's ABI: build-android/lib/x86_64, the APK
     make PLATFORM=android ABI=arm64-v8a -j16     # phones; the APK then holds both ABIs
     make PLATFORM=android ABI=x86_64 install     # adb install -r build-android/mhgurecomp.apk
+
+The release (`make dist VERSION=...` on Windows, or `make PLATFORM=android dist VERSION=...`) is
+`dist/Android-MHGURecomp.<version>.apk`: arm64-v8a only (x86_64 is for the emulator; it would double the download),
+signed with the release key in `%USERPROFILE%\.android\mhgurecomp-release.keystore` (+ `.pass`; README.md "Making a
+release"). The development APK is signed with the SDK's debug key instead, so the two can't update each other: switching
+between them on one device means uninstalling (and losing the app's folder).
 
 The first build of an ABI also builds SDL3 (shared, for SDL's Java activity), shaderc and FFmpeg for it (~3 min);
 objects go to obj-android/<abi>/. The APK is ~115 MB per ABI, nearly all of it the game code (libmhgugame.so).
@@ -74,8 +81,8 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    every pipeline would fail. Check the target GPUs (gpuinfo.org), or make the translator do without int64.
 3. Controls by hand. Note: SDL took the emulator's keyboard ("qwerty2", 0627:0001) for a gamepad ("[input] gamepad
    in use"); a real controller should be preferred over it.
-4. pipelines.list: looked for beside the executable (exec.c), which on Android is the system's app_process64, so the
-   pipeline prewarm list isn't used. Ship it in the APK's assets and copy it to the app's folder (android.c).
+4. (done) pipelines.list and bonus/system: in the APK's assets, copied into the app's folder at start (android.c:
+   pipelines.list whenever it differs, bonus/system only when missing); exec.c reads pipelines.list from there.
 5. Getting the game files onto a phone: Android/data can't be reached from a phone's own file managers since
    Android 11, only over USB (MTP) or adb. For players: an in-app import from a folder they pick (Storage Access
    Framework), or the "All files access" permission and a folder of their choosing.
@@ -87,7 +94,10 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    new process: it reports failure). The updater isn't built.
 9. 16 KB pages: PLAT_PAGE is fixed at 4 KB. The libraries are 16 KB aligned, but a 16 KB page kernel would also need
    plat_protect / commit at that granularity.
-10. Movies: FFmpeg is built in (as on PC); not yet seen playing on Android.
+10. (done) Movies: FFmpeg is built in (as on PC); the intro movie plays in the emulator.
+11. Uninstalling deletes the app's folder with the game files and saves; android:hasFragileUserData makes Android
+    offer to keep it. A folder outside Android/data (all files access) would survive, at the cost of a scarier
+    permission.
 
 ## Performance (expectations, not measured)
 
@@ -112,5 +122,4 @@ samples), or decode in a compute shader.
 
 - Minimum device: arm64; Android 10+, Vulkan 1.2 with timeline semaphores and shaderInt64; roughly Snapdragon 865 /
   Adreno 650 class or better, 6 GB RAM.
-- Distribution: an APK on the releases page (sideloaded), like the PC zips; a release key instead of the debug key.
 - Multiplayer works the same over Wi-Fi (Local Play over IP; the internet hubs plan in internet-hubs.md).
