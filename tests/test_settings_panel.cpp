@@ -34,6 +34,10 @@ extern "C" bool cheats_set(const bool *on, int n, char *, size_t) {
         cheat_on[i] = on[i];
     return true;
 }
+extern "C" bool cheats_add(const char *, char *err, size_t n) {  // (Add a cheat: not reached here)
+    snprintf(err, n, "not in the test");
+    return false;
+}
 extern "C" int overlay_face_position(int semantic) {
     const int p[] = {1, 0, 3, 2};
     return p[semantic];
@@ -166,6 +170,8 @@ int main() {
     selected("display.mode");
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
+    selected("volume");  // (Audio first)
+    down(3);  // (mutebg, show.fps, fps)
     selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
@@ -182,6 +188,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 91);
     press(ImGuiKey_Home);
+    down(3);
     selected("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
@@ -192,6 +199,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 60);
     press(ImGuiKey_Home);
+    down(3);
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -359,11 +367,12 @@ int main() {
     }
     fs::remove_all("obj/settings-test/mods/Eee");
     tab();
+    selected("cheats.add");  // (the Cheats tab: Add a cheat, then the cheats)
+    tab();
     selected("language");
     tab();
     selected("display.mode");
     tab();
-    down(8);  // (fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth)
     selected("volume");
     confirm();
     selected("volume");
@@ -387,30 +396,34 @@ int main() {
     io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, false);
     idle();
     assert(settings_panel_dirty());
-    press(ImGuiKey_GamepadFaceUp);
+    press(ImGuiKey_GamepadFaceUp);  // (Y, the top face button, saves)
+    assert(!settings_panel_dirty());
+    assert(config_editable().volume == 99);
+    selected("reset");  // (as after Save)
+    press(ImGuiKey_Home);
+    selected("volume");
+    press(ImGuiKey_GamepadDpadRight);  // (100 again, not saved)
     assert(settings_panel_dirty());
-    assert(config_editable().volume == 100);
     press(ImGuiKey_End);
     selected("reset");
     press(ImGuiKey_GamepadDpadUp);
     selected("save");
     confirm();
     assert(!settings_panel_dirty());
-    assert(config_editable().volume == 99);
+    assert(config_editable().volume == 100);
     press(ImGuiKey_Home);
-    down(8);
     selected("volume");
-    press(ImGuiKey_GamepadDpadRight);
+    press(ImGuiKey_GamepadDpadLeft);
     back();
     selected("dialog.cancel");
     down(2);
     confirm();
     assert(!opened);
-    assert(config_editable().volume == 99);
+    assert(config_editable().volume == 100);
     frame();
     opened = true;
     idle();
-    selected("fps");
+    selected("volume");
     tab();
     tab();
     selected("port");
@@ -470,8 +483,9 @@ int main() {
     tab();
     tab();
     tab();
+    tab();  // (Misc, Mods, Cheats, Menu Options)
     selected("language");
-    down(6);
+    down(7);  // (theme, scale, confirm.exit, updates, bonus, detach, restart)
     selected("restart");
     confirm();
     selected("dialog.cancel");
@@ -498,6 +512,7 @@ int main() {
     float top = w->Pos.y;
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
+    press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("hp.0");
     down(5);
     confirm();
@@ -533,8 +548,8 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
-    selected("fps");
-    down(10);  // (vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, volume, mutebg, fsr)
+    selected("volume");
+    down(11);  // (mutebg, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());
@@ -557,8 +572,6 @@ int main() {
     g_config.fsr = 1;
     opened = true;
     idle();
-    selected("fps");
-    down(5);
     selected("volume");
     assert(!settings_panel_dirty()); // FSR-owned AA rows are disabled, not misleading live toggles.
     idle(20);
@@ -574,7 +587,7 @@ int main() {
     assert(root->NavRectRel[ImGuiNavLayer_Main].Max.y + root->Pos.y <= pinned_bottom + 1);
     press(ImGuiKey_Home);
     idle(40);
-    selected("fps");
+    selected("volume");
     assert(pinned_content_bottom() == pinned_bottom);
     assert(pinned_content_top() == pinned_top);
     assert(root->NavRectRel[ImGuiNavLayer_Main].Min.y + root->Pos.y >= pinned_top - 1);
@@ -590,7 +603,7 @@ int main() {
     idle(8);
     selected("display.mode"); // Pinned tabs remain clickable when the option list is scrolled.
     press(ImGuiKey_GamepadR1);
-    selected("fps");
+    selected("volume");
     opened = false;
     frame();
     assert(!settings_panel_dirty());
