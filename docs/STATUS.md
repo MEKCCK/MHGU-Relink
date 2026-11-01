@@ -76,7 +76,8 @@ Fixed on the way (2026-10-20):
 - Performance: device-local vertex cache refreshed per written page (page write tracking): guest copies went from
   ~880 MB/s to ~8 MB/s; mailbox presentation (FIFO with 2 images held the game at ~26 fps).
 - Settings: mhgurecomp.ini in the game folder (runtime/config.c; written with the defaults when missing): Mode = Fullscreen /
-  Windowed / Borderless, Resolution = WxH or Desktop, RenderResolution = Auto or WxH, FPS = 30..240, VSync. Alt+Enter
+  Windowed / Borderless, Resolution = WxH or Desktop (the screen's real pixels: on a scaled Wayland desktop, SDL's desktop
+  size x its pixel density), RenderResolution = Auto or WxH, FPS = 30..240, VSync. Alt+Enter
   toggles windowed / full screen. The 3D resolution is the game's own docked render size (main 0xdbcd34 / 0xdbcd38,
   `mov` 1920 / 1080, the constants the 4K-2K mod patches): tools/gen.py PATCHES makes those two instructions read
   g_render_size. Overrides for test runs: MHGU_CONFIG=<file>, MHGU_WINDOW=WxH (windowed), MHGU_RENDER=WxH,

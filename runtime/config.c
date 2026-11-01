@@ -879,7 +879,8 @@ void config_load(void) {
     render_auto = !g_config.render_w;
     config_store_loaded(&g_config);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
-    desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
+    // (in pixels: on a scaled Wayland desktop, SDL's size is the logical one, 1280x800 at density 2 on a 2560x1600 screen)
+    desktop_w = dm ? (int)lround(dm->w * dm->pixel_density) : 1920, desktop_h = dm ? (int)lround(dm->h * dm->pixel_density) : 1080;
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
 
     const char *e = getenv("MHGU_WINDOW");
