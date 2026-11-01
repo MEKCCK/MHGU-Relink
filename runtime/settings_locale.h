@@ -264,7 +264,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Confirm exit", "Confirmar salida"},
         {"FPS counter", "Contador de FPS"},
         {"Audio", "Audio"},
-        {"Conflicts", "Conflictos"},
+        {"Load order", "Orden de carga"},
         {"Hub", "Hub"},
         {"Graphics", "Gráficos"},
         {"Add a cheat", "Añadir un truco"},

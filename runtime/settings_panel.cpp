@@ -938,7 +938,7 @@ void mods_rows(std::vector<Row> &r) {
         };
         r.push_back(std::move(row));
     }
-    header(r, "mods.header", tr("Conflicts"));  // (the rows below are not mods)
+    header(r, "mods.header", tr("Load order"));  // (the rows below are not mods)
     if (!result->done) {
         action(r, "mods.scanning", tr("Checking for conflicts..."), []() {});
     } else {
