@@ -351,6 +351,26 @@ HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): De
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
 
+## Urgent quests count for everyone (2026-11-01)
+
+ini [Multiplayer] ShareUrgentCredit = On (default, applies at Save): an Urgent quest someone else posted counts for you
+when you clear it. runtime/hle/urgentcredit.c has the mechanism. A clear sets the quest's bit in the save's clear flags
+(the object behind the GOT slot 0x1a38d88, +0x42c; 0x723da4 tests, 0x723f30 sets) in 0x588d40, called once at the quest's end.
+If the game isn't the poster's (0x5ae3b4: online, and sQuestSelector +0xd788 != +0xd789), three checks can skip it:
+0x5ae75c Urgent (sQuest +0xb8 bit 12, from cQuestData mFlag +0x10c bit 0), 0x5ae768 Special Permit (group 4, bit 19),
+0x5a3424 a quest of requesters 5-8 and 12 (mRequestVillage +0xd) that the save hasn't unlocked. The hook makes the first
+say no. In the quest files mFlag is the file's last u16 (the language references before it have variable length): bit 0
+is on 28 quests: 206, 303, 402, 501, 601, 620, 713, 806, 906, 1005, 1017, 1018, 1019, 1026, 1039, 10216, 10307, 10335,
+10531, 10606, 10608, 10710, 10722, 10768, 11204, 11319, 11401, 11432. Special Permit quests stay the poster's. Other
+things only the poster gets, unchanged: the contract fee back (0x5c7274) and the cutscene-seen flags (0x34e4d8,
+0x34fb60). Each game decides for its own save: nothing is sent, and the host's setting doesn't matter.
+
+Tested (2026-11-01) with a temporary harness, not committed: quest 206 / 101 loaded by MHGU_QUICKHUNT on a scratch save,
+the bit forced to 0, 0x5ae3b4 made to answer "not the poster", 0x5a5ed0(sQuest, 2, 1) "cleared", then the real 0x588d40:
+206 On (and the key absent from the ini) -> bit set; 206 Off -> not set, as in the original; 206 as the poster, Off ->
+set; 101 (not Urgent), Off -> set. Not checked yet: a real clear by two players, a Hub-numbered Urgent in game, and what
+it unlocks afterwards for the joiner (the unlocks read the same bits, 0x70cbd0 and the VM's 0x723da4 calls).
+
 ## Save data safety (2026-10-22)
 
 Reported: saves in a folder symlinked to a NAS (Linux, Proton) were lost. The game saves by DeleteFile(system),

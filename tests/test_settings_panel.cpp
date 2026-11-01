@@ -260,7 +260,7 @@ int main() {
     tab();
     tab();
     selected("sync");  // (the Hub heading first)
-    down(2);
+    down(3);
     selected("hp.0");
     tab();
     selected("mod.Aaa");
@@ -519,7 +519,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("sync");  // (the Hub heading first)
-    down(2);
+    down(3);
     selected("hp.0");
     down(5);
     confirm();
