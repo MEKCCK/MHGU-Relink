@@ -484,7 +484,7 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
-// The frame rate ([Application] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
+// The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
 // its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
 // forge_imgui.ini
 static void draw_fps(uint64_t now) {

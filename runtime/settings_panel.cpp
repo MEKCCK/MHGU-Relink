@@ -714,6 +714,7 @@ void reset_section() {
         c.fsr_objmotion = f.fsr_objmotion;
         c.fsr_reactive = f.fsr_reactive;
         c.fsr_animsurf = f.fsr_animsurf;
+        c.show_fps = f.show_fps;
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
@@ -762,7 +763,6 @@ void reset_section() {
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
         c.confirm_exit = f.confirm_exit;
-        c.show_fps = f.show_fps;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
         break;
@@ -1017,6 +1017,7 @@ std::vector<Row> main_rows() {
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
         break;
     case 1:
+        add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};
@@ -1203,7 +1204,6 @@ std::vector<Row> main_rows() {
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
-        add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
