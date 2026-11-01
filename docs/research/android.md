@@ -80,7 +80,8 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    (maxwell/translate.c), while device.c only logs a warning without shaderInt64. Not every phone driver has it: there
    every pipeline would fail. Check the target GPUs (gpuinfo.org), or make the translator do without int64.
 3. Controls by hand. Note: SDL took the emulator's keyboard ("qwerty2", 0627:0001) for a gamepad ("[input] gamepad
-   in use"); a real controller should be preferred over it.
+   in use"); a real controller should be preferred over it. The on-screen keyboard comes up only for a real text box
+   (the game's entries, the chat, a Forge plugin's field: textinput.c), not for the settings menu with its own keys.
 4. (done) pipelines.list and bonus/system: in the APK's assets, copied into the app's folder at start (android.c:
    pipelines.list whenever it differs, bonus/system only when missing); exec.c reads pipelines.list from there.
 5. Getting the game files onto a phone: Android/data can't be reached from a phone's own file managers since

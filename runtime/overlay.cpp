@@ -44,7 +44,7 @@ void vk_unlock(void);
 SDL_Window *ui_window(void);
 }
 
-static std::atomic<bool> g_enabled, g_ready, g_open;
+static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
 static std::atomic<bool> g_settings_open, g_forge_open;
 static int g_menu_key;
 static float g_font_size;
@@ -225,6 +225,7 @@ void overlay_pad(const OverlayPad *p) {
 
 bool overlay_enabled(void) { return g_enabled; }
 bool overlay_menu_open(void) { return g_open; }
+bool overlay_wants_text(void) { return g_wants_text; }
 
 static void apply_input(ImGuiIO &io) {
     std::vector<Ev> evs;
@@ -529,6 +530,7 @@ void overlay_frame(void *cpu) {
     char line[256];
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
+    g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
     bool fps = config_show_fps();
     if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
