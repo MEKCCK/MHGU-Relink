@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
+    assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
     assert(g_config.fps==60 && g_config.fxaa==1 && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));

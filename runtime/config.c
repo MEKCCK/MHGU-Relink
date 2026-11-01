@@ -349,9 +349,10 @@ static int parse_factors(const char *v, float f[4]) {
 // The vertical field of view (radians) a camera of this aspect gets (tools/gen.py PATCHES: the three callers of the
 // perspective matrix that load a camera's). One made for the screen (its 16:9 aspect replaced with g_render_aspect)
 // gets the FOV factor and, on a picture narrower than 16:9 (16:10), the height that keeps 16:9's width (Vert+): more
-// above and below instead of less to the sides. Other cameras keep their own.
+// above and below instead of less to the sides. Other cameras keep their own. (A picture is a whole number of pixels:
+// a camera made from its size has an aspect within rounding of g_render_aspect, 1918x1050 for 1.828, not equal to it.)
 float camera_fovy(float fovy, float aspect) {
-    if (aspect != g_render_aspect) return fovy;
+    if (fabsf(aspect / g_render_aspect - 1.0f) > 0.005f) return fovy;
     fovy *= config_live_fov();
     if (aspect < 16.0f / 9.0f) fovy = 2.0f * atanf(tanf(fovy * 0.5f) * (16.0f / 9.0f) / aspect);
     return fovy;
