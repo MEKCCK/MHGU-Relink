@@ -23,19 +23,24 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Optional: village quests are playable in multiplayer (press L/R at the quest counter), with appropriately re-scaled monster HP
 - Mod support. The vast majority of mods work by dropping them into the `mods` folder, including Forge mods. (see [Mods](#mods))
 - Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
-- Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open, will be replaced with a real settings menu in the future)
+- Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open)
 - Working online multiplayer servers, in public or with friends (use "Local Wireless" menu)
-- Discord Rich Presence: your Discord profile shows where you are, the quest's monsters and your party (can be turned off)
+- Discord Rich Presence (optional)
 
 ## Requirements
 
-- OS: Windows 10/11 64-bit, or Linux 64-bit with glibc 2.39 or newer (Ubuntu 24.04, Linux Mint 22, Debian 13,
-  SteamOS 3.7, Arch, Fedora 40 or newer) and a Vulkan driver
+- OS: Windows 10/11 64-bit, or Linux 64-bit with glibc 2.39 or newer. The following Linux distros are known to work (Vulkan support required):
+    - Ubuntu 24.04
+    - Linux Mint 22
+    - Debian 13
+    - SteamOS 3.7
+    - Arch
+    - Fedora 40
 - CPU: Any CPU from 2014 or newer (needs AVX2 support)
 - GPU: Any GPU from 2016 or newer (needs Vulkan 1.2 support), and at least 1GB of VRAM
 - RAM: 4GB
 - Android (experimental, see [Android](#android)): a 64-bit ARM phone or tablet with Android 10 or newer, a GPU
-  with Vulkan 1.2, and a controller
+  with Vulkan 1.2, and a controller or virtual controller overlay app
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
     - (Title ID `0100770008DD8000`, the `main` executable's build ID starts with `FB08F1D20FD1204F`)
 
