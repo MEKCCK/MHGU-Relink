@@ -11,13 +11,48 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 
 ## Qué ofrece
 
-- Hasta 120 fps en teléfonos potentes
+### Cacería con controles táctiles
+
+- **Movimiento:** un pad fijo, que no se mueve con el dedo. Arrastra más allá de su borde para correr; con el arma desenfundada eso se desactiva, para que no salgas corriendo en plena pelea
+- **Cámara:** arrastra en cualquier parte de la pantalla para girarla, como en un juego de teléfono. Con un doble toque se centra
+- **Fijar al monstruo:** toca el ícono del objetivo y la cámara lo sigue hasta que lo vuelvas a tocar, como en los Monster Hunter más nuevos
+- **Objetos:** la barra queda abajo al centro. Tócala para usar el objeto y deslízala para cambiarlo
+- **Hunter Arts:** toca el panel de cada una para usarla
+- **Ataques:** tres disposiciones a elegir: píldora dividida en diagonal, botones separados o una banda en U en la esquina de la pantalla
+- **Otros botones:** esquivar, cubrirse y enfundar el arma, cada uno con su ícono
+
+### Menús y comodidad
+
+- El menú de pausa, la bolsa y las tiendas se manejan con una cruceta y botones en pantalla
+- El teclado del teléfono sirve para escribir el nombre de tu personaje
+- El menú de opciones se usa con el dedo y tiene el estilo visual del juego
+- **Beber y comer más rápido:** dos trucos opcionales, apagados por defecto, en el engranaje, **Trucos**. Aceleran la animación x1,7 o x2,5, pero no permiten caminar mientras bebes
+- El juego se pausa solo cuando sales de la app
+- Vibración al tocar los botones y vibración del juego en el teléfono, con o sin joystick
+
+### Personalización
+
+- Mantén apretado el engranaje para abrir el editor: mueve y cambia el tamaño de cada botón, y mueve la barra de objetos, las Hunter Arts y el ícono del objetivo
+- La interfaz del juego se reacomoda para no quedar bajo los pulgares. Se puede desactivar
+- Opacidad de los controles y velocidad de la cámara ajustables
+
+### Pantalla y rendimiento
+
+- Hasta 120 fps en teléfonos potentes, con límite de FPS configurable
 - Llena toda la pantalla, desde teléfonos ultra anchos hasta consolas portátiles 4:3
-- Controles táctiles: pad de movimiento, arrastrar para girar la cámara, deslizar la barra de objetos, tocar las Hunter Arts y tocar el ícono del objetivo para fijar la cámara
-- Tres disposiciones de los botones de ataque: píldora, botones separados o una banda en la esquina de la pantalla
-- Mantén apretado el engranaje para mover y cambiar el tamaño de cada control
-- También funciona con joystick: los controles táctiles se ocultan mientras haya uno conectado. Aprieta **+** y **-** juntos para abrir las opciones
-- Vibración y un contador opcional de FPS y temperatura
+- Resolución 3D ajustable para ganar rendimiento en equipos modestos
+- Contador opcional de FPS y temperatura
+- Usa menos memoria en dispositivos con GPU Mali y en teléfonos con poca RAM
+
+### Con joystick
+
+- Los controles táctiles se ocultan apenas conectas uno y vuelven cuando lo desconectas, sin reiniciar
+- Aprieta **+** y **-** juntos para abrir las opciones
+- El clic del stick derecho fija al monstruo
+
+### Heredado de la versión de PC
+
+Red local, mods, vida de los monstruos ajustable y misiones de la aldea en el Hub también están en las opciones, pero todavía no se probaron a fondo en Android.
 
 ## ¿Qué tan bien corre?
 

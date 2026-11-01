@@ -11,13 +11,48 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 
 ## What it does
 
-- Up to 120 fps on capable phones
-- Fills the whole screen, from ultrawide phones to 4:3 handheld consoles
-- Touch controls: a movement pad, drag to turn the camera, swipe the item bar, tap Hunter Arts, tap the target icon to lock on
-- Three layouts for the attack buttons: a pill, separate buttons, or a band along the corner of the screen
-- Hold the gear button to move and resize every control
-- Controllers work too: the touch controls hide while one is connected. Press **+** and **-** together to open the settings
-- Vibration, and an optional counter for frame rate and temperature
+### Touch controls for the hunt
+
+- **Movement:** a fixed pad that doesn't follow your finger. Drag past its edge to run; this turns off while your weapon is out, so you don't run off in the middle of a fight
+- **Camera:** drag anywhere on the screen to turn it, as in a phone game. A double tap centers it
+- **Monster lock-on:** tap the target icon and the camera follows the monster until you tap it again, as in the newer Monster Hunter games
+- **Items:** the bar sits at the bottom center. Tap it to use the item and swipe it to change the item
+- **Hunter Arts:** tap each one's panel to use it
+- **Attacks:** three layouts to choose from: a diagonally split pill, separate buttons, or a U-shaped band in the corner of the screen
+- **Other buttons:** dodge, guard and sheathe, each with its own icon
+
+### Menus and comfort
+
+- The pause menu, item pouch and shops work with an on-screen d-pad and buttons
+- Your phone's keyboard works for typing your character's name
+- The settings menu works by touch and matches the game's look
+- **Faster drinking and eating:** two optional cheats, off by default, under the gear, **Cheats**. They speed up the animation x1.7 or x2.5, but they don't let you walk while drinking
+- The game pauses by itself when you leave the app
+- Vibration on button taps, and the game's rumble on your phone, with or without a controller
+
+### Customization
+
+- Press and hold the gear to open the editor: move and resize each button, and move the item bar, the Hunter Arts and the target icon
+- The game's HUD is rearranged to stay clear of your thumbs. You can turn this off
+- Adjustable control opacity and camera speed
+
+### Display and performance
+
+- Up to 120 fps on powerful phones, with a configurable frame rate limit
+- Fills the whole screen, from ultra-wide phones to 4:3 handhelds
+- Adjustable 3D resolution to gain performance on modest devices
+- Optional FPS and temperature counter
+- Uses less memory on devices with Mali GPUs and on phones with little RAM
+
+### With a controller
+
+- The touch controls hide as soon as you connect one and come back when you disconnect it, with no restart
+- Press **+** and **-** together to open the settings
+- Clicking the right stick locks onto the monster
+
+### Inherited from the PC version
+
+LAN play, mods, adjustable monster HP and Village quests in the Hub are also in the settings, but they haven't been fully tested on Android yet.
 
 ## How well does it run?
 
