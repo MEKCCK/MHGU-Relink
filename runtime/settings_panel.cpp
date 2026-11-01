@@ -541,6 +541,8 @@ void header(std::vector<Row> &rows, const std::string &id, const std::string &ti
     r.enabled = false;
     rows.push_back(std::move(r));
 }
+// A gap between groups of rows (a header without a title)
+void spacer(std::vector<Row> &rows, const std::string &id) { header(rows, id, ""); }
 void action(std::vector<Row> &rows, const std::string &id, const std::string &name, std::function<void()> fn,
             bool enabled = true) {
     Row r;
@@ -861,6 +863,7 @@ void add_cheat() {
 void cheat_rows(std::vector<Row> &r) {
     action(r, "cheats.add", tr("Add a cheat"), []() { add_cheat(); });
     r.back().help = tr("Paste a cheat code (Atmosphere format, as for Ryujinx). It is saved in cheats/added.txt and turns on right away.");
+    header(r, "cheats.header", tr("Cheats"));
     if (cheat_tab.draft.empty())
         action(r, "cheats.none", tr("No cheats found in the cheats folder"), []() {});
     for (int i = 0; i < (int)cheat_tab.draft.size(); ++i) {
@@ -1225,9 +1228,12 @@ std::vector<Row> main_rows() {
                 s.move_start = s.move_position = w->Pos;
                 push(View::Move, "move.accept");
             });
+        break;
+    }
+    spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)
+    if (s.page == APP_PAGE) {
         action(r, "restart", tr("Restart"), []() { push(View::Restart, "dialog.cancel"); });
         action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
-        break;
     }
     action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
     action(r, "reset", tr("Reset this tab"), []() { push(View::Reset, "dialog.cancel"); });
