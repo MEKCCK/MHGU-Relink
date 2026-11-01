@@ -730,8 +730,6 @@ void reset_section() {
         break;
     case 2:
         c.face_buttons = f.face_buttons;
-        c.menu_confirm = f.menu_confirm;
-        c.button_icons = f.button_icons;
         c.background_input = f.background_input;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
@@ -764,6 +762,8 @@ void reset_section() {
         c.language = f.language;
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
+        c.menu_confirm = f.menu_confirm;
+        c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
@@ -1104,11 +1104,6 @@ std::vector<Row> main_rows() {
     case 2:
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
-        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
-                   {tr("Original"), tr("Bottom button"), tr("Right button")},
-                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
-        add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
-                   [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
@@ -1205,15 +1200,12 @@ std::vector<Row> main_rows() {
         cheat_rows(r);
         break;
     case APP_PAGE:
+        header(r, "look.header", tr("Appearance"));
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
-        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
-        add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
-                   [](int v) { c.updates = v; }, ini("Updates"));
-        add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
         action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
                []() {
                    s.floating = !s.floating;
@@ -1230,6 +1222,17 @@ std::vector<Row> main_rows() {
                 s.move_start = s.move_position = w->Pos;
                 push(View::Move, "move.accept");
             });
+        header(r, "menu.controls.header", tr("Menu controls"));
+        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
+                   {tr("Original"), tr("Bottom button"), tr("Right button")},
+                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
+        add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
+                   [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
+        header(r, "general.header", tr("General"));
+        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
+        add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
+                   [](int v) { c.updates = v; }, ini("Updates"));
+        add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
         break;
     }
     spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)

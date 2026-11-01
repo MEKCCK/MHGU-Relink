@@ -207,27 +207,9 @@ int main() {
     assert(!settings_panel_dirty() && opened);
     tab();
     selected("face");
-    down();
-    selected("menu.confirm");
-    press(ImGuiKey_GamepadDpadRight);
-    press(ImGuiKey_End);
-    press(ImGuiKey_GamepadDpadUp);
-    selected("save");
-    confirm();
-    assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
-    assert(config_editable().face_buttons == FACE_POSITION);
-    assert(!config_restart_required(&baseline));
-    press(ImGuiKey_Home);
-    down();
-    selected("menu.confirm");
-    press(ImGuiKey_GamepadDpadLeft);
-    press(ImGuiKey_End);
-    press(ImGuiKey_GamepadDpadUp);
-    confirm();
-    assert(config_live_menu_confirm() == MENU_CONFIRM_ORIGINAL);
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
     press(ImGuiKey_Home);
-    down(6);
+    down(4);  // (background, combo, mouse, keybinds)
     selected("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
@@ -260,7 +242,7 @@ int main() {
     confirm();
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
     press(ImGuiKey_Home);
-    down(6);
+    down(4);
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -487,7 +469,28 @@ int main() {
     tab();
     tab();  // (Misc, Mods, Cheats, Menu Options)
     selected("language");
-    down(7);  // (theme, scale, confirm.exit, updates, bonus, detach, restart)
+    // The menu's confirm button (Menu controls): saved, it applies to the menu right away
+    down(4);  // (theme, scale, detach, menu.confirm)
+    selected("menu.confirm");
+    press(ImGuiKey_GamepadDpadRight);
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
+    assert(config_editable().face_buttons == FACE_POSITION);
+    assert(!config_restart_required(&baseline));
+    press(ImGuiKey_Home);
+    down(4);
+    selected("menu.confirm");
+    press(ImGuiKey_GamepadDpadLeft);
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    confirm();
+    assert(config_live_menu_confirm() == MENU_CONFIRM_ORIGINAL);
+    press(ImGuiKey_Home);
+    selected("language");
+    down(9);  // (theme, scale, detach, menu.confirm, icons, confirm.exit, updates, bonus, restart)
     selected("restart");
     confirm();
     selected("dialog.cancel");
