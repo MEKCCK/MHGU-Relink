@@ -282,6 +282,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(sync_small_monsters);
     SAME(bonus_content);
     SAME(village_in_hub);
+    SAME(share_urgent);
     SAME(mouse_sensitivity);
     SAME(aspect_ratio);
     SAME(fov);
@@ -766,6 +767,7 @@ void reset_section() {
     case 4:
         c.sync_small_monsters = f.sync_small_monsters;
         c.village_in_hub = f.village_in_hub;
+        c.share_urgent = f.share_urgent;
         c.hp = f.hp;
         quest_keys();
         break;
@@ -1149,6 +1151,7 @@ std::vector<Row> main_rows() {
         header(r, "hub.header", tr("Hub"));
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
+        add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],

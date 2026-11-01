@@ -351,6 +351,38 @@ HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): De
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
 
+## Urgent quests count for everyone (2026-11-01)
+
+ini [Multiplayer] ShareUrgentCredit = On (default, applies at Save): an Urgent quest someone else posted counts for you
+when you clear it, if you have unlocked it yourself. runtime/hle/urgentcredit.c has the mechanism. A clear sets the quest's bit in the save's clear flags
+(the object behind the GOT slot 0x1a38d88, +0x42c; 0x723da4 tests, 0x723f30 sets) in 0x588d40, called once at the quest's end.
+If the game isn't the poster's (0x5ae3b4: online, and sQuestSelector +0xd788 != +0xd789), three checks can skip it:
+0x5ae75c Urgent (sQuest +0xb8 bit 12, from cQuestData mFlag +0x10c bit 0), 0x5ae768 Special Permit (group 4, bit 19),
+0x5a3424 a quest of requesters 5-8 and 12 (mRequestVillage +0xd) that the save hasn't unlocked. The hook makes the first
+say no if 0x74af8c(quest, 0xff, 0) says the quest is unlocked, the counters' own check for showing a quest. It runs the
+quest's unlock script (0x5b2174). That script reads no clear flags: for an Urgent one progress flag decides (found by
+zeroing each byte in turn: +0x501 of the object at GOT 0x1a390e0 for 206 and 303, +0x50c 10216, +0x50d 10307, +0x5af
+11204), and clearing every quest's flag on a new hunter unlocks nothing. Which code sets those flags isn't known; 10216's appeared after a new hunter's 1-star key quests were cleared. The
+script module (vm +0x8d0) is not loaded during a hunt, when the script always says no; it is again on the result
+screen, where 0x588d40 runs. 0x74af8c also goes by a table of quest variants (0x182cde4, bits at +0x35d4): Sky Render
+11401 and 1005 read locked after their clear, when their replay versions take their place. In the quest files mFlag is the file's last u16 (the language references before it have variable length): bit 0
+is on 28 quests: 206, 303, 402, 501, 601, 620, 713, 806, 906, 1005, 1017, 1018, 1019, 1026, 1039, 10216, 10307, 10335,
+10531, 10606, 10608, 10710, 10722, 10768, 11204, 11319, 11401, 11432. Special Permit quests stay the poster's. Other
+things only the poster gets, unchanged: the contract fee back (0x5c7274) and the cutscene-seen flags (0x34e4d8,
+0x34fb60). Each game decides for its own save: nothing is sent, and the host's setting doesn't matter.
+
+Tested (2026-11-01) with a temporary harness, not committed: a quest loaded by MHGU_QUICKHUNT on a scratch save, sQuest
++0x50 set to 3 in the hunt (the game's own clear and result flow then runs), the bit forced to 0 at the start of 0x588d40,
+0x5ae3b4 made to answer "not the poster". Quest 206: testsave/save_0 On (key absent from the ini) -> set; the same with
+the progress byte +0x501 zeroed -> not set; a new hunter (testsave/newsave) -> not set; save_0 Off -> not set, as in the
+original; the new hunter as the poster -> set. Quest 101 (not Urgent), the new hunter -> set. 
+Tested in a Local Play hub (2026-11-01, two instances on one PC, the user driving): host John Rise (HR83) posted The New
+Tenant (10216), joined by a new hunter whose 1-star Hub key quests were cleared solo, so that it had appeared at their
+counter. An insta-clear cheat (sQuest +0xec = 0x29) on the host ended the quest for both. The joiner's log: "[urgent]
+quest 0010216 cleared, posted by someone else: it counts here too"; back in the Hub "Hunter Rank 2 unlocked!", the 2-star
+quests unlocked, and new NPC dialogue. Not checked yet: a joiner who hasn't unlocked the Urgent, in a real hub (only
+through the harness above; the board may refuse them first).
+
 ## Save data safety (2026-10-22)
 
 Reported: saves in a folder symlinked to a NAS (Linux, Proton) were lost. The game saves by DeleteFile(system),
