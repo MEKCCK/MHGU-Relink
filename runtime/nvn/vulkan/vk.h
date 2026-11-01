@@ -35,6 +35,10 @@ typedef struct {
     VkPhysicalDeviceProperties props;
     VkPipelineCache pcache;
     VkSemaphore timeline;      // value = last completed submission number
+    // (from the driver: Android 10 and 11's libvulkan.so has no Vulkan 1.2 functions, whatever the driver supports, and
+    // importing one stops the game from starting)
+    PFN_vkGetSemaphoreCounterValue get_semaphore_counter;
+    PFN_vkWaitSemaphores wait_semaphores;
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
     bool bc;                   // textureCompressionBC (MHGU_NO_BC=1: off, as phone GPUs report; textures.c decodes BC)

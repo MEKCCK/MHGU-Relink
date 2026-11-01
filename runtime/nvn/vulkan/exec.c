@@ -63,7 +63,7 @@ static void ss_forget(void);
 
 uint64_t vk_completed_seq(void) {
     uint64_t v = 0;
-    vkGetSemaphoreCounterValue(g_vk.dev, g_vk.timeline, &v);
+    g_vk.get_semaphore_counter(g_vk.dev, g_vk.timeline, &v);
     return v;
 }
 
@@ -72,7 +72,7 @@ void vk_wait_seq(uint64_t seq) {
     uint64_t t0_ = plat_now_ns();
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_vk.timeline,
                               .pValues = &seq};
-    VkResult r = vkWaitSemaphores(g_vk.dev, &wi, 10ull * 1000000000ull);
+    VkResult r = g_vk.wait_semaphores(g_vk.dev, &wi, 10ull * 1000000000ull);
     stat_wait_ns += plat_now_ns() - t0_;
     if (r == VK_TIMEOUT) LOG("[vk] GPU did not finish submission %llu within 10 s (device lost?)\n", (unsigned long long)seq);
     else if (r != VK_SUCCESS) FATAL("vkWaitSemaphores: %d (device lost)\n", r);
