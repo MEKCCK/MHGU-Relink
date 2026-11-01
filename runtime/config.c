@@ -350,9 +350,11 @@ static int parse_factors(const char *v, float f[4]) {
 // perspective matrix that load a camera's). One made for the screen (its 16:9 aspect replaced with g_render_aspect)
 // gets the FOV factor and, on a picture narrower than 16:9 (16:10), the height that keeps 16:9's width (Vert+): more
 // above and below instead of less to the sides. Other cameras keep their own. (A picture is a whole number of pixels:
-// a camera made from its size has an aspect within rounding of g_render_aspect, 1918x1050 for 1.828, not equal to it.)
+// a camera made from its size has an aspect within rounding of g_render_aspect, 1918x1050 for 1.828, not equal to it;
+// a small picture, 426x118 for 3.578 with FSR Ultra Performance at 1280x720, is further off, so its size counts too.)
 float camera_fovy(float fovy, float aspect) {
-    if (fabsf(aspect / g_render_aspect - 1.0f) > 0.005f) return fovy;
+    if (fabsf(aspect / g_render_aspect - 1.0f) > 0.005f && aspect != (float)g_render_size[0] / (float)g_render_size[1])
+        return fovy;
     fovy *= config_live_fov();
     if (aspect < 16.0f / 9.0f) fovy = 2.0f * atanf(tanf(fovy * 0.5f) * (16.0f / 9.0f) / aspect);
     return fovy;
