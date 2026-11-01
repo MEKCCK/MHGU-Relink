@@ -762,7 +762,7 @@ static struct {
     int n, predict;  // predict: the anchor this group got last frame (ui_group_known), -1 if not seen
     float z, x0, y0, xmin, xmax, ymin, ymax;
     uint8_t anchors;  // (bit per vertical anchor among its pieces)
-    struct { float *m, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
+    struct { float *m, pos_x, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
 // Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
 // scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
@@ -791,9 +791,49 @@ static int ui_group_vanchor(void) {
     float above = ui_group.ymin, below = 720.0f - ui_group.ymax;  // (piece centres: the edges and corners lie on the frame)
     return above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
 }
+// Wider than 16:9 (a menu window, cbuf_info) the group is placed sideways as one, from where the whole of it sits:
+// centred on the canvas (a dialog: its sides mirror about x 640) Centre, else the half it is in (a submenu beside the
+// menu it opened from stays with it)
+static int ui_group_hside(float x0, float x1) {
+    return x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f ? 2 : x0 + x1 < 1280.0f ? 0 : 1;
+}
+static int ui_float_cmp(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+static void ui_group_hend(int n) {
+    float x0 = ui_group.xmin, x1 = ui_group.xmax, cut = INFINITY, asp = g_render_aspect;
+    int h = ui_group_hside(x0, x1), h2 = h;
+    // Across the middle, not centred, with nothing of it over a quarter of the canvas: two things side by side on one
+    // row (the smithy's title at the top left and its page counter at the top right), each placed by its own side
+    if (h != 2 && x0 < 640.0f && x1 > 640.0f) {
+        static float xs[UI_GROUP_MAX];
+        for (int i = 0; i < n; i++) xs[i] = ui_group.p[i].pos_x;
+        qsort(xs, (size_t)n, sizeof xs[0], ui_float_cmp);
+        int k = 0;
+        for (int i = 1; i < n; i++)
+            if (xs[i] - xs[i - 1] > (k ? xs[k] - xs[k - 1] : 0.0f)) k = i;
+        if (k && xs[k] - xs[k - 1] > 320.0f) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
+    }
+    float s = (16.0f / 9.0f) / asp, anchor = g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
+    float left = 640.0f * (1.0f - anchor / asp);
+    for (int i = 0; i < n; i++) {
+        float x = ui_group.p[i].pos_x;
+        int a = x < cut ? h : h2;
+        ui_group.p[i].m[12] = a == 0 ? left + x * s : a == 1 ? 1280.0f - left - (1280.0f - x) * s : 640.0f + (x - 640.0f) * s;
+        if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].hanchor = (uint8_t)a;
+    }
+    if (g_hudtrace_active)
+        LOG("[hud] group z %.1f: %d pieces, x %.1f..%.1f -> %c%c (cut %.1f)\n", ui_group.z, n, x0, x1, "LRC"[h], "LRC"[h2], cut);
+}
 static void ui_group_end(void) {
     int n = ui_group.n;
     if (!n) return;
+    if (g_render_aspect > 16.0f / 9.0f) {
+        ui_group.n = 0;
+        ui_group_hend(n);
+        return;
+    }
     int v = n < 2 ? -1 : ui_group_vanchor();
     ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
@@ -810,9 +850,11 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     // Not near: more than 400 above or below (a frame drawn as its corners only, the help windows' 336 high, is one group;
     // the target cam at y 42..82 and the Hunter Arts prompts below y 600 are two), or a piece of another anchor beside the
     // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
-    // pieces line up with the rest of it on one side: its other corner, its bottom edge)
+    // pieces line up with the rest of it on one side: its other corner, its bottom edge). Wider than 16:9 by place alone:
+    // the pieces' own anchors are the ones that split a window there.
     const float margin = 24.0f;
-    bool apart = !(ui_group.anchors & (1u << vanchor)) && (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
+    bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
+                 (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
     if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 400.0f || pos_y > ui_group.ymax + 400.0f ||
                        apart || ui_group.n == UI_GROUP_MAX))
@@ -825,7 +867,8 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     ui_group.xmin = fminf(ui_group.xmin, pos_x), ui_group.xmax = fmaxf(ui_group.xmax, pos_x);
     ui_group.ymin = fminf(ui_group.ymin, pos_y), ui_group.ymax = fmaxf(ui_group.ymax, pos_y);
     ui_group.anchors |= (uint8_t)(1u << vanchor);
-    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_y = pos_y, ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
+    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_x = pos_x, ui_group.p[ui_group.n].pos_y = pos_y;
+    ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
     ui_group.p[ui_group.n].recent = ui_nrecent - 1;  // (cbuf_info recorded it just before)
     ui_group.n++;
 }
@@ -3166,6 +3209,15 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
                     grouped = sy < 1.0f && !(ui_loading_pass && pos_z >= 94.0f && pos_z < 109.5f) && fabsf(pos_z - 103.0f) >= 0.5f &&
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f;
+                    // Wider than 16:9 one anchor per window sideways, for the menus (97, the text over them 98) and the
+                    // windows and prompts of 100. By its own place a piece went left of x 430 and right of it (all of 100
+                    // right): the item box's Manage Equipment submenu (x 333..563) lost its body and right corners to the
+                    // right, its Rotate / Camera prompts (100, x 18..98, under the menu) and the Multiplayer dialog (over
+                    // the middle) went right. Not on the screens placed whole above, nor the bars that belong to an edge.
+                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || fabsf(pos_z - 100.0f) < 0.5f) &&
+                        !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
+                        !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)
+                        grouped = true;
                     vgroup = v;
                     if (g_hudtrace_active)
                         LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],
