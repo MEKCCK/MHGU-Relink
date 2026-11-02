@@ -72,6 +72,7 @@ static void disable_overwolf_layers(void) {
 }
 
 static uint32_t instance_api;  // the Vulkan version asked of the instance
+extern bool maxwell_no_int64;   // (nvn/maxwell/translate.c)
 
 static void create_instance(void) {
     disable_overwolf_layers();
@@ -204,9 +205,15 @@ static void create_device(void) {
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
     g_vk.has_timeline = g_vk.api12 && f12_have.timelineSemaphore;
     g_vk.mirror_clamp = g_vk.api12 ? f12_have.samplerMirrorClampToEdge : mirror_ext;
-    if (!g_vk.has_timeline)
-        LOG("[vk] Vulkan 1.1 path: fences for the submissions, SPIR-V 1.3, mirror clamp %d, shaderInt64 %d\n", g_vk.mirror_clamp,
-            have.features.shaderInt64);
+    maxwell_no_int64 = !have.features.shaderInt64 || getenv("MHGU_VK_NO_INT64");  // (the env: tests)
+    if (!g_vk.has_timeline) {
+        VkPhysicalDeviceSubgroupProperties sg = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &sg};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+        LOG("[vk] Vulkan 1.1 path: fences for the submissions, SPIR-V 1.3, mirror clamp %d, shaderInt64 %d, subgroups: size %u, "
+            "stages 0x%x, operations 0x%x\n", g_vk.mirror_clamp, have.features.shaderInt64, sg.subgroupSize, sg.supportedStages,
+            sg.supportedOperations);
+    }
     g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
     g_vk.custom_border = g_vk.custom_border && cbc_have.customBorderColors && cbc_have.customBorderColorWithoutFormat;
 
@@ -234,7 +241,7 @@ static void create_device(void) {
     b->samplerAnisotropy = h->samplerAnisotropy;
     b->textureCompressionBC = h->textureCompressionBC;
     b->textureCompressionASTC_LDR = h->textureCompressionASTC_LDR;
-    b->shaderInt64 = h->shaderInt64;
+    b->shaderInt64 = !maxwell_no_int64;
     b->depthBiasClamp = h->depthBiasClamp;
     b->depthClamp = h->depthClamp;
     g_vk.depth_clamp = h->depthClamp;
@@ -253,7 +260,7 @@ static void create_device(void) {
         f12.shaderFloat16 = b->shaderInt16 = g_vk.fsr_fp16 = f12_have.shaderFloat16 && h->shaderInt16;  // (both, or neither)
     }
     if (fsr4) vk_fsr4_device_features(&f11, &f12, b);  // FSR 4: cooperative matrix, float8... (only when asked for)
-    if (!h->shaderInt64) LOG("[vk] warning: no shaderInt64 (64-bit address math in shaders)\n");
+    if (maxwell_no_int64) LOG("[vk] no shaderInt64: the shaders do their 64-bit math in 32 bits\n");
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = g_vk.qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
@@ -375,7 +382,7 @@ static VkPresentModeKHR present_mode(void) {
 }
 
 static VkRenderPass sc_pass;
-static VkFramebuffer sc_fb[8];
+static VkFramebuffer sc_fb[VK_SC_MAX];
 
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
@@ -434,7 +441,8 @@ static void create_swapchain(void) {
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
     uint32_t count = caps.minImageCount + 1 < 3 ? 3 : caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
-    if (count > 8) count = 8;
+    if (count > 8) count = caps.minImageCount > 8 ? caps.minImageCount : 8;
+    if (getenv("MHGU_VK_IMAGES")) count = (uint32_t)atoi(getenv("MHGU_VK_IMAGES"));  // (tests)
     VkSwapchainKHR old = g_vk.swapchain;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = g_vk.surface, .minImageCount = count,
@@ -481,8 +489,9 @@ static void create_swapchain(void) {
                                      .subpassCount = 1, .pSubpasses = &sp, .dependencyCount = 1, .pDependencies = &dep};
         VK_CHECK(vkCreateRenderPass(g_vk.dev, &rp, NULL, &sc_pass));
     }
-    g_vk.sc_count = 8;
-    vkGetSwapchainImagesKHR(g_vk.dev, g_vk.swapchain, &g_vk.sc_count, g_vk.sc_images);
+    g_vk.sc_count = VK_SC_MAX;
+    if (vkGetSwapchainImagesKHR(g_vk.dev, g_vk.swapchain, &g_vk.sc_count, g_vk.sc_images) != VK_SUCCESS)
+        FATAL("the window has more than %d images\n", VK_SC_MAX);
     for (uint32_t i = 0; i < g_vk.sc_count; i++) {
         VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g_vk.sc_images[i],
                                     .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = sf.format,
@@ -492,7 +501,8 @@ static void create_swapchain(void) {
                                       .pAttachments = &g_vk.sc_views[i], .width = ext.width, .height = ext.height, .layers = 1};
         VK_CHECK(vkCreateFramebuffer(g_vk.dev, &fi, NULL, &sc_fb[i]));
     }
-    LOG("[vk] swapchain %ux%u, %u images, format %d\n", ext.width, ext.height, g_vk.sc_count, sf.format);
+    LOG("[vk] swapchain %ux%u, %u images (asked for %u, least %u), format %d\n", ext.width, ext.height, g_vk.sc_count, count,
+        caps.minImageCount, sf.format);
 }
 
 static void recreate_swapchain(void) {
@@ -506,7 +516,7 @@ VkRenderPass vk_window_pass(void) { return sc_pass; }
 // ================================================================== frames
 // Acquire semaphores rotate per frame in flight; a slot is reused once the submission that waited on it is done.
 #define FRAMES 3
-static VkSemaphore acquire_sem[FRAMES], done_sem[8];
+static VkSemaphore acquire_sem[FRAMES], done_sem[VK_SC_MAX];
 static uint64_t slot_seq[FRAMES];
 static int slot;
 

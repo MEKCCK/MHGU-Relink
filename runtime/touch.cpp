@@ -116,9 +116,10 @@ enum { STYLE_PILL, STYLE_SEPARATE, STYLE_CORNER, STYLE_COUNT };  // how the atta
 std::atomic<int> g_style{STYLE_PILL};                            // (Layout.style, for every thread)
 bool in_mode(int i, bool menu) {  // (the menus: the d-pad, the diamond, the shoulders, Minus, Plus and the settings)
     // (no L: the lock-on is the target icon's; no map button: the whole map is in the game's menu, Y, and the place stays
-    // Minus's; no run button: the thumb past the stick's rim runs; no ZL, ZR: nothing a hunt needs, the game began on a
-    // 3DS without them - a controller still has them)
-    if (i == C_MAP || i == C_RUN || i == C_L || i == C_ZL || i == C_ZR) return false;
+    // Minus's; no run button: the thumb past the stick's rim runs; ZL, ZR only if asked for ([Touch] ShowZL, ShowZR): a
+    // hunt needs neither, the game began on a 3DS without them)
+    if (i == C_MAP || i == C_RUN || i == C_L) return false;
+    if (i == C_ZL || i == C_ZR) return !menu && (i == C_ZL ? config_live_touch_zl() : config_live_touch_zr());
     if (i >= C_DPAD) return menu;
     if (menu) return i == C_MENU || i == C_SETTINGS;
     int style = g_style.load();

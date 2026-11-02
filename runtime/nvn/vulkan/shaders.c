@@ -9,6 +9,8 @@
 
 #include "shaders.h"
 
+extern bool maxwell_no_int64;  // (nvn/maxwell/translate.c)
+
 void vk_shaders_init(void) {  // (compilers are per thread: check shaderc works at all)
     shaderc_compiler_t c = shaderc_compiler_initialize();
     if (!c) FATAL("shaderc_compiler_initialize failed\n");
@@ -169,6 +171,11 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
         memcpy(out, shaderc_result_get_bytes(r), n);
         *nwords = n / 4;
         if (stage == STAGE_VERTEX) out = no_contraction(out, nwords);
+        if (maxwell_no_int64) {  // (a shader that still asks for them would not run on such a driver)
+            static int nlog;
+            for (size_t i = 5; i + 1 < *nwords && (out[i] & 0xFFFF) == 17; i += 2)  // (OpCapability, first in a module)
+                if (out[i + 1] == 11 && nlog++ < 5) LOG("[shader] %s still uses 64-bit integers\n", name);
+        }
         if (!nocache) cache_store(h, out, *nwords);
     }
     shaderc_result_release(r);

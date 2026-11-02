@@ -200,6 +200,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Map  -", "Mapa  -"},
         {"Touch controls", "Controles táctiles"},
         {"Move the HUD for touch", "Acomodar el HUD para el táctil"},
+        {"ZL button on the screen", "Botón ZL en pantalla"},
+        {"ZR button on the screen", "Botón ZR en pantalla"},
         {"Touch camera speed", "Velocidad de la cámara táctil"},
         {"Touch controls opacity", "Opacidad de los controles"},
         {"Customize touch controls", "Personalizar controles táctiles"},

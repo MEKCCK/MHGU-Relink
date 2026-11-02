@@ -23,6 +23,7 @@
 #include "shader.h"
 
 uint64_t maxwell_gmem_base, maxwell_gmem_size;
+bool maxwell_no_int64;  // the driver has no shaderInt64 (seen: a Mali-G57 MC2 on Vulkan 1.1): GLSL without 64-bit integers
 const uint8_t *maxwell_dbg_code;
 uint32_t maxwell_dbg_pc;
 int maxwell_dbg_reg;
@@ -82,6 +83,7 @@ typedef struct {
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
 } Ctx;
 
+#define NO64(c) ((c)->glsl && maxwell_no_int64)
 static uint64_t bits(uint64_t w, int lo, int n) { return (w >> lo) & ((n == 64) ? ~0ull : ((1ull << n) - 1)); }
 static int64_t sbits(uint64_t w, int lo, int n) {
     int64_t v = (int64_t)bits(w, lo, n);
@@ -1165,8 +1167,12 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
     } else if (OPM(0x1c00000000000000ull, 0xfe00000000000000ull)) {  // IADD32I (CC bit 52, X bit 53)
         bool wcc = bits(w, 52, 1), x = bits(w, 53, 1);
         if (wcc || x) { c->uses_cc = true; if (wcc) c->cc_zs = 2; }
-        sp(&c->body, "    { ulong sum = ulong(%s%s) + ulong(0x%08xu)%s;%s\n", bits(w, 56, 1) ? "-" : "", R(a), (uint32_t)bits(w, 20, 32),
-           x ? " + ulong(cc)" : "", wcc ? " cc = uint(sum >> 32) & 1u;" : "");
+        if (NO64(c))
+            sp(&c->body, "    { uint hi_, sum = add3c(uint(%s%s), 0x%08xu, 0u, %s, hi_);%s\n", bits(w, 56, 1) ? "-" : "", R(a),
+               (uint32_t)bits(w, 20, 32), x ? "cc" : "0u", wcc ? " cc = hi_ & 1u;" : "");
+        else
+            sp(&c->body, "    { ulong sum = ulong(%s%s) + ulong(0x%08xu)%s;%s\n", bits(w, 56, 1) ? "-" : "", R(a), (uint32_t)bits(w, 20, 32),
+               x ? " + ulong(cc)" : "", wcc ? " cc = uint(sum >> 32) & 1u;" : "");
         if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = uint(sum);\n", d); }
         sp(&c->body, "    }\n");
     } else if (OPM(0x5cc0000000000000ull, 0xfff0000000000000ull) || OPM(0x4cc0000000000000ull, 0xfff0000000000000ull) ||
@@ -1174,9 +1180,13 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         bool wcc3 = bits(w, 47, 1), x3 = bits(w, 48, 1);
         if (wcc3 || x3) {  // carry in/out (64-bit address math)
             c->uses_cc = true; if (wcc3) c->cc_zs = 2;
-            sp(&c->body, "    { ulong sum = ulong(%s%s) + ulong(%s%s) + ulong(%s%s)%s;\n", bits(w, 51, 1) ? "-" : "", R(a),
-               bits(w, 50, 1) ? "-" : "", B(false), bits(w, 49, 1) ? "-" : "", R((int)bits(w, 39, 8)), x3 ? " + ulong(cc)" : "");
-            if (wcc3) sp(&c->body, "      cc = uint(sum >> 32) & 1u;\n");
+            if (NO64(c))
+                sp(&c->body, "    { uint hi_, sum = add3c(uint(%s%s), uint(%s%s), uint(%s%s), %s, hi_);\n", bits(w, 51, 1) ? "-" : "", R(a),
+                   bits(w, 50, 1) ? "-" : "", B(false), bits(w, 49, 1) ? "-" : "", R((int)bits(w, 39, 8)), x3 ? "cc" : "0u");
+            else
+                sp(&c->body, "    { ulong sum = ulong(%s%s) + ulong(%s%s) + ulong(%s%s)%s;\n", bits(w, 51, 1) ? "-" : "", R(a),
+                   bits(w, 50, 1) ? "-" : "", B(false), bits(w, 49, 1) ? "-" : "", R((int)bits(w, 39, 8)), x3 ? " + ulong(cc)" : "");
+            if (wcc3) sp(&c->body, NO64(c) ? "      cc = hi_ & 1u;\n" : "      cc = uint(sum >> 32) & 1u;\n");
             if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = uint(sum);\n", d); }
             sp(&c->body, "    }\n");
         } else {
@@ -1428,7 +1438,8 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         bool right = (w >> 56) == 0x5c || (w >> 57) == (0x38 >> 1);
         const char *sh = ((w >> 60) == 3) ? B(false) : R((int)bits(w, 20, 8));
         const char *hi = R((int)bits(w, 39, 8));
-        if (right) sprintf(t, "uint((((ulong(%s) << 32) | ulong(%s)) >> (%s & 31u)))", hi, R(a), sh);
+        if (NO64(c)) sprintf(t, "%s(uint(%s), uint(%s), uint(%s))", right ? "shfr" : "shfl", hi, R(a), sh);
+        else if (right) sprintf(t, "uint((((ulong(%s) << 32) | ulong(%s)) >> (%s & 31u)))", hi, R(a), sh);
         else sprintf(t, "uint((((ulong(%s) << 32) | ulong(%s)) << (%s & 31u)) >> 32)", hi, R(a), sh);
         set_reg(c, d, t);
     } else if (OPM(0xeed0000000000000ull, 0xfff8000000000000ull) || OPM(0xeed8000000000000ull, 0xfff8000000000000ull)) {  // LDG / STG
@@ -1438,11 +1449,18 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         int64_t off = sbits(w, 20, 24);
         c->info->uses_gmem = true;
         char addr[256];
+        if (NO64(c)) {  // (ga: the address in the heap, its low word; everything below only reads that)
+            if (maxwell_gmem_size >> 32) fail(c, "gmem over 4 GB without 64-bit integers");
+            sp(&c->body, "    { uint ga; bool ok = gaddr(uint(%s), uint(%s), 0x%xu, 0x%xu, 0x%xu, 0x%xu, 0x%xu, ga);\n",
+               a == RZ || !wide ? "0u" : R(a + 1), a == RZ ? "0u" : R(a), (uint32_t)((uint64_t)off >> 32), (uint32_t)off,
+               (uint32_t)(maxwell_gmem_base >> 32), (uint32_t)maxwell_gmem_base, (uint32_t)maxwell_gmem_size);
+        } else {
         if (a == RZ) sprintf(addr, "ulong(%lld)", (long long)off);
         else if (wide) sprintf(addr, "((ulong(%s) << 32 | ulong(%s)) + ulong(%lld))", R(a + 1), R(a), (long long)off);
         else sprintf(addr, "(ulong(%s) + ulong(%lld))", R(a), (long long)off);
         sp(&c->body, "    { ulong ga = %s - 0x%llxul; bool ok = ga < 0x%llxul;\n", addr,
            (unsigned long long)maxwell_gmem_base, (unsigned long long)maxwell_gmem_size);
+        }
         static const char *const ld_small[] = {"uint(gmem[ga])", "uint(int(char(gmem[ga])))",
                                                "uint(*(device ushort *)(gmem + ga))", "uint(int(*(device short *)(gmem + ga)))"};
         int nw = size == 5 ? 2 : size >= 6 ? 4 : 1;
@@ -1699,7 +1717,8 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
         if (*p >= '0' && *p <= '9') {  // number (0x..u, 1.0f, ...)
             const char *e = p;
             while (id_char(*e) || *e == '.') e++;
-            sp(o, "%.*s", (int)(e - p), p);
+            bool wide = maxwell_no_int64 && e - p > 2 && e[-1] == 'l' && e[-2] == 'u';  // (3ul: ga is 32 bits there)
+            sp(o, "%.*s", (int)(e - p) - (wide ? 1 : 0), p);
             p = e;
             continue;
         }
@@ -1802,6 +1821,16 @@ static const char glsl_prelude[] =
     "uint hpack(vec2 r, uint merge, uint old) { if (merge == 1u) return floatBitsToUint(r.x); uint lo = packHalf2x16(vec2(r.x, 0.0f)), hi = packHalf2x16(vec2(r.y, 0.0f)); if (merge == 2u) return (old & 0xFFFF0000u) | lo; if (merge == 3u) return (old & 0xFFFFu) | (hi << 16); return lo | (hi << 16); }\n"
     "uint prmt(uint a, uint b, uint sel) { uint r = 0u; for (uint i = 0u; i < 4u; i++) { uint s = (sel >> (i * 4u)) & 7u; uint bt = s < 4u ? (a >> (s * 8u)) & 0xFFu : (b >> ((s - 4u) * 8u)) & 0xFFu; r |= bt << (i * 8u); } return r; }\n";
 
+// 64-bit integer math without them (maxwell_no_int64)
+static const char glsl_prelude_no64[] =
+    "uint add3c(uint a, uint b, uint e, uint f, out uint carry) { uint c1, c2, c3;"
+    " uint s = uaddCarry(a, b, c1); s = uaddCarry(s, e, c2); s = uaddCarry(s, f, c3); carry = c1 + c2 + c3; return s; }\n"
+    "uint shfr(uint hi, uint lo, uint s) { s &= 31u; return s == 0u ? lo : (lo >> s) | (hi << (32u - s)); }\n"
+    "uint shfl(uint hi, uint lo, uint s) { s &= 31u; return s == 0u ? hi : (hi << s) | (lo >> (32u - s)); }\n"
+    "bool gaddr(uint hi, uint lo, uint ohi, uint olo, uint bhi, uint blo, uint size, out uint ga) { uint c1, b1;"
+    " uint l = uaddCarry(lo, olo, c1); uint h = hi + ohi + c1; ga = usubBorrow(l, blo, b1); h = h - bhi - b1;"
+    " return h == 0u && ga < size; }\n";
+
 static const char *glsl_sampler_type(const ShaderTexture *t) {
     static const char *const names[][2] = {
         {"sampler1D", "sampler1DShadow"}, {"sampler2D", "sampler2DShadow"}, {"sampler3D", "sampler3D"},
@@ -1826,6 +1855,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     int set = stage == STAGE_FRAGMENT ? 1 : 0;
     Str s = {0};
     sp(&s, "%s", glsl_prelude);
+    if (maxwell_no_int64) sp(&s, "%s", glsl_prelude_no64);
     for (int i = 0; i < 18; i++) {
         if (!(info->cbuf_mask & (1u << i))) continue;
         uint32_t n = info->cbuf_size[i] / 16;

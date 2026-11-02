@@ -99,6 +99,7 @@ typedef struct {
     int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
     int show_stats;           // [Performance] ShowStats: the frame rate and the phone's temperature on screen (perfstats)
     int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
+    int touch_zl, touch_zr;   // [Touch] ShowZL, ShowZR: those buttons on the screen (last: 0 by default)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // none). "" = no default: no internet hubs unless the player names a server.
@@ -181,6 +182,8 @@ int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_touch_controls(void);  // [Touch] (runtime/touch.cpp)
 int config_live_touch_hud(void);
+int config_live_touch_zl(void);
+int config_live_touch_zr(void);
 float config_live_touch_camera(void);
 float config_live_touch_opacity(void);
 int config_live_touch_vibration(void);  // [Touch] Vibration

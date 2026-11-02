@@ -35,6 +35,7 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 - Mantén apretado el engranaje para abrir el editor: mueve y cambia el tamaño de cada botón, y mueve la barra de objetos, las Hunter Arts y el ícono del objetivo
 - La interfaz del juego se reacomoda para no quedar bajo los pulgares. Se puede desactivar
 - Opacidad de los controles y velocidad de la cámara ajustables
+- Los botones ZL y ZR vienen ocultos: se activan en el engranaje, **Controles**
 
 ### Pantalla y rendimiento
 

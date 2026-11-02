@@ -25,6 +25,7 @@
 
 #define VK_CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) FATAL("%s failed: %d (%s:%d)\n", #x, r_, __FILE__, __LINE__); } while (0)
 
+#define VK_SC_MAX 64  // window images: a driver can make more than it was asked for (seen: a Mali-G57 MC2)
 typedef struct {
     VkInstance inst;
     VkPhysicalDevice phys;
@@ -48,8 +49,8 @@ typedef struct {
     VkFormat sc_format;
     VkExtent2D sc_extent;
     uint32_t sc_count;
-    VkImage sc_images[8];
-    VkImageView sc_views[8];
+    VkImage sc_images[VK_SC_MAX];
+    VkImageView sc_views[VK_SC_MAX];
 } VkG;
 extern VkG g_vk;
 

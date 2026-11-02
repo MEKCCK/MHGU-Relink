@@ -216,6 +216,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "MoveHUD = On\n"
     "\n"
+    "; The ZL and ZR buttons on the screen: a hunt needs neither (ZL targets, ZR is not used by most weapons)\n"
+    "; Default: Off\n"
+    "ShowZL = Off\n"
+    "ShowZR = Off\n"
+    "\n"
     "; How far a drag turns the camera (1: about 90 degrees for a drag the screen's height)\n"
     "; Between 0.2 and 5\n"
     "; Default: 1.0\n"
@@ -504,6 +509,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
     ON_OFF("Touch", "MoveHUD", touch_hud, false),
+    ON_OFF("Touch", "ShowZL", touch_zl, false),
+    ON_OFF("Touch", "ShowZR", touch_zr, false),
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
     {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Touch", "Vibration", touch_vibration, false),

@@ -35,6 +35,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 - Press and hold the gear to open the editor: move and resize each button, and move the item bar, the Hunter Arts and the target icon
 - The game's HUD is rearranged to stay clear of your thumbs. You can turn this off
 - Adjustable control opacity and camera speed
+- The ZL and ZR buttons are hidden by default: turn them on under the gear, **Controls**
 
 ### Display and performance
 
