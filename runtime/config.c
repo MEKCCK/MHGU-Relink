@@ -32,7 +32,7 @@
 #define CONFIG_DEFAULT_SIZE 1920, 1080
 #define CONFIG_DEFAULT_FXAA 1
 #endif
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, TOUCH_SHOW_DEFAULT
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -205,6 +205,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "PhoneRumble = On\n"
     "\n"
+    "; The lock-on, as in the newer games: the target icon or the right stick's click keep the camera on the monster,\n"
+    "; and a bow's or a bowgun's shots go to it. Off: the icon turns the camera to it once, as in the original game\n"
+    "; Default: On\n"
+    "LockOn = On\n"
+    "\n"
     "[Mouse]\n"
     "; Mouse sensitivity\n"
     "; Default: 1.0\n"
@@ -221,10 +226,48 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "MoveHUD = On\n"
     "\n"
-    "; The ZL and ZR buttons on the screen: a hunt needs neither (ZL targets, ZR is not used by most weapons)\n"
-    "; Default: Off\n"
+    "; Which of the game's buttons are on the screen in a hunt. A hunt needs none of those off by default\n"
+    "ShowAttacks = On\n"
+    "ShowDodge = On\n"
+    "ShowGuard = On\n"
+    "ShowSheathe = On\n"
+    "ShowPlus = On\n"
+    "ShowMinus = Off\n"
+    "ShowDpad = Off\n"
+    "ShowL = Off\n"
     "ShowZL = Off\n"
     "ShowZR = Off\n"
+    "ShowL3 = Off\n"
+    "ShowR3 = Off\n"
+    "ShowStick = On\n"
+    "\n"
+    "; With a bow or a bowgun in hand, a layout of their own in a hunt, and which of its buttons show\n"
+    "ShowRanged = On\n"
+    "ShowFire = On\n"
+    "ShowSecond = On\n"
+    "ShowAim = On\n"
+    "ShowRangedSpecial = On\n"
+    "ShowAmmo = On\n"
+    "\n"
+    "; Arrows beside the item bar. A swipe on the bar turns it too\n"
+    "; Default: Off\n"
+    "ShowItemArrows = Off\n"
+    "\n"
+    "; Buttons of your own, each pressing several of the game's together: A+X, ZL+R, L+Up...\n"
+    "; A B X Y L R ZL ZR Plus Minus Up Down Left Right L3 R3, joined by +\n"
+    "; ComboNPad: a controller's button that does the same: None, L3, R3, Minus, Guide, Misc, Paddle1 to Paddle4, Touchpad\n"
+    "Combo1 =\n"
+    "Combo1Pad = None\n"
+    "Combo2 =\n"
+    "Combo2Pad = None\n"
+    "Combo3 =\n"
+    "Combo3Pad = None\n"
+    "Combo4 =\n"
+    "Combo4Pad = None\n"
+    "Combo5 =\n"
+    "Combo5Pad = None\n"
+    "Combo6 =\n"
+    "Combo6Pad = None\n"
     "\n"
     "; How far a drag turns the camera (1: about 90 degrees for a drag the screen's height)\n"
     "; Between 0.2 and 5\n"
@@ -513,10 +556,33 @@ const ConfigSetting g_settings[] = {
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
+    ON_OFF("Controls", "LockOn", lock_on, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
     ON_OFF("Touch", "MoveHUD", touch_hud, false),
-    ON_OFF("Touch", "ShowZL", touch_zl, false),
-    ON_OFF("Touch", "ShowZR", touch_zr, false),
+    ON_OFF("Touch", "ShowAttacks", touch_show[TB_ATTACKS], false),
+    ON_OFF("Touch", "ShowDodge", touch_show[TB_DODGE], false),
+    ON_OFF("Touch", "ShowGuard", touch_show[TB_GUARD], false),
+    ON_OFF("Touch", "ShowSheathe", touch_show[TB_SHEATHE], false),
+    ON_OFF("Touch", "ShowPlus", touch_show[TB_PLUS], false),
+    ON_OFF("Touch", "ShowMinus", touch_show[TB_MINUS], false),
+    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], false),
+    ON_OFF("Touch", "ShowL", touch_show[TB_L], false),
+    ON_OFF("Touch", "ShowZL", touch_show[TB_ZL], false),
+    ON_OFF("Touch", "ShowZR", touch_show[TB_ZR], false),
+    ON_OFF("Touch", "ShowL3", touch_show[TB_L3], false),
+    ON_OFF("Touch", "ShowR3", touch_show[TB_R3], false),
+    ON_OFF("Touch", "ShowStick", touch_show[TB_STICK], false),
+    ON_OFF("Touch", "ShowRanged", touch_show[TB_RANGED], false),
+    ON_OFF("Touch", "ShowFire", touch_show[TB_FIRE], false),
+    ON_OFF("Touch", "ShowSecond", touch_show[TB_SECOND], false),
+    ON_OFF("Touch", "ShowAim", touch_show[TB_AIM], false),
+    ON_OFF("Touch", "ShowRangedSpecial", touch_show[TB_RSPECIAL], false),
+    ON_OFF("Touch", "ShowAmmo", touch_show[TB_AMMO], false),
+    ON_OFF("Touch", "ShowItemArrows", touch_show[TB_ITEM_ARROWS], false),
+#define COMBO(n) {"Touch", "Combo" #n, SET_TEXT, F(touch_combo[n - 1]), sizeof g_config.touch_combo[0], 0, 0, NULL, NULL, false, ERR_MISC}, \
+    {"Touch", "Combo" #n "Pad", SET_CHOICE, F(touch_combo_pad[n - 1]), 0, 0, 0, \
+     "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
+    COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
     {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Touch", "Vibration", touch_vibration, false),
@@ -979,6 +1045,14 @@ void config_load(void) {
     config_store_loaded(&g_config);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
+#ifdef __ANDROID__
+    // (the game is always landscape, but a phone that is locked or still upright says otherwise: the 3D picture and the
+    // HUD would be laid out for that shape, narrow, with black at the sides, until the next start)
+    if (desktop_h > desktop_w) {
+        int upright = desktop_w;
+        desktop_w = desktop_h, desktop_h = upright;
+    }
+#endif
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
 
     const char *e = getenv("MHGU_WINDOW");

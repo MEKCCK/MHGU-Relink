@@ -41,6 +41,8 @@ mkdir -p "$ROOT/android/app/src/main/assets"
 printf %s "$GAMELIB_ID" > "$ROOT/android/app/src/main/assets/gamelib_id.txt"  # (GameFolderActivity: which game code fits)
 cp "$OUT/libmain.so" "$OUT/libmhguffmpeg.so" "$ROOT/deps/out/$ABI/sdl3/lib/libSDL3.so" "$J/"
 cp "$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/$( [ $ABI = arm64-v8a ] && echo aarch64 || echo x86_64)-linux-android/libc++_shared.so" "$J/"
+# (a driver of the player's own: runtime/platform/android_gpu.c; these are found in the app's nativeLibraryDir)
+[ "$ABI" = arm64-v8a ] && cp "$OUT"/adrenotools/src/hook/lib*_hook.so "$OUT/adrenotools/src/hook/libhook_impl.so" "$J/"
 [ -f "$OUT/libmhgugame.so" ] && cp "$OUT/libmhgugame.so" "$J/"
 echo "native $ABI: ok (GAMELIB_ID $GAMELIB_ID)"
 ls -la "$J"

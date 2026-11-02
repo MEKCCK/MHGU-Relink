@@ -24,8 +24,10 @@
 // whole frame period whatever the load, and the system would boost all the time. The busiest thread rather than the sum:
 // the update thread goes on with the next frame while the render thread translates this one, so the slower of the two
 // sets the rate (MHGU_ADPF_LOG shows both: their sum above the frame period at the cap says they overlap).
-// Power efficiency (APerformanceHint_setPreferPowerEfficiency, API 35) is set off, as a new session's default already
-// is: on, the system may keep the threads on its efficient cores, which a 120 fps cap cannot afford.
+// Power efficiency (APerformanceHint_setPreferPowerEfficiency, API 35): on, the system may keep the threads on its
+// efficient cores, which a tight frame cannot afford, but which is most of a phone's heat when frames leave time over.
+// So it goes by what the frames need: on after EASY_RUNS seconds or so of frames using under half the target, off at once
+// when they near it (MHGU_ADPF_EFFICIENT=0: never).
 #define _GNU_SOURCE
 #include <android/api-level.h>
 #include <dlfcn.h>
@@ -263,6 +265,30 @@ static void log_frame(uint64_t work, bool have_session) {
     t0 = now, frames = work_sum = work_max = 0;
 }
 
+#define EASY_FRAMES 60  // (frames looked at together)
+#define EASY_RUNS 5     // (of them in a row, all easy, before the efficient cores)
+static void efficiency_follow(APerformanceHintSession *s, int64_t work) {
+    static int frames, easy_runs, off = -1;
+    static int64_t sum, longest;
+    static bool efficient;
+    if (off < 0) {
+        const char *e = getenv("MHGU_ADPF_EFFICIENT");
+        off = !fn.prefer_efficiency || (e && !strcmp(e, "0"));
+    }
+    if (off) return;
+    sum += work, longest = work > longest ? work : longest;
+    if (++frames < EASY_FRAMES) return;
+    int64_t avg = sum / frames, target = target_ns;
+    bool tight = avg > target * 7 / 10 || longest > target;
+    easy_runs = avg < target / 2 && longest < target * 8 / 10 ? easy_runs + 1 : 0;
+    frames = 0, sum = longest = 0;
+    bool want = tight ? false : efficient || easy_runs >= EASY_RUNS;
+    if (want == efficient) return;
+    efficient = want;
+    fn.prefer_efficiency(s, want);
+    LOG("[perf] efficient cores %s (work %.1f ms of %.1f)\n", want ? "on" : "off", avg / 1e6, target / 1e6);
+}
+
 void perf_hint_frame(void) {
     perf_hint_thread(PERF_RENDER);
     if (log_on < 0) {  // (the first present: the environment)
@@ -319,6 +345,7 @@ void perf_hint_frame(void) {
         else if (atomic_load_explicit(&t->submitted, memory_order_relaxed) != f) t->streak = 0;
         else if (t->streak < SUBMIT_FRAMES && ++t->streak == SUBMIT_FRAMES) again = true;  // (one of every frame's now)
     }
+    if (s && work) efficiency_follow(s, (int64_t)work);
     if (s) {
         int64_t tgt = frame_target();  // (the settings' FPS changed: the target follows)
         if (tgt != target_ns) {

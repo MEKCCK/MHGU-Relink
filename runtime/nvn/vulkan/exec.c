@@ -2009,6 +2009,17 @@ static VkPipeline clear_pipeline(int index, int kind, uint32_t mask, bool depth,
 
 volatile int g_clear_draw = -1;  // colour clears as draws (MHGU_CLEAR_DRAW, F9 toggles; host_input.c)
 
+// The Adreno 630's driver of Android 10 (1.1.87, vulkan.sdm845.so) dies inside vkCmdClearAttachments, at the first clear of
+// the game (two reports; a null at +0x1dd318): on drivers that old a clear is a draw. MHGU_CLEAR_FORCE=1 tries it anywhere
+static bool clears_drawn(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = getenv("MHGU_CLEAR_FORCE") || (strstr(g_vk.props.deviceName, "Adreno") && g_vk.props.apiVersion < VK_MAKE_VERSION(1, 1, 128));
+        if (on) LOG("[vk] clears as draws: vkCmdClearAttachments is not used on this driver\n");
+    }
+    return on;
+}
+
 static void clear(int index, int kind, const void *color, uint32_t mask, bool depth, float dval, bool stencil, uint32_t sval,
                   uint32_t smask) {
     if (depth || stencil) {  // (MSAA, a picture 3D models are drawn into: their depth clear into the samples, pass_models)
@@ -2030,7 +2041,7 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     stencil = stencil && has_stencil;
     if (index < 0 && !depth && !stencil) return;
     if (g_clear_draw < 0) { const char *e = getenv("MHGU_CLEAR_DRAW"); g_clear_draw = e && atoi(e); }
-    bool simple = (index < 0 || ((mask & 0xF) == 0xF && !g_clear_draw)) && (!stencil || (smask & 0xFF) == 0xFF);
+    bool simple = (index < 0 || ((mask & 0xF) == 0xF && !g_clear_draw)) && (!stencil || (smask & 0xFF) == 0xFF) && !clears_drawn();
     if (simple) {
         VkClearAttachment a[2];
         uint32_t n = 0;
@@ -3227,6 +3238,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         }
                         if (ui_stamp_pass) anchor = ANCHOR_CENTER;
                     } else if (fabsf(pos_z - 100.0f) < 0.5f) {
+                        // (a window on this layer, the multiplayer menu or the hub's form: a stretched panel, which the
+                        // HUD's parts here never are, in a hunt: the touch controls' menu layout)
+                        if (fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) touch_hud_menu();
                         // 100.0: Hunter Arts HUD and bottom right prompts (y > 600) -> Bottom anchor
                         // Target cam selector (right edge, y 42..82: x > 1000, y < 360) -> Top anchor, so it stays by the minimap.
                         // (Windows centered on this layer, x 640, must stay one piece: they keep the Bottom anchor.)
@@ -3248,8 +3262,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     } else if (fabsf(pos_z - 103.0f) < 0.5f) {
                         // 103.0: In-hunt Status HUD & Item Selector
                         // Status HUD (Clock, HP bar, Stamina, gauges, palico status: y < 500) -> Left anchor
-                        // Item Selector wheel (y >= 500) -> Right anchor
-                        if (pos_y < 500.0f) {
+                        // Item Selector wheel (y >= 500) -> Right anchor, and the ammo or coating list that opens above it
+                        // (x 970..1242, y 392..464, L held), which must stay with its plates below
+                        if (pos_y < 500.0f && !(pos_x > 900.0f && pos_y > 330.0f)) {
                             anchor = ANCHOR_LEFT;
                             vanchor = V_TOP;
                             status_edge = g_touch_hud && hunt_hud;  // (touch controls: at the screen's left edge)
@@ -3260,7 +3275,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             ui_relax_scissor = s < 1.0f || sy < 1.0f || (g_touch_hud && hunt_hud);
                             // Touch controls on the screen (runtime/touch.cpp): the bar goes to the bottom middle, out of
                             // the right thumb's buttons, where a tap on it uses the item and a swipe turns it
-                            item_bar_part = hunt_hud;
+                            item_bar_part = hunt_hud && pos_y >= 500.0f;
                             if (g_touch_hud && hunt_hud) {
                                 anchor = ANCHOR_CENTER;
                                 item_bar_move = true;
@@ -3689,6 +3704,21 @@ static bool fxaa_skipped(Prog *pr) {
 // The bloom and depth of field chain goes: from the picture's copy at half size to the last pass at a size below the
 // picture's, and the two draws that add its results to the picture. Its targets are marked as the GPU's: never drawn,
 // they would be uploaded from the guest's memory when sampled, and that garbage over the picture is coloured noise.
+static NvnTexture *lowend_seen[32];  // (debug: fs_new) the targets skipped this frame
+static uint64_t lowend_seen_frame;
+static int lowend_nseen;
+static void lowend_note_skipped(NvnTexture *t) {
+    if (lowend_seen_frame != g_present_count) lowend_seen_frame = g_present_count, lowend_nseen = 0;
+    for (int i = 0; i < lowend_nseen; i++)
+        if (lowend_seen[i] == t) return;
+    if (lowend_nseen < 32) lowend_seen[lowend_nseen++] = t;
+}
+static bool lowend_was_skipped(NvnTexture *t) {
+    if (lowend_seen_frame != g_present_count) return false;
+    for (int i = 0; i < lowend_nseen; i++)
+        if (lowend_seen[i] == t) return true;
+    return false;
+}
 #define BLOOM_FIRST_FS_HASH 0x6be2f1217dae4cbfull  // the picture to half size
 #define BLOOM_ADD_FS_HASH 0x414c7689cdfe5a68ull    // one result into the picture
 #define BLOOM_GLOW_FS_HASH 0xb505f15693063946ull   // the other, at the start of the HUD
@@ -3705,8 +3735,66 @@ static bool lowend_skipped(Prog *pr) {
     uint64_t h = prog_fs_hash(pr);
     if (h == BLOOM_FIRST_FS_HASH) bloom_open = true, bloom_frame = g_present_count;
     if (bloom_open && (bloom_frame != g_present_count || !small_target())) bloom_open = false;
-    if (bloom_open) renderer_mark_gpu_owned(st.rt.color[0]);
+    if (bloom_open) {
+        renderer_mark_gpu_owned(st.rt.color[0]);
+        lowend_note_skipped(st.rt.color[0]);
+    }
     return bloom_open || h == BLOOM_ADD_FS_HASH || h == BLOOM_GLOW_FS_HASH;
+}
+
+// (debug) MHGU_FS_NEW=1: a fragment program the first time it draws, what it reads and where it draws, so one that
+// only draws now and then (a hit's effect) stands out; a low-end frame's draw that reads a target it skipped, too.
+// MHGU_FS_WATCH=<hash>: when that program draws, the next frames as pictures and a dump of every pass.
+static void fs_new(Prog *pr, uint32_t count) {
+    static int on = -1;
+    if (on < 0) on = getenv("MHGU_FS_NEW") != NULL;
+    if (!on) return;
+    extern bool mousecam_active(void);
+    extern volatile int g_dump_request;
+    static uint64_t seen[2048], in_hunt;
+    static int nseen;
+    uint64_t h = prog_fs_hash(pr), now = plat_now_ns();
+    static uint64_t watch, watch_next;
+    static int watch_left = 4;
+    if (!watch && getenv("MHGU_FS_WATCH")) watch = strtoull(getenv("MHGU_FS_WATCH"), NULL, 16);
+    if (h == watch && watch_left && now >= watch_next) {  // (its frames, and every pass of the next one)
+        extern char g_burst_name[200];
+        extern int g_burst_left, g_burst_index;
+        watch_left--, watch_next = now + 3000000000ull;
+        snprintf(g_burst_name, sizeof g_burst_name, "hit%d", watch_left);
+        g_burst_index = 0, g_burst_left = 10, g_dump_request = 1;
+        LOG("[fsnew] frame %llu: watched program, %d more\n", (unsigned long long)g_present_count, watch_left);
+    }
+    if (!mousecam_active()) in_hunt = 0;
+    else if (!in_hunt) in_hunt = now;
+    bool reads_skipped = false;
+    char list[220];
+    int n = 0;
+    list[0] = 0;
+    for (int i = 0; i < pr->fi->ntex && n < 180; i++) {
+        NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
+        bool skipped = lowend_was_skipped(t);
+        reads_skipped |= skipped;
+        n += snprintf(list + n, sizeof list - (size_t)n, " %ux%u%s", t ? t->width : 0, t ? t->height : 0, skipped ? "(skipped)" : "");
+    }
+    NvnTexture *to = st.rt.ncolor ? st.rt.color[0] : NULL;
+    if (reads_skipped) {
+        static uint64_t said[64];
+        static int nsaid;
+        bool known = false;
+        for (int i = 0; i < nsaid; i++) known |= said[i] == h;
+        if (!known && nsaid < 64) {
+            said[nsaid++] = h;
+            LOG("[lowend] fs %016llx (%u vertices, into %ux%u) reads what was skipped:%s\n", (unsigned long long)h, count,
+                to ? to->width : 0, to ? to->height : 0, list);
+        }
+    }
+    for (int i = 0; i < nseen; i++)
+        if (seen[i] == h) return;
+    if (nseen == 2048) return;
+    seen[nseen++] = h;
+    LOG("[fsnew] frame %llu fs %016llx %u vertices, into %ux%u, reads%s%s\n", (unsigned long long)g_present_count, (unsigned long long)h,
+        count, to ? to->width : 0, to ? to->height : 0, list, in_hunt ? " (in a hunt)" : "");
 }
 
 // A movie frame: the game draws the decoder's NV12 planes (hle/movie.c), an R8 picture and its half-size RG8 colour.
@@ -3756,6 +3844,7 @@ static void draw(CmdRec *r, bool indexed) {
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
+    fs_new(pr, (uint32_t)r->x[2]);
     if (fxaa_skipped(pr) || lowend_skipped(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];

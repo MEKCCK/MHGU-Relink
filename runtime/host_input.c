@@ -19,6 +19,7 @@
 //   frames. BUTTON: A B X Y L R ZL ZR PLUS MINUS LEFT UP RIGHT DOWN LSTICK RSTICK, or STICK_UP/DOWN/LEFT/RIGHT and
 //   RSTICK_UP/DOWN/LEFT/RIGHT (full tilt).
 #include <math.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -34,6 +35,7 @@
 #include "hle/itembar.h"
 #include "hle/mousecam.h"
 #include "overlay.h"
+#include "padmap.h"
 #include "rt.h"
 #include "textinput.h"
 #include "touch.h"
@@ -197,6 +199,7 @@ static void control_poll(void) {
             done = ftell(f);
             char cmd[32] = "", arg[256] = "", arg2[200] = "";
             if (sscanf(line, "%31s %255s %199s", cmd, arg, arg2) < 1) continue;
+            if (!strcmp(cmd, "crash")) raise(SIGILL);  // (tests: the error screen, runtime/platform/android.c)
             if (!strcmp(cmd, "msaa")) { void vk_set_msaa(uint32_t); vk_set_msaa((uint32_t)atoi(arg)); continue; }
             if (!strcmp(cmd, "gpuprof")) { extern volatile int g_gpuprof_request; g_gpuprof_request = 1; continue; }
             if (!strcmp(cmd, "hudtrace")) { g_hudtrace_request = 1; continue; }
@@ -499,7 +502,7 @@ static void open_pad(SDL_JoystickID id) {
     if (npads == MAX_PADS) { log_pad(id, "gamepad skipped (too many)"); return; }
     SDL_Gamepad *p = SDL_OpenGamepad(id);
     if (!p) { LOG("[input] gamepad %u failed to open: %s\n", (unsigned)id, SDL_GetError()); return; }
-    pads[npads].pad = p, pads[npads].real = pad_is_real(p), pads[npads++].opened_ns = plat_now_ns();
+    pads[npads].pad = p, pads[npads].real = pad_is_real(p) || padmap_custom(id), pads[npads++].opened_ns = plat_now_ns();
     if (!pad) pad = p, log_pad(id, "gamepad in use");
     else log_pad(id, "gamepad open too (a button pressed on it makes it the one in use)");
     const char *name = SDL_GetGamepadName(p);
@@ -660,6 +663,11 @@ void host_input_event(const SDL_Event *e) {
     case SDL_EVENT_GAMEPAD_REMOVED:
         close_pad(e->gdevice.which);
         break;
+    case SDL_EVENT_GAMEPAD_REMAPPED: {  // (the player mapped it: runtime/padmap.c)
+        int i = find_pad(e->gdevice.which);
+        if (i >= 0) pads[i].real |= padmap_custom(e->gdevice.which);
+        break;
+    }
     }
 }
 
@@ -735,7 +743,8 @@ static void rumble_update(void) {
 }
 
 void host_input_update(void) {
-    if (nscript < 0) script_parse();
+    if (nscript < 0) script_parse(), padmap_init();
+    padmap_poll();
     rumble_update();
     control_poll();
     quickhunt_poll();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
@@ -768,6 +777,19 @@ void host_input_update(void) {
     mouse_update(&rx, &ry);
 
     if (pad) {
+        // combined buttons on the controller's own ([Touch] Combo*Pad): that button is theirs now, not what it was
+        static const SDL_GamepadButton pad_of[PADB_COUNT] = {
+            SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_BACK,
+            SDL_GAMEPAD_BUTTON_GUIDE, SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
+            SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_TOUCHPAD};
+        uint64_t taken = 0;
+        for (int i = 0; i < TOUCH_COMBOS; i++) {
+            int on = config_live_touch_combo_pad(i);
+            uint32_t combo = config_live_touch_combo(i);
+            if (on <= PADB_NONE || on >= PADB_COUNT || !combo) continue;
+            taken |= 1ull << pad_of[on];
+            if (SDL_GetGamepadButton(pad, pad_of[on])) b |= combo;
+        }
         static const struct { SDL_GamepadButton sdl; int btn; } pad_buttons[] = {
             {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, BTN_L}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, BTN_R},
             {SDL_GAMEPAD_BUTTON_START, BTN_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, BTN_MINUS},
@@ -776,7 +798,7 @@ void host_input_update(void) {
             {SDL_GAMEPAD_BUTTON_LEFT_STICK, BTN_LSTICK}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, BTN_RSTICK},
         };
         for (unsigned i = 0; i < sizeof pad_buttons / sizeof *pad_buttons; i++)
-            if (SDL_GetGamepadButton(pad, pad_buttons[i].sdl)) b |= B(pad_buttons[i].btn);
+            if (!(taken >> pad_buttons[i].sdl & 1) && SDL_GetGamepadButton(pad, pad_buttons[i].sdl)) b |= B(pad_buttons[i].btn);
         // face buttons: SDL names them by position (south, east, west, north). Settings FaceButtons: Position = the
         // Switch layout; Label = the letter on the button (PlayStation symbols as an Xbox pad's letters at that place)
         static const SDL_GamepadButton face[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
@@ -791,7 +813,7 @@ void host_input_update(void) {
         int menu_positions[4] = {1, 0, 3, 2};
         for (int i = 0; i < 4; i++) {
             int btn = switch_at[i];
-            if (face_mode == FACE_LABEL) {
+            if (face_mode == FACE_LABEL && !padmap_custom(SDL_GetGamepadID(pad))) {  // (a mapped one: by position, it was set so)
                 switch (SDL_GetGamepadButtonLabel(pad, face[i])) {
                 case SDL_GAMEPAD_BUTTON_LABEL_A: btn = BTN_A; break;
                 case SDL_GAMEPAD_BUTTON_LABEL_B: btn = BTN_B; break;
@@ -853,7 +875,7 @@ void host_input_update(void) {
     // The right stick's click in a hunt turns the lock-on on or off (the camera kept on the target, as in the newer
     // games: runtime/touch.cpp); elsewhere it is the game's
     static bool rstick_was;
-    bool rstick = (b & B(BTN_RSTICK)) && mousecam_active();
+    bool rstick = (b & B(BTN_RSTICK)) && mousecam_active() && config_live_lock_on();
     if (rstick && !rstick_was) touch_lock_toggle();
     rstick_was = rstick;
     if (rstick) b &= ~B(BTN_RSTICK);
@@ -876,6 +898,7 @@ void host_input_update(void) {
         memset(keys, 0, sizeof keys);  // (keys held as it opened went to the menu: nothing stays pressed)
         mouse_held = 0;
     }
+    if (padmap_active()) b = 0, lx = ly = rx = ry = 0;  // (being mapped: its presses are the mapping's)
     if (menu) {  // Forge's menu has the controller (as in Forge: A activates, B cancels, stick and d-pad move)
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
                         b & B(BTN_LEFT), b & B(BTN_RIGHT), b & B(BTN_L), b & B(BTN_R), b & B(BTN_PLUS),

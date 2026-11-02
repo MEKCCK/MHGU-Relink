@@ -259,6 +259,9 @@ bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays
     g_nfiles = l.nf;
     free(l.dirs);
     LOG("[romfs] %d files, %d folders, image %.1f GB\n", l.nf, l.nd, g_size / 1e9);
+    // (version 1.4.0's is 12.3 GB. A copy cut short, with every file there but some of them empty, starts and then fails in
+    // ways that look like the port's: seen as a black picture and a call to nothing)
+    if (g_size < 12000000000ull) LOG("[romfs] WARNING: smaller than the game's 12.3 GB: some files are probably incomplete\n");
     return true;
 }
 

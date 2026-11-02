@@ -29,6 +29,9 @@ bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 void ui_request_licenses(void) { SDL_SetAtomicInt(&requested_action, 3); }
 void ui_request_game_folder(void) { SDL_SetAtomicInt(&requested_action, 4); }
 void ui_request_save_import(void) { SDL_SetAtomicInt(&requested_action, 5); }
+void ui_request_share_log(void) { SDL_SetAtomicInt(&requested_action, 6); }
+void ui_request_save_export(void) { SDL_SetAtomicInt(&requested_action, 7); }
+void ui_request_gpu_driver(void) { SDL_SetAtomicInt(&requested_action, 8); }
 static void activity_call(const char *method) {  // (a static void method of GameActivity: as restart_application)
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
@@ -36,6 +39,19 @@ static void activity_call(const char *method) {  // (a static void method of Gam
     jclass cls = (*env)->GetObjectClass(env, act);
     jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, method, "()V") : NULL;
     if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+#endif
+#ifdef __ANDROID__
+static void frame_cap_to_activity(float fps) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "setFrameCap", "(F)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jfloat)fps);
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
     if (cls) (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, act);
@@ -243,6 +259,12 @@ int ui_run(void) {
         if (action == 3) activity_call("showLicenses");
         if (action == 4) activity_call("showGameFolder");
         if (action == 5) activity_call("showSaveImport");
+        if (action == 6) activity_call("showShareLog");
+        if (action == 7) activity_call("showSaveExport");
+        if (action == 8) activity_call("showDrivers");
+        static float screen_for = -1;  // (the screen's refresh rate follows the FPS limit: GameActivity.setFrameCap)
+        float fps_now = config_live_fps();
+        if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);
 #endif
         if (action == 2) {
             if (restart_application()) exit(0);

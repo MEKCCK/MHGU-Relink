@@ -285,6 +285,10 @@ int main(int argc, char **argv) {
         }
     }
     LOG("MHGU Recomp %s\n", MHGU_VERSION);
+#ifdef __ANDROID__
+    void plat_log_device(void);
+    plat_log_device();
+#endif
     { void fnprof_init(void); fnprof_init(); }
     crash_handler_install();
     ui_init();

@@ -1,5 +1,6 @@
 // Loads the recompiled game code library (runtime/gamelib.h).
 #include "gamelib.h"
+#include "gamelib_lse.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@ bool gamelib_load(char *why, size_t why_size) {
     if (!h) { snprintf(why, why_size, "can't load %s (error %lu): run `make gen` and `make` first", path, GetLastError()); return false; }
     GameLibEntry entry = (GameLibEntry)(void *)GetProcAddress(h, GAMELIB_ENTRY);
 #else
+    if (!gamelib_fit_cpu(path, sizeof path, why, why_size)) return false;
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!h) { snprintf(why, why_size, "%s", dlerror()); return false; }
     GameLibEntry entry = (GameLibEntry)dlsym(h, GAMELIB_ENTRY);

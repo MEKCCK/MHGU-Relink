@@ -20,7 +20,10 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <android/api-level.h>
 #include <android/log.h>
+#include <jni.h>
+#include <sys/system_properties.h>
 #include <SDL3/SDL_messagebox.h>
 #include "../settings_locale.h"
 #include <unwind.h>
@@ -623,6 +626,7 @@ void plat_standalone(void) {
     // log.txt in the home folder, and every line to logcat as well (adb logcat -s MHGU): stderr goes to a pipe a
     // thread reads, writing each line to both.
     int fds[2];
+    rename("log.txt", "log_prev.txt");  // (kept: after a crash the share screen sends both)
     FILE *log = fopen("log.txt", "w");
     if (log && pipe(fds) == 0) {
         setvbuf(log, NULL, _IOLBF, 0);
@@ -709,11 +713,49 @@ void plat_error_box(const char *msg) {
     box(&data, &pressed);
 }
 
+// The game's error screen, in a process of its own (LogShareActivity): this one is about to end, and sharing the log
+// must outlive it. SDL looked up at run time, as in plat_error_box.
+static bool crash_screen(void) {
+    typedef void *(*Get)(void);
+    Get get_env = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"), get_act = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity");
+    JNIEnv *env = get_env ? (JNIEnv *)get_env() : NULL;
+    jobject act = env && get_act ? (jobject)get_act() : NULL;
+    if (!act) return false;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "crashReport", "()V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+    bool ok = m && !(*env)->ExceptionCheck(env);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+    return ok;
+}
+
 void plat_fatal_notice(void) {
     int config_language(void);
-    if (g_own_log)
-        plat_error_box(settings_text(config_language(), "The game stopped because of an error. The details are in log.txt, "
-                                                        "in Android/data/com.mhgu.recomp/files."));
+    if (!g_own_log) return;
+    const char *msg = settings_text(config_language(), "The game stopped because of an error. The details are in log.txt, "
+                                                       "in Android/data/com.mhgu.recomp/files.");
+    if (crash_screen()) {
+        fprintf(stderr, "\n*** %s\n", msg);
+        usleep(300000);  // (the log's last lines on their way to the file: stderr is a pipe, log_tee)
+        return;
+    }
+    plat_error_box(msg);
+}
+
+// Which phone, for a log someone else reads (not everyone who sends one knows its chip)
+void plat_log_device(void) {
+    char maker[PROP_VALUE_MAX] = "", model[PROP_VALUE_MAX] = "", soc[PROP_VALUE_MAX] = "", hw[PROP_VALUE_MAX] = "", ver[PROP_VALUE_MAX] = "";
+    __system_property_get("ro.product.manufacturer", maker);
+    __system_property_get("ro.product.model", model);
+    __system_property_get("ro.soc.model", soc);
+    __system_property_get("ro.hardware", hw);
+    __system_property_get("ro.build.version.release", ver);
+    extern bool gamelib_cpu_lse(void);
+    fprintf(stderr, "[device] %s %s, Android %s (API %d), chip %s (%s), %ld CPUs, %lld MB, LSE atomics %s\n", maker, model, ver,
+            android_get_device_api_level(), soc[0] ? soc : "?", hw, sysconf(_SC_NPROCESSORS_CONF),
+            (long long)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE) >> 20, gamelib_cpu_lse() ? "yes" : "no");
 }
 
 // ---- diagnostics

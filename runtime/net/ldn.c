@@ -1164,6 +1164,46 @@ static void station_leave(void) {  // (caller: not holding L.mu)
     vsock_network_down();
 }
 
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#include <ifaddrs.h>
+#include <jni.h>
+#include <net/if.h>
+// Android's Wi-Fi drops broadcasts to save battery unless an app asks otherwise: on while the local play service is up
+// (GameActivity.lanSearch)
+static void lan_wifi(bool on) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "lanSearch", "(Z)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jboolean)on);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+// The probe to each network's own broadcast address as well: 255.255.255.255 follows the default route, and on a phone
+// that can be mobile data, or nothing when it is the Wi-Fi hotspot
+static void probe_networks(hsock u, const uint8_t *probe, size_t size, struct sockaddr_in to) {
+    struct ifaddrs *all = NULL;
+    if (getifaddrs(&all)) return;
+    int sent = 0;
+    for (struct ifaddrs *i = all; i; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || !(i->ifa_flags & IFF_BROADCAST) || !(i->ifa_flags & IFF_UP) ||
+            !i->ifa_broadaddr)
+            continue;
+        to.sin_addr = ((struct sockaddr_in *)(void *)i->ifa_broadaddr)->sin_addr;
+        sendto(u, (const char *)probe, size, 0, (struct sockaddr *)&to, sizeof to);
+        ONCE("[ldn] searching on %s (%s)\n", i->ifa_name, inet_ntoa(to.sin_addr));
+        sent++;
+    }
+    freeifaddrs(all);
+    ONCE("[ldn] %d local network(s) to search\n", sent);
+}
+#else
+static void lan_wifi(bool on) { (void)on; }
+#endif
+
 // Hosts to ask: ini Join (comma separated host[:port]) and this computer.
 static int scan_addresses(struct sockaddr_in *out, int max) {
     int n = 0;
@@ -1176,6 +1216,8 @@ static int scan_addresses(struct sockaddr_in *out, int max) {
     return n;
 }
 
+#define SEARCH_NS 1500000000ull      // how long a LAN search listens
+#define SEARCH_ASK_NS 500000000ull   // and how often it asks
 // Collects the networks of hosts that answer: by address (TCP) and by LAN broadcast (UDP).
 static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, int max) {
     hnet_init();
@@ -1207,18 +1249,26 @@ static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, i
     struct sockaddr_in to = {0};
     to.sin_family = AF_INET;
     to.sin_port = htons((uint16_t)g_config.ldn_port);
-    to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
-    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
-    uint64_t end = plat_now_ns() + 400000000ull;
+    // Asked more than once, and given time: on Wi-Fi a broadcast waits at the router for the next beacon that wakes a
+    // device saving power (a phone's reply took longer than the 400 ms this used to wait)
+    uint64_t next_ask = 0, end = plat_now_ns() + SEARCH_NS;
     for (uint64_t now; (now = plat_now_ns()) < end && n < max;) {
+        if (now >= next_ask) {
+            next_ask = now + SEARCH_ASK_NS;
+            to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+            sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
+#ifdef __ANDROID__
+            probe_networks(u, probe, sizeof probe, to);
+#endif
+            to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
+        }
         fd_set r;
         FD_ZERO(&r);
         FD_SET(u, &r);
-        uint64_t left = (end - now) / 1000;
+        uint64_t left = ((next_ask < end ? next_ask : end) - now) / 1000;
         struct timeval tv = {(long)(left / 1000000), (long)(left % 1000000)};
-        if (select((int)u + 1, &r, NULL, NULL, &tv) <= 0) break;
+        if (select((int)u + 1, &r, NULL, NULL, &tv) <= 0) continue;
         struct sockaddr_in from;
         socklen_t fl = sizeof from;
         int k = recvfrom(u, (char *)buf, MAX_FRAME, 0, (struct sockaddr *)&from, &fl);
@@ -1237,6 +1287,7 @@ static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, i
 // ---- nn::ldn
 
 HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
+    lan_wifi(true);
     pthread_mutex_lock(&L.mu);
     if (!L.ev) L.ev = kernel_create_event_pair(&(uint32_t){0}, &L.ev_r);
     if (L.state == ST_NONE) {
@@ -1259,6 +1310,7 @@ static void to_initialized(void) {
 }
 
 HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
+    lan_wifi(false);
     to_initialized();
     L.state = ST_NONE;
     (void)c;

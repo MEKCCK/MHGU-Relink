@@ -14,6 +14,7 @@
 
 #include "../hle.h"
 #include "itembar.h"
+#include "mousecam.h"
 
 #define FN_ITEM_BAR      0x4f7f38u  // the player's item bar handler (r0 = the player)
 #define FN_PL_IS_LOCAL   0x47bcd0u  // (player) 1: the handler goes on
@@ -56,6 +57,7 @@ static void item_bar(Cpu *c) {
     fnhook_call_original(c, FN_ITEM_BAR);
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
     g_seen_ns = now;
+    if (pl == weapon_hunter()) mousecam_lock_shot();  // (the hunt camera's handler doesn't run while a gun aims)
     pthread_mutex_lock(&g_lock);
     if (seen && now - seen >= ACTIVE_NS) g_steps = 0;  // (scrolled while it didn't run)
     int dir = g_steps > 0 ? 1 : g_steps < 0 ? -1 : 0;

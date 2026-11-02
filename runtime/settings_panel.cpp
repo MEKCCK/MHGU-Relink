@@ -6,6 +6,7 @@
 #include "app_actions.h"
 #include "cheats.h"
 #include "overlay.h"
+#include "padmap.h"
 #include "keymap.h"
 #include "modorder.h"
 #include "net/net.h"
@@ -28,7 +29,8 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, TouchButtons, ComboEdit,
+                  PadList, PadMap };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -421,6 +423,11 @@ bool equal(const Config &a, const Config &b) {
     SAME(hp.village);
     SAME(hp.quests);
 #undef SAME
+    if (a.lock_on != b.lock_on)
+        return false;
+    if (memcmp(a.touch_show, b.touch_show, sizeof a.touch_show) || memcmp(a.touch_combo, b.touch_combo, sizeof a.touch_combo) ||
+        memcmp(a.touch_combo_pad, b.touch_combo_pad, sizeof a.touch_combo_pad))
+        return false;
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
@@ -865,6 +872,10 @@ void reset_section() {
         c.touch_opacity = f.touch_opacity;
         c.touch_vibration = f.touch_vibration;
         c.phone_rumble = f.phone_rumble;
+        c.lock_on = f.lock_on;
+        memcpy(c.touch_show, f.touch_show, sizeof c.touch_show);
+        memcpy(c.touch_combo, f.touch_combo, sizeof c.touch_combo);
+        memcpy(c.touch_combo_pad, f.touch_combo_pad, sizeof c.touch_combo_pad);
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -1142,11 +1153,13 @@ std::vector<Row> main_rows() {
                 r.back().value = std::to_string(c.render_scale) + "%";
             r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
         }
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
             {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, ini("AspectRatio"));
         if (c.aspect_ratio)
             number(r, "aspect", tr("Aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, ini("AspectRatio"));
+#endif
         number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
@@ -1186,9 +1199,13 @@ std::vector<Row> main_rows() {
                     focus("choice." + std::to_string(-1 - now));
             };
         }
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "vsync", "VSync", &c.vsync, ini("VSync"));
+#endif
         add_bool(r, "stats", "Show FPS and temperature", &c.show_stats, ini("ShowStats"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, ini("ShaderPrewarm"));
+#endif
         add_choice(r, "msaa", "MSAA",
                    c.msaa == 8   ? 3
                    : c.msaa == 4 ? 2
@@ -1212,6 +1229,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "fxaamode", "FXAA mode", c.fxaa_mode, {tr("Original"), "3.11"}, [](int v) { c.fxaa_mode = v; },
                    ini("FXAAMode"));
         low_end_off();
@@ -1222,13 +1240,18 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
+#endif
         number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
                ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
+#endif
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+#endif
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         low_end_off();
         if (c.fsr && !c.low_end) {
@@ -1247,32 +1270,51 @@ std::vector<Row> main_rows() {
                 {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},
                 [](int v) { s.draft.fsr_quality = v; }, ini("FSRQuality"));
             number(r, "fsr.sharpness", tr("Sharpness"), &c.fsr_sharpness, lo("Sharpness"), hi("Sharpness"), .05f, ini("Sharpness"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
             add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, ini("ObjectMotion"));
+#endif
+#ifndef __ANDROID__  // (a phone: not worth a row)
             number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, ini("Reactive"));
+#endif
+#ifndef __ANDROID__  // (a phone: not worth a row)
             add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
+#endif
         }
+#ifdef __ANDROID__
+        if (vk_gpu_adreno()) {
+            action(r, "gpu.driver", tr("GPU driver"), []() { ui_request_gpu_driver(); });
+            r.back().value = *gpu_driver_name() ? gpu_driver_name() : tr("System");
+            r.back().help = tr("Adreno only, at your own risk: load a Vulkan driver of your own. By default the system's is used.");
+        }
+#endif
         break;
     case 2:
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
                    {tr("Original"), tr("Bottom button"), tr("Right button")},
                    [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
+#endif
 #ifndef __ANDROID__  // (a phone pauses in the background; no mouse, no keyboard)
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
 #endif
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
+#endif
 #ifndef __ANDROID__
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
 #endif
         add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
                    [](int v) { c.touch_controls = v; }, ini("Controls"));
         add_bool(r, "touch.hud", "Move the HUD for touch", &c.touch_hud, ini("MoveHUD"));
-        add_bool(r, "touch.zl", "ZL button on the screen", &c.touch_zl, ini("ShowZL"));
-        add_bool(r, "touch.zr", "ZR button on the screen", &c.touch_zr, ini("ShowZR"));
+        add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
+        r.back().help = tr("The target icon, or a controller's right stick click, keeps the camera on the monster as in the newer games, and bows and bowguns fire at it. Off: the icon turns the camera to it once, as in the original game.");
+        action(r, "touch.buttons", tr("Buttons on the screen"), []() { push(View::TouchButtons, "tb.0"); });
+        r.back().help = tr("Choose which of the game's buttons show on the screen, and add buttons of your own that press several at once.");
         number(r, "touch.camera", tr("Touch camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));
         number(r, "touch.opacity", tr("Touch controls opacity"), &c.touch_opacity, lo("Opacity"), hi("Opacity"), .05f, ini("Opacity"));
         add_bool(r, "touch.vibration", "Vibrate on touch", &c.touch_vibration, ini("Vibration"));
@@ -1292,6 +1334,8 @@ std::vector<Row> main_rows() {
                 r.back().help = tr("Move and resize each button on the screen: drag a button, pinch or use - / + for its size, then Save.");
             }
         }
+        action(r, "pad.map", tr("Map a controller"), []() { push(View::PadList, "pad.0"); });
+        r.back().help = tr("For a controller the game does not read well: press each button once and it works from then on.");
 #ifndef __ANDROID__
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
@@ -1325,6 +1369,7 @@ std::vector<Row> main_rows() {
                    lo("1Player"), hi("1Player"), .05f, ini("1Player"));
         number(r, "hp.village", tr("Village quests in Hub"), &c.hp.village, lo("HubHP"), hi("HubHP"), .05f,
                ini("HubHP"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         action(r, "hp.advanced", tr("Per-quest overrides"), []() { s.advanced = !s.advanced; });
         r.back().help = per_quest;
         if (s.advanced) {
@@ -1380,6 +1425,7 @@ std::vector<Row> main_rows() {
         for (auto &row : r)
             if (!row.id.compare(0, 6, "quest.") || row.id == "hp.add")
                 row.help = per_quest;
+#endif
         break;
     }
     case MODS_PAGE:
@@ -1391,11 +1437,15 @@ std::vector<Row> main_rows() {
     case APP_PAGE:
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
                    [](int v) { c.language = v; }, ini("Language"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
+#endif
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
         add_bool(r, "pause.bg", "Pause in the background", &c.pause_background, ini("PauseInBackground"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
+#endif
 #ifndef __ANDROID__  // (the PC build's updater)
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
@@ -1406,6 +1456,10 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Where the game's exefs and romfs are read from. A new folder is used the next time the game starts.");
         action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });
         r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
+        action(r, "save.export", tr("Export save"), []() { ui_request_save_export(); });
+        r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
+        action(r, "log.share", tr("Share log"), []() { ui_request_share_log(); });
+        r.back().help = tr("Sends the game's log to the app you choose, for whoever is helping you with a problem.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });
 #endif
         if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)
@@ -1429,7 +1483,8 @@ std::vector<Row> main_rows() {
         action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
         break;
     }
-    action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
+    if (!touch_ui() || SDL_HasGamepad())  // (a finger has the header's Save; a controller can't reach that one)
+        action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
     action(r, "reset", tr("Reset this tab"), []() { push(View::Reset, "dialog.cancel"); });
     return r;
 }
@@ -1471,10 +1526,118 @@ bool save() {
     s.error.clear();
     return true;
 }
+// Which of the game's buttons are on the screen, and the player's own
+const char *const TB_TITLES[TB_COUNT] = {"Attacks", "Dodge (B)", "Guard (R)", "Sheathe (Y)", "Game menu (+)", "Minus (-)", "D-pad",
+                                         "L", "ZL", "ZR", "Left stick click (L3)", "Right stick click (R3)", "Movement stick",
+                                         "Layout for bows and bowguns", "Fire / shoot", "Reload / melee", "Aim",
+                                         "Crouching fire / coating", "Ammo arrows", "Item arrows"};
+const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
+                                       "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
+                                       "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows"};
+int s_combo;  // the combined button being edited
+void touch_button_rows(std::vector<Row> &r) {
+    Config &c = s.draft;
+    header(r, "tb.head", tr("Buttons on the screen"));
+    for (int i = 0; i < TB_COUNT; i++) {
+        add_bool(r, ("tb." + std::to_string(i)).c_str(), TB_TITLES[i], &c.touch_show[i], nullptr);
+        r.back().key = TB_KEYS[i];
+    }
+    header(r, "tc.head", tr("Combined buttons"));
+    for (int k = 0; k < TOUCH_COMBOS; k++) {
+        action(r, "tc." + std::to_string(k), fmt("Button %d", k + 1), [k]() {
+            s_combo = k;
+            push(View::ComboEdit, "ce.0");
+        });
+        r.back().value = c.touch_combo[k][0] ? c.touch_combo[k] : tr("Empty");
+    }
+    r.back().help = tr("A button of your own presses several of the game's together. Place it with Customize touch controls.");
+    action(r, "tb.back", tr("Back"), []() { pop(); });
+}
+void combo_rows(std::vector<Row> &r) {
+    static const char *const NAMES[16] = {"A", "B", "X", "Y", "L3", "R3", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down"};
+    static const int ORDER[16] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 15, 12, 14, 4, 5};  // (the face buttons first)
+    Config &c = s.draft;
+    int k = s_combo;
+    uint32_t mask = config_combo_mask(c.touch_combo[k]);
+    for (int n = 0; n < 16; n++) {
+        int b = ORDER[n];
+        Row row;
+        row.id = "ce." + std::to_string(n);
+        row.title = tr(NAMES[b]);
+        row.toggle = mask >> b & 1;
+        row.activate = [k, b, mask]() { config_combo_text(mask ^ 1u << b, s.draft.touch_combo[k], sizeof s.draft.touch_combo[k]); };
+        row.adjust = [k, b, mask](int d) {
+            config_combo_text(d > 0 ? mask | 1u << b : mask & ~(1u << b), s.draft.touch_combo[k], sizeof s.draft.touch_combo[k]);
+        };
+        r.push_back(std::move(row));
+    }
+    add_choice(r, "ce.pad", "Controller button", c.touch_combo_pad[k],
+               {tr("None"), "L3", "R3", tr("Minus"), "Guide", "Misc", "Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad"},
+               [k](int v) { s.draft.touch_combo_pad[k] = v; });
+    r.back().help = tr("That button of a controller does the same, and no longer does what it did.");
+    action(r, "ce.clear", tr("Clear"), [k]() {
+        s.draft.touch_combo[k][0] = 0;
+        s.draft.touch_combo_pad[k] = 0;
+    });
+    action(r, "ce.back", tr("Back"), []() { pop(); });
+}
+// Mapping a controller (runtime/padmap.c): the list of those connected, then its steps
+void pad_list_rows(std::vector<Row> &r) {
+    padmap_watch();
+    char names[PADMAP_MAX][64];
+    bool custom[PADMAP_MAX];
+    int n = padmap_list(names, custom, PADMAP_MAX);
+    if (!n) header(r, "pad.none", tr("No controller connected"));
+    for (int i = 0; i < n; i++) {
+        action(r, "pad." + std::to_string(i), names[i], [i]() {
+            padmap_begin(i);
+            push(View::PadMap, "pm.go");
+        });
+        if (custom[i]) {
+            r.back().value = tr("Mapped");
+            action(r, "padf." + std::to_string(i), fmt("Forget the map of %s", names[i]), [i]() { padmap_forget(i); });
+            r.back().help = tr("The next time the game starts it reads this controller as before.");
+        }
+    }
+    action(r, "pad.back", tr("Back"), []() { pop(); });
+}
+void pad_map_rows(std::vector<Row> &r) {
+    padmap_watch();
+    int step = padmap_step(), steps = padmap_steps();
+    if (!padmap_active()) {  // (saved, or it was unplugged)
+        pop();
+        return;
+    }
+    if (step == PADMAP_REST) {
+        header(r, "pm.rest", tr("Move both sticks and press the triggers once, then let everything go"));
+        action(r, "pm.go", tr("Continue"), []() { padmap_continue(); });
+    } else if (step < steps) {
+        header(r, "pm.step", fmt("%d of %d: press", step + 1, steps) + std::string(" ") + tr(padmap_step_title(step)));
+        action(r, "pm.go", tr("Skip"), []() { padmap_skip(); });
+        r.back().help = tr("Leave this one out: the buttons your controller does not have.");
+        if (step > 0) action(r, "pm.back", tr("Previous"), []() { padmap_back(); });
+    } else {
+        header(r, "pm.done", tr("That's all of them"));
+        action(r, "pm.go", tr("Save"), []() {
+            padmap_save();
+            pop();
+        });
+        action(r, "pm.back", tr("Previous"), []() { padmap_back(); });
+    }
+    action(r, "pm.cancel", tr("Cancel"), []() {
+        padmap_cancel();
+        pop();
+    });
+}
+
 std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main)
         return main_rows();
     std::vector<Row> r;
+    if (s.view == View::TouchButtons) { touch_button_rows(r); return r; }
+    if (s.view == View::ComboEdit) { combo_rows(r); return r; }
+    if (s.view == View::PadList) { pad_list_rows(r); return r; }
+    if (s.view == View::PadMap) { pad_map_rows(r); return r; }
     if (s.view == View::Keyboard) {
         std::string chars = "1234567890abcdefghijklmnopqrstuvwxyz.:,-_/@";
         if (s.keyboard.upper)
@@ -1586,9 +1749,75 @@ std::vector<Row> dropdown_rows() {
     return r;
 }
 // A row's help: its own, or what the default ini says of its setting (each line looked up in settings_locale.h)
+#ifdef __ANDROID__
+// A phone's own: the default ini's speaks of keys and of a PC, and stays in English
+struct PhoneHelp {
+    const char *key, *en, *es;
+};
+const PhoneHelp PHONE_HELP[] = {
+    {"RenderScale", "The size of the 3D picture against the screen's. Lower runs faster and looks softer.",
+     "El tamaño de la imagen 3D respecto de la pantalla. Más bajo corre más rápido y se ve más suave."},
+    {"LowEnd", "For a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays sharp over a smaller 3D picture.",
+     "Para un teléfono débil: sin resplandor ni profundidad de campo, texturas más livianas y más chicas, y el HUD sigue nítido sobre una imagen 3D más chica."},
+    {"LockOn", "Keeps the camera on the monster, as in the newer games, and a bow's or a bowgun's shots go to it. Off: the icon turns the camera to it once.",
+     "Mantiene la cámara sobre el monstruo, como en los juegos nuevos, y los disparos de arcos y ballestas van hacia él. Apagado: el ícono gira la cámara una sola vez."},
+    {"Join", "A host's IP address, to play over a VPN. Empty: searches your network.", "La dirección IP de un anfitrión, para jugar por VPN. Vacío: busca en tu red."},
+    {"1Player", "The health of large monsters in Hub quests, by number of hunters. When you join a hub, the host's values are used.",
+     "La vida de los monstruos grandes en las misiones del Hub, según la cantidad de cazadores. Al unirte a un Hub se usan los valores del anfitrión."},
+    {"FOV", "How much of the scene you see: higher shows more.", "Cuánto se ve de la escena: un valor mayor muestra más."},
+    {"ShowRanged", "With a bow or a bowgun in hand, in a hunt, the touch controls change to a layout of their own. Its buttons are moved in the editor.",
+     "Con un arco o una ballesta en la mano, en una cacería, los controles táctiles pasan a un layout propio. Sus botones se mueven en el editor."},
+    {"ShowFire", "A bowgun fires. A bow draws while you hold it and shoots when you let go. Drag on it to aim while you hold it.",
+     "La ballesta dispara. El arco se tensa mientras lo mantienes y dispara al soltar. Arrastra sobre él para apuntar mientras lo mantienes."},
+    {"ShowSecond", "A bowgun reloads. A bow does its melee attack.", "La ballesta recarga. El arco da su golpe cuerpo a cuerpo."},
+    {"ShowAim", "A bowgun: a tap, the scope; held, the quick aim. A bow: the aiming mode.", "Ballesta: un toque, la mira; mantenido, el apuntado rápido. Arco: el modo de apuntado."},
+    {"ShowRangedSpecial", "A bowgun's crouching fire. A bow applies its coating.", "El fuego agachado de la ballesta. El arco aplica su capa."},
+    {"ShowAmmo", "Change the ammo or the coating. A swipe up or down on the item bar does it too.", "Cambian la munición o la capa. También se puede deslizar hacia arriba o abajo sobre la barra de ítems."},
+    {"ShowItemArrows", "Arrows beside the item bar. A swipe on the bar turns it too.", "Flechas a los lados de la barra de ítems. Deslizar sobre la barra también la gira."},
+    {"UIAnchor", "On a screen wider than 16:9, where the HUD goes.", "En una pantalla más ancha que 16:9, dónde va el HUD."},
+    {"FillScreen", "Movies and menu backdrops fill the screen, with a little cut above and below, instead of bars at the sides.",
+     "Los videos y los fondos de los menús llenan la pantalla, con un pequeño recorte arriba y abajo, en lugar de barras a los costados."},
+    {"FPS", "The most frames a second. A lower limit heats the phone less and saves battery.",
+     "El máximo de cuadros por segundo. Un límite más bajo calienta menos el teléfono y gasta menos batería."},
+    {"ShowStats", "Shows the frame rate and the phone's temperature on the screen.", "Muestra los FPS y la temperatura del teléfono en la pantalla."},
+    {"MSAA", "Smooths the edges of 3D models. It asks more of the GPU.", "Suaviza los bordes de los modelos 3D. Exige más a la GPU."},
+    {"FXAA", "Smooths the edges of the whole picture. On Mali GPUs it can leave a green line at the edge of the screen.",
+     "Suaviza los bordes de toda la imagen. En GPU Mali puede dejar una línea verde al borde de la pantalla."},
+    {"DrawDistance", "How far away people in towns are drawn: 1 is the game's distance, 2 twice as far, 0 no limit.",
+     "Hasta qué distancia se dibuja a la gente en los pueblos: 1 es la distancia del juego, 2 el doble, 0 sin límite."},
+    {"Volume", "The game's volume.", "El volumen del juego."},
+    {"FSR", "Rebuilds the picture from a lower resolution. It needs a Vulkan 1.2 GPU.", "Reconstruye la imagen desde una resolución menor. Necesita una GPU con Vulkan 1.2."},
+    {"FSRQuality", "How low the resolution goes before the picture is rebuilt.", "Cuánto baja la resolución antes de reconstruir la imagen."},
+    {"Sharpness", "How sharp FSR leaves the picture.", "Qué tan nítida deja FSR la imagen."},
+    {"FaceButtons", "How A, B, X and Y are read on a controller. Position: as on the Switch. Label: by the letter printed on the button.",
+     "Cómo se leen A, B, X e Y en un mando. Posición: como en la Switch. Etiqueta: según la letra impresa en el botón."},
+    {"Controls", "Auto: they show while no controller is connected.", "Automático: se ven mientras no haya un mando conectado."},
+    {"MoveHUD", "While the touch controls show, the HUD moves out of your thumbs' way.", "Mientras se ven los controles táctiles, el HUD se aparta de los pulgares."},
+    {"CameraSpeed", "How far the camera turns for a drag.", "Cuánto gira la cámara al arrastrar."},
+    {"Opacity", "How solid the touch controls look.", "Qué tan sólidos se ven los controles táctiles."},
+    {"Vibration", "A short vibration when you press a touch control.", "Una vibración corta al tocar un control."},
+    {"PhoneRumble", "The game's rumble on the phone too, with or without a controller.", "La vibración del juego también en el teléfono, con o sin mando."},
+    {"Port", "The port for local play hubs. Everyone must use the same one.", "El puerto de las salas de juego local. Todos deben usar el mismo."},
+    {"SyncSmallMonsters", "Small monsters are the same for every player. Experimental: they may stop attacking.",
+     "Los monstruos pequeños son los mismos para todos los jugadores. Experimental: pueden dejar de atacar."},
+    {"VillageQuestsInHub", "In the Hub, L or R while choosing a quest shows the Village quests, to play them with others.",
+     "En el Hub, L o R al elegir una misión muestra las de la aldea, para jugarlas con otros."},
+    {"HubHP", "A Village quest played in the Hub first multiplies the monster's health by this.",
+     "Una misión de la aldea jugada en el Hub primero multiplica la vida del monstruo por este valor."},
+    {"Language", "The language of this menu.", "El idioma de este menú."},
+    {"MenuScale", "The size of this menu.", "El tamaño de este menú."},
+    {"PauseInBackground", "The game stops while you are out of the app.", "El juego se detiene mientras estás fuera de la app."},
+    {"BonusContent", "Copies the free downloadable content (event quests, item packs, Palicoes) to a save that has not received it yet.",
+     "Copia el contenido descargable gratuito (misiones de evento, packs de objetos, Palicoes) a una partida que todavía no lo recibió."},
+};
+#endif
 std::string help_text(const Row &r) {
     if (!r.help.empty() || r.key.empty())
         return r.help;
+#ifdef __ANDROID__
+    for (const PhoneHelp &h : PHONE_HELP)
+        if (r.key == h.key) return s.draft.language == 1 ? h.es : h.en;
+#endif
     static std::vector<std::pair<std::string, std::string>> cache;  // (key, help in English)
     auto at = std::find_if(cache.begin(), cache.end(), [&](const auto &e) { return e.first == r.key; });
     if (at == cache.end()) {
@@ -2133,6 +2362,10 @@ std::string view_title() {
                     : s.view == View::Move       ? "Move menu"
                     : s.view == View::Conflicts  ? "Mod conflicts"
                     : s.view == View::Keybinds   ? "Keybinds"
+                    : s.view == View::TouchButtons ? "Buttons on the screen"
+                    : s.view == View::ComboEdit  ? "Combined button"
+                    : s.view == View::PadList    ? "Map a controller"
+                    : s.view == View::PadMap     ? "Map a controller"
                     : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
                                                  : "Unsaved changes");
 }
@@ -2492,7 +2725,7 @@ void touch_panel(bool *open, const Config &before) {
             for (const Row &r : rows)  // (as tall as the page's longest help: nothing shows it otherwise on a phone)
                 if (!r.header)
                     tall = std::max(tall, ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, std::max(f * 4, hw * .7f), help_text(r).c_str()).y);
-            float box = std::min(tall + pad * 1.7f, (bottom - top) * .45f);
+            float box = std::min(tall + f * .55f * 1.7f, (bottom - top) * .45f);  // (touch_help's own padding)
             list_rect = ImRect(lx, top, end, bottom - box - pad);
             help_rect = ImRect(lx, bottom - box, end, bottom);
         }

@@ -49,13 +49,13 @@ public class GameActivity extends SDLActivity {
         prepareFiles();
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        pickHighestRefreshRate();
+        pickRefreshRate();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        pickHighestRefreshRate();
+        pickRefreshRate();
     }
 
     /**
@@ -175,6 +175,56 @@ public class GameActivity extends SDLActivity {
         if (activity != null) activity.startActivity(new Intent(activity, SaveImportActivity.class));
     }
 
+    /** Ajustes -> Exportar partida. */
+    /** Ajustes -> Gráficos -> Driver de GPU. */
+    public static void showDrivers() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, DriverActivity.class));
+    }
+
+    public static void showSaveExport() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, SaveExportActivity.class));
+    }
+
+    /** Ajustes -> Compartir registro. */
+    public static void showShareLog() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, LogShareActivity.class));
+    }
+
+    /** El juego se cierra por un error (runtime/platform/android.c): la pantalla para compartir el registro, en su proceso. */
+    public static void crashReport() {
+        SDLActivity activity = mSingleton;
+        if (activity == null) throw new IllegalStateException("crashReport: no activity");
+        Intent intent = new Intent(activity, LogShareActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra(LogShareActivity.EXTRA_CRASH, true);
+        activity.startActivity(intent);
+    }
+
+    /** LAN (runtime/net/ldn.c): sin este permiso, muchos teléfonos descartan por Wi-Fi los paquetes de búsqueda de sala. */
+    public static void lanSearch(boolean on) {
+        SDLActivity activity = mSingleton;
+        if (activity == null) return;
+        try {
+            synchronized (GameActivity.class) {
+                if (lanLock == null) {
+                    android.net.wifi.WifiManager wifi = (android.net.wifi.WifiManager) activity.getApplicationContext().getSystemService(WIFI_SERVICE);
+                    if (wifi == null) return;
+                    lanLock = wifi.createMulticastLock("mhgu-lan");
+                    lanLock.setReferenceCounted(false);
+                }
+                if (on) lanLock.acquire();
+                else if (lanLock.isHeld()) lanLock.release();
+                Log.i(TAG, "LAN: Wi-Fi broadcasts " + (on ? "on" : "off"));
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "LAN: " + e);
+        }
+    }
+    private static android.net.wifi.WifiManager.MulticastLock lanLock;
+
     /** Ajustes -> Carpeta del juego. */
     public static void showGameFolder() {
         SDLActivity activity = mSingleton;
@@ -185,18 +235,31 @@ public class GameActivity extends SDLActivity {
         }
     }
 
-    /** La pantalla a su tasa de refresco más alta (120 Hz en el S25 Ultra) para poder pasar de 60 fps. */
-    private void pickHighestRefreshRate() {
+    private static volatile float frameCap;  // (el límite de FPS de los ajustes; 0: aún no se sabe, o sin límite)
+
+    /** El límite de FPS cambió (runtime/ui.c): la pantalla lo sigue. */
+    public static void setFrameCap(float fps) {
+        frameCap = fps;
+        SDLActivity activity = mSingleton;
+        if (activity instanceof GameActivity) activity.runOnUiThread(((GameActivity) activity)::pickRefreshRate);
+    }
+
+    /**
+     * La tasa de refresco más baja que alcanza para el límite de FPS, nunca menos de 60: una pantalla a 120 Hz con el juego
+     * a 60 gasta batería y calienta el teléfono sin mostrar nada más. Sin límite conocido, la más alta.
+     */
+    private void pickRefreshRate() {
         try {
             Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
             if (display == null) return;
-            Display.Mode current = display.getMode();
-            Display.Mode best = current;
+            Display.Mode current = display.getMode(), best = null, fastest = current;
+            float want = frameCap > 0 ? Math.max(frameCap, 60) - .5f : Float.MAX_VALUE;
             for (Display.Mode m : display.getSupportedModes()) {
-                if (m.getPhysicalWidth() == current.getPhysicalWidth() && m.getPhysicalHeight() == current.getPhysicalHeight()
-                        && m.getRefreshRate() > best.getRefreshRate())
-                    best = m;
+                if (m.getPhysicalWidth() != current.getPhysicalWidth() || m.getPhysicalHeight() != current.getPhysicalHeight()) continue;
+                if (m.getRefreshRate() > fastest.getRefreshRate()) fastest = m;
+                if (m.getRefreshRate() >= want && (best == null || m.getRefreshRate() < best.getRefreshRate())) best = m;
             }
+            if (best == null) best = fastest;
             WindowManager.LayoutParams lp = getWindow().getAttributes();
             lp.preferredDisplayModeId = best.getModeId();
             lp.preferredRefreshRate = best.getRefreshRate();

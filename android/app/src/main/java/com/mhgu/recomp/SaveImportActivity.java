@@ -51,7 +51,7 @@ public class SaveImportActivity extends Activity {
     private TextView status;
     private Button main, leave;
 
-    private static File home(Context c) {
+    static File home(Context c) {
         File f = c.getExternalFilesDir(null);
         return f != null ? f : c.getFilesDir();
     }

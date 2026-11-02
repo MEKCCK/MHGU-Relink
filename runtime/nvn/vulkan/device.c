@@ -74,7 +74,22 @@ static void disable_overwolf_layers(void) {
 static uint32_t instance_api;  // the Vulkan version asked of the instance
 extern bool maxwell_no_int64;   // (nvn/maxwell/translate.c)
 
+static uint32_t msaa_floor(uint32_t s);
+#ifdef __ANDROID__
+PFN_vkGetInstanceProcAddr gpu_driver_loader(void);  // (platform/android_gpu.c)
+bool gpu_driver_surface(SDL_Window *win, VkInstance inst, VkSurfaceKHR *out);
+void gpu_driver_good(void);
+#define make_surface() gpu_driver_surface(ui_window(), g_vk.inst, &g_vk.surface)
+#else
+#define make_surface() SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)
+#endif
+
 static void create_instance(void) {
+#ifdef __ANDROID__
+    PFN_vkGetInstanceProcAddr loader = gpu_driver_loader();
+    if (!loader) FATAL("no vkGetInstanceProcAddr: is there a Vulkan driver?\n");
+    volkInitializeCustom(loader);
+#endif
     disable_overwolf_layers();
     Uint32 n_sdl = 0;
     const char *const *sdl_ext = SDL_Vulkan_GetInstanceExtensions(&n_sdl);
@@ -110,6 +125,9 @@ static void create_instance(void) {
         r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     }
     if (r != VK_SUCCESS) FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
+#ifdef __ANDROID__
+    volkLoadInstance(g_vk.inst);  // (through the instance, as the library's own exports go; the device's are not bypassed)
+#endif
     if (validate) {
         PFN_vkCreateDebugUtilsMessengerEXT f =
             (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(g_vk.inst, "vkCreateDebugUtilsMessengerEXT");
@@ -267,6 +285,15 @@ static void create_device(void) {
     VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f, .queueCreateInfoCount = 1,
                              .pQueueCreateInfos = &qi, .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext};
     VK_CHECK(vkCreateDevice(g_vk.phys, &di, NULL, &g_vk.dev));
+#ifdef __ANDROID__
+    {   // (Vulkan 1.2's, and only by the device: the libvulkan of an older Android doesn't know them)
+        PFN_vkWaitSemaphores wait = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphores");
+        PFN_vkGetSemaphoreCounterValue value = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValue");
+        if (!wait) wait = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphoresKHR");
+        if (!value) value = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValueKHR");
+        vkWaitSemaphores = wait, vkGetSemaphoreCounterValue = value;
+    }
+#endif
     vkGetDeviceQueue(g_vk.dev, g_vk.qfam, 0, &g_vk.queue);
     LOG("[vk] features: divisor %d, custom border %d, BC %d, ASTC %d, exclusive full screen off %d\n", g_vk.divisor,
         g_vk.custom_border, h->textureCompressionBC, h->textureCompressionASTC_LDR, no_exclusive);
@@ -282,6 +309,7 @@ static void create_device(void) {
     for (uint32_t s = (uint32_t)g_config.msaa; s > 1 && g_vk.msaa == 1; s >>= 1)
         if (g_vk.msaa_counts & s) g_vk.msaa = s;
     if (g_vk.msaa != (uint32_t)g_config.msaa) LOG("[vk] MSAA %dx not supported: %ux\n", g_config.msaa, g_vk.msaa);
+    g_vk.msaa = msaa_floor(g_vk.msaa);
 
     VmaAllocatorCreateInfo ai = {.physicalDevice = g_vk.phys, .device = g_vk.dev, .instance = g_vk.inst,
                                  .vulkanApiVersion = g_vk.api12 ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1};
@@ -341,6 +369,18 @@ static void pipeline_cache_save(void) {
     free(data);
 }
 
+// An Adreno on a Vulkan 1.1 driver (seen: Adreno 710, 1.1.128) shows the 3D picture repeated in a grid over the screen with
+// a small 3D picture and no MSAA, in a hunt; with 2x it is right (the report's own test: 894x402). Why is not known and no
+// device here does it, so those drivers keep 2x below 720 lines, and nothing else changes
+static uint32_t msaa_floor(uint32_t s) {
+    if (s > 1 || g_vk.api12 || !strstr(g_vk.props.deviceName, "Adreno") || g_config.render_h >= 720 || !(g_vk.msaa_counts & 2)) return s;
+    static bool told;
+    if (!told) LOG("[vk] MSAA 2x kept: this Adreno driver repeats a small picture without it\n");
+    told = true;
+    return 2;
+}
+bool vk_gpu_adreno(void) { return strstr(g_vk.props.deviceName, "Adreno") != NULL; }
+
 // F7 (host_input.c): MSAA off -> 2x -> 4x -> 8x (those the GPU has) -> off, from the next pass on.
 void vk_cycle_msaa(void) {
     if (g_fsr_on) { LOG("[vk] MSAA stays off while FSR is on\n"); return; }
@@ -355,7 +395,7 @@ void vk_set_msaa(uint32_t n) {
     if (g_fsr_on) { LOG("[vk] MSAA stays off while FSR is on\n"); return; }
     uint32_t s = 1;
     for (uint32_t c = 2; c <= 8; c *= 2) if (c <= n && (g_vk.msaa_counts & c)) s = c;
-    g_vk.msaa = s;
+    g_vk.msaa = s = msaa_floor(s);
     LOG("[vk] MSAA %ux\n", s);
 }
 
@@ -544,7 +584,7 @@ static void android_window_check(void) {
     g_vk.swapchain = VK_NULL_HANDLE;
     if (g_vk.surface) vkDestroySurfaceKHR(g_vk.inst, g_vk.surface, NULL);
     g_vk.surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) {
+    if (!make_surface()) {
         LOG("[vk] SDL_Vulkan_CreateSurface after resume: %s\n", SDL_GetError());
         return;  // (tried again next frame)
     }
@@ -759,6 +799,9 @@ void backend_present(NvnTexture *t) {
     }
     g_frames++;
     g_present_count = g_frames;
+#ifdef __ANDROID__
+    if (g_frames == 120) gpu_driver_good();  // (a driver of the player's own has drawn: it stays)
+#endif
     touch_hud_frame();  // (the touch controls: where this frame's HUD parts were, runtime/touch.cpp)
     {   // (debug) MHGU_CONTROL "dump": the next whole frame's passes (exec.c dump_pass)
         extern volatile int g_dump_active, g_dump_request;
@@ -825,7 +868,7 @@ void backend_init(void) {
     done = true;
     if (!ui_window()) FATAL("no window\n");
     create_instance();
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+    if (!make_surface()) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
     pick_device();
     create_device();
     vk_exec_init();

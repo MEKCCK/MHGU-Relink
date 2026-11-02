@@ -22,7 +22,8 @@ file(GLOB RT_SRC ${S}/runtime/*.c ${S}/runtime/hle/*.c ${S}/runtime/services/*.c
 list(APPEND RT_SRC
   ${S}/runtime/nvn/objects.c ${S}/runtime/nvn/cmdbuf.c ${S}/runtime/nvn/nvn_args.c ${S}/runtime/nvn/tegra.c
   ${S}/runtime/nvn/formats.c ${S}/runtime/nvn/backend_null.c ${S}/runtime/nvn/astc.c ${S}/runtime/nvn/bcn.c ${S}/runtime/nvn/maxwell/translate.c
-  ${S}/runtime/platform/android.c ${S}/runtime/platform/android_vk.c ${S}/runtime/platform/android_perf.c
+  ${S}/runtime/platform/android.c ${S}/runtime/platform/android_gpu.c ${S}/runtime/platform/android_perf.c
+  ${S}/third_party/volk/volk.c
   ${S}/updater/sha256.c)
 
 set(IMGUI ${S}/third_party/cimgui)
@@ -77,8 +78,16 @@ target_link_options(mhguffmpeg PRIVATE -Wl,--whole-archive ${DEPS}/ffmpeg/lib/li
 target_link_libraries(mhguffmpeg PRIVATE m)
 set_target_properties(mhguffmpeg PROPERTIES LINK_DEPENDS  # (they are link options: a new build of them must relink it)
   "${DEPS}/ffmpeg/lib/libavformat.a;${DEPS}/ffmpeg/lib/libavcodec.a;${DEPS}/ffmpeg/lib/libavutil.a")
-target_link_libraries(main PRIVATE SDL3 mhguffmpeg
-  ${DEPS}/shaderc/lib/libshaderc_combined.a vulkan android log dl m z)
+# (the vk* of everything in it are volk's pointers, filled by runtime/platform/android_gpu.c: the system's driver, or the
+# player's own through libadrenotools)
+set(ADRENOTOOLS_GEN OFF)
+add_subdirectory(${S}/third_party/libadrenotools adrenotools)
+target_compile_definitions(main PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR VMA_STATIC_VULKAN_FUNCTIONS=1
+                           VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
+target_include_directories(main PRIVATE ${S}/third_party/volk)
+target_compile_options(main PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-include ${S}/third_party/volk/volk.h>")
+target_link_libraries(main PRIVATE SDL3 mhguffmpeg adrenotools
+  ${DEPS}/shaderc/lib/libshaderc_combined.a android log dl m z)
 # The game code library binds the runtime's functions (rt_dispatch, the NEON helpers...) by name: all exported.
 # The static libraries stay inside.
 target_link_options(main PRIVATE -Wl,--exclude-libs,ALL -Wl,--export-dynamic -Wl,-z,nostart-stop-gc)

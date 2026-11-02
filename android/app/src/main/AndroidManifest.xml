@@ -78,6 +78,29 @@
             android:screenOrientation="sensorLandscape"
             android:exported="false" />
 
+        <!-- Compartir el registro: en su propio proceso, que sigue vivo cuando el del juego se cerró por un error -->
+        <activity android:name=".LogShareActivity"
+            android:process=":share"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+        <provider android:name=".LogProvider"
+            android:authorities="com.mhgu.recomp.logs"
+            android:process=":share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <activity android:name=".DriverActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false" />
+
+        <activity android:name=".SaveExportActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false" />
+
         <activity android:name=".LicensesActivity"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"

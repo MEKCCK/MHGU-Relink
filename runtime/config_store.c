@@ -22,7 +22,7 @@ static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_binds[BINDS][BIND_KEYS],
-                     live_touch, live_touch_hud, live_touch_zl, live_touch_zr, live_touch_cam, live_touch_opacity,
+                     live_touch, live_touch_hud, live_touch_show[TB_COUNT], live_touch_combo[TOUCH_COMBOS], live_touch_combo_pad[TOUCH_COMBOS], live_touch_cam, live_touch_opacity, live_lock_on = {1},
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1};
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
@@ -55,8 +55,12 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->touch_controls != saved.touch_controls) SDL_SetAtomicInt(&live_touch, c->touch_controls);
     if (all || c->touch_hud != saved.touch_hud) SDL_SetAtomicInt(&live_touch_hud, c->touch_hud);
-    if (all || c->touch_zl != saved.touch_zl) SDL_SetAtomicInt(&live_touch_zl, c->touch_zl);
-    if (all || c->touch_zr != saved.touch_zr) SDL_SetAtomicInt(&live_touch_zr, c->touch_zr);
+    for (int i = 0; i < TB_COUNT; i++) SDL_SetAtomicInt(&live_touch_show[i], c->touch_show[i]);
+    for (int i = 0; i < TOUCH_COMBOS; i++) {
+        SDL_SetAtomicInt(&live_touch_combo[i], (int)config_combo_mask(c->touch_combo[i]));
+        SDL_SetAtomicInt(&live_touch_combo_pad[i], c->touch_combo_pad[i]);
+    }
+    if (all || c->lock_on != saved.lock_on) SDL_SetAtomicInt(&live_lock_on, c->lock_on);
     if (all || c->touch_camera != saved.touch_camera) set_float(&live_touch_cam, c->touch_camera);
     if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
     if (all || c->touch_vibration != saved.touch_vibration) SDL_SetAtomicInt(&live_touch_vibration, c->touch_vibration);
@@ -110,8 +114,32 @@ int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_touch_controls(void) { return SDL_GetAtomicInt(&live_touch); }
 int config_live_touch_hud(void) { return SDL_GetAtomicInt(&live_touch_hud); }
-int config_live_touch_zl(void) { return SDL_GetAtomicInt(&live_touch_zl); }
-int config_live_touch_zr(void) { return SDL_GetAtomicInt(&live_touch_zr); }
+int config_live_lock_on(void) { return SDL_GetAtomicInt(&live_lock_on); }
+int config_live_touch_show(int button) { return SDL_GetAtomicInt(&live_touch_show[button]); }
+uint32_t config_live_touch_combo(int index) { return (uint32_t)SDL_GetAtomicInt(&live_touch_combo[index]); }
+int config_live_touch_combo_pad(int index) { return SDL_GetAtomicInt(&live_touch_combo_pad[index]); }
+
+// The names of a combined button's parts, in BTN_* order (hle/input.h)
+static const char *const COMBO_NAMES[16] = {"A", "B", "X", "Y", "L3", "R3", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down"};
+uint32_t config_combo_mask(const char *text) {
+    uint32_t mask = 0;
+    while (*text) {
+        const char *end = strchr(text, '+');
+        size_t n = end ? (size_t)(end - text) : strlen(text);
+        bool known = false;
+        for (int i = 0; i < 16; i++)
+            if (strlen(COMBO_NAMES[i]) == n && !strncmp(text, COMBO_NAMES[i], n)) mask |= 1u << i, known = true;
+        if (!known) return 0;
+        text += n + (end ? 1 : 0);
+    }
+    return mask;
+}
+void config_combo_text(uint32_t mask, char *out, size_t size) {
+    size_t n = 0;
+    out[0] = 0;
+    for (int i = 0; i < 16; i++)
+        if (mask >> i & 1) n += (size_t)snprintf(out + n, size - n, "%s%s", n ? "+" : "", COMBO_NAMES[i]);
+}
 float config_live_touch_camera(void) { return get_float(&live_touch_cam); }
 float config_live_touch_opacity(void) { return get_float(&live_touch_opacity); }
 int config_live_touch_vibration(void) { return SDL_GetAtomicInt(&live_touch_vibration); }

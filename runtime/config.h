@@ -33,6 +33,14 @@ enum {
 #define HP_QUESTS_MAX 256
 #define HP_SCALE_MIN 0.05f
 #define HP_SCALE_MAX 20.0f
+// The game's buttons, for showing each on the screen or not ([Touch] Show*: runtime/touch.cpp)
+enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, TB_L, TB_ZL, TB_ZR, TB_L3, TB_R3, TB_STICK,
+       TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_COUNT };
+#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0}
+#define TOUCH_COMBOS 6
+// a controller's buttons a combined button can be on (the less used ones)
+enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
+       PADB_TOUCHPAD, PADB_COUNT };
 typedef struct {
     float scale[4];  // by the number of hunters (index: hunters - 1)
     float village;   // Village quests posted in the Hub / Pub: this first, then scale ([Village Quests] HubHP)
@@ -99,9 +107,15 @@ typedef struct {
     int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
     int show_stats;           // [Performance] ShowStats: the frame rate and the phone's temperature on screen (perfstats)
     int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
-    int touch_zl, touch_zr;   // [Touch] ShowZL, ShowZR: those buttons on the screen (last: 0 by default)
     int low_end;              // [Performance] LowEnd: a weak GPU's frame (nvn/vulkan/exec.c lowend_skipped; last: 0 by default)
+    int lock_on;              // [Controls] LockOn: the camera stays on the monster, and with it a bow's or gun's shots (touch.cpp)
+    int touch_show[TB_COUNT]; // [Touch] Show*: which of the game's buttons are on the screen in a hunt (runtime/touch.cpp)
+    char touch_combo[TOUCH_COMBOS][32];  // [Touch] Combo1..: the game's buttons one screen button presses together
+                                         // ("A+X"; config_combo_mask); "" none
+    int touch_combo_pad[TOUCH_COMBOS];   // [Touch] Combo1Pad..: PADB_*, a controller's button that does the same
 } Config;
+uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
+void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // none). "" = no default: no internet hubs unless the player names a server.
 #define LDN_DEFAULT_SERVER ""
@@ -185,8 +199,10 @@ int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_touch_controls(void);  // [Touch] (runtime/touch.cpp)
 int config_live_touch_hud(void);
-int config_live_touch_zl(void);
-int config_live_touch_zr(void);
+int config_live_lock_on(void);
+int config_live_touch_show(int button);        // TB_*
+uint32_t config_live_touch_combo(int index);   // its buttons (config_combo_mask)
+int config_live_touch_combo_pad(int index);    // PADB_*
 float config_live_touch_camera(void);
 float config_live_touch_opacity(void);
 int config_live_touch_vibration(void);  // [Touch] Vibration

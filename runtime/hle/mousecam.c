@@ -17,14 +17,27 @@
 // The lock-on (runtime/touch.cpp: the target icon, a long press on L, a controller's right stick click): in the same
 // hook, the camera turns toward the nearest large monster every update, eased, as in the newer games. The camera's
 // yaw unit u looks along (x, z) = (-sin, -cos)(u * 2 pi / 0x10000) (measured on a Galaxy S25: the eye +0x40 toward the
-// target point +0x60); its pitch is positive looking up. Monsters: sEnemy (0x1a51fe0) +0x1c, ten slots; each
+// target point +0x60); its pitch is positive looking up. Only a monster in the hunter's zone of the map counts (+0x1054
+// of each: the game's own "(Diff Area)"), or the camera would stare at a wall. Monsters: sEnemy (0x1a51fe0) +0x1c, ten slots; each
 // one's status block (+0x1428) has its place at +0x40 and a network id at +0x1b6 (a large monster's below 10000).
+//
+// A shot with the lock-on on goes to the monster: arrows and shells leave along the hunter's heading (hunter +0x14a0, in
+// the camera's units; (x, z) = (sin, cos); written, the hunter turns at once; +0xfec and +0x2ee4 are copies of it; its
+// place is at +0xa0; measured on a Motorola g06). So with a bow or a bowgun, while the fire button is held and a moment
+// after, the heading is set toward the monster; aiming (R held) keeps it there while the camera is not being turned by
+// hand, and the camera follows the hunter's heading then.
+//
+// The height: aiming, the shot leaves along the aim's pitch: hunter +0x14b8 (a float, -100 down .. 100 up; +0x14bc a copy),
+// from which the game makes +0x2714 (16-bit units: 100 is 45 degrees up, -100 is 30 down). A shot that isn't aimed ignores
+// them, it leaves level whatever they say (a Motorola g06: a shell in the same place at 0 and at -30 degrees), so with the
+// lock-on on a gun's fire button aims first (runtime/touch.cpp).
 #include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
 
 #include "../config.h"
 #include "../hle.h"
+#include "input.h"
 #include "mousecam.h"
 
 #define FN_CAMERA_STICK 0x2255ccu  // uQuestCamera's right stick handler: r0 = the camera, r1 = the invert bits
@@ -56,6 +69,15 @@ void mousecam_add(float dx, float dy) {
 static int clamp_pitch(int p) { return p < -PITCH_MAX ? -PITCH_MAX : p > PITCH_MAX ? PITCH_MAX : p; }
 
 bool touch_lock_active(void);  // (runtime/touch.cpp: the lock-on is on and the player is not turning the camera)
+bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doing)
+#define ZONE       0x1054u       // (u8, of a hunter and of a monster: which zone of the map it is in)
+#define PL_HEADING 0x14a0u
+#define PL_AIM     0x14b8u       // (float: the aim's pitch)
+#define PL_AIM2    0x14bcu
+#define PL_PITCH   0x2714u       // (u16: the same in the camera's units)
+#define MUZZLE_Y   110.0f        // (a shot leaves this far above the hunter's feet)
+#define PL_PLACE   0xa0u
+#define SHOT_NS    400000000ull  // (the fire button let go: the shot may leave a little later, on a bow always)
 #define G_SENEMY 0x1a51fe0u
 #define LOCK_TAU 0.12f       // seconds for the camera to turn ~63% of the way to the monster (eased)
 #define LOCK_RANGE 6000.0f   // (a monster farther away from the hunter than this is not followed)
@@ -71,12 +93,13 @@ static bool lock_target(float x, float y, float z, float out[3]) {
     uint32_t sen = LD32(G_SENEMY);
     if (!sane(sen)) return false;
     float best = LOCK_RANGE * LOCK_RANGE, cur_d = -1.0f, cur[3] = {0};
-    uint32_t best_en = 0;
+    uint32_t best_en = 0, hunter = weapon_hunter();
     for (int k = 0; k < 10; k++) {
         uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info = sane(en) ? LD32(en + 0x1428) : 0;
         if (!sane(info)) continue;
         uint32_t id = LD16(info + 0x1b6);
         if (id == 0xffff || id >= 10000) continue;
+        if (hunter && LD8(en + ZONE) != LD8(hunter + ZONE)) continue;
         float mx = LDF(info + 0x40), my = LDF(info + 0x44), mz = LDF(info + 0x48);
         if (!isfinite(mx) || !isfinite(my) || !isfinite(mz)) continue;
         float d = (mx - x) * (mx - x) + (mz - z) * (mz - z);
@@ -122,6 +145,36 @@ static void lock_follow(uint32_t cam, float dt) {
         ST32(cam + QC_PITCH_TO, (uint32_t)next & 0xffffu);
         ST32(cam + QC_PITCH_NOW, (uint32_t)now_p & 0xffffu);
     }
+}
+
+// A bow's or a bowgun's shot, with the lock-on on: the hunter turned to the monster, and its aim raised to it (see the top)
+void mousecam_lock_shot(void) {
+    static uint64_t fired;
+    uint32_t h = weapon_hunter();
+    int ranged = weapon_ranged(h);
+    if (!ranged || !touch_lock_on()) return;
+    uint64_t b, now = plat_now_ns();
+    int32_t sticks[4];
+    input_get(&b, sticks);
+    // (a bowgun: A fires; a bow: what draws it, by the game's Bow Controls; A is its melee attack)
+    bool fire = (b & (ranged != WEAPON_BOW ? 1ull << BTN_A : weapon_bow_type() ? 1ull << BTN_R : 1ull << BTN_X)) != 0;
+    if (fire) fired = now;
+    bool aiming = weapon_aiming(h);
+    if (!(aiming && touch_lock_active()) && !((fire || now - fired < SHOT_NS) && (aiming || weapon_moving(h)))) return;
+    float x = LDF(h + PL_PLACE), y = LDF(h + PL_PLACE + 4), z = LDF(h + PL_PLACE + 8), t[3];
+    if (!isfinite(x) || !lock_target(x, y, z, t)) return;
+    float dx = t[0] - x, dz = t[2] - z, dist = sqrtf(dx * dx + dz * dz);
+    if (dist < LOCK_NEAR0) return;  // (under it: the bearing swings)
+    const float U = 65536.0f / (2.0f * 3.14159265f);
+    ST32(h + PL_HEADING, (uint32_t)lrintf(atan2f(dx, dz) * U) & 0xffffu);
+    if (!aiming && ranged != WEAPON_BOW) return;
+    float rise = atan2f(t[1] + LOCK_HEIGHT - (y + MUZZLE_Y), dist);  // (radians; up is positive)
+    const float UP = 45.0f * 3.14159265f / 180.0f, DOWN = 30.0f * 3.14159265f / 180.0f;
+    if (rise > UP) rise = UP;
+    if (rise < -DOWN) rise = -DOWN;
+    float aim = 100.0f * rise / (rise >= 0.0f ? UP : DOWN);
+    STF(h + PL_AIM, aim), STF(h + PL_AIM2, aim);
+    ST16(h + PL_PITCH, (uint16_t)(int16_t)lrintf(rise * U));
 }
 
 // (debug) MHGU_CAMLOG=1: twice a second, the hunt camera (eye, target, its angles) and the large monsters' places
