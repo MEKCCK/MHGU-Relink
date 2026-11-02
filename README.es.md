@@ -27,6 +27,7 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 - El teclado del teléfono sirve para escribir el nombre de tu personaje
 - El menú de opciones se usa con el dedo y tiene el estilo visual del juego
 - **Beber y comer más rápido:** dos trucos opcionales, apagados por defecto, en el engranaje, **Trucos**. Aceleran la animación x1,7 o x2,5, pero no permiten caminar mientras bebes
+- Importa tu partida desde un emulador o desde otro dispositivo
 - El juego se pausa solo cuando sales de la app
 - Vibración al tocar los botones y vibración del juego en el teléfono, con o sin joystick
 
@@ -138,6 +139,18 @@ La app revisa la carpeta, te dice exactamente qué falta si algo está mal y arr
 
 Tus partidas y ajustes se guardan aparte, en `Android/data/com.mhgu.recomp/files`. Para elegir otra carpeta después: engranaje,
 **Opciones del menú**, **Carpeta del juego**.
+
+## Importar tu partida
+
+Puedes traer tu partida desde un emulador o desde otro dispositivo:
+
+1. Busca el archivo `system` de tu partida. En Ryujinx: clic derecho en el juego, **Open User Save Directory**. En yuzu: clic derecho
+   en el juego, **Open Save Data Location**.
+2. Copia ese archivo a tu dispositivo, por ejemplo a Descargas.
+3. En el juego, entra al engranaje, **Opciones del menú**, **Importar partida**, y elige el archivo.
+
+Se reemplazan todos los personajes del dispositivo y el juego se reinicia. Tu partida anterior queda guardada en
+`Android/data/com.mhgu.recomp/files/MHGURecomp/save_backups`.
 
 ## Samsung: Game Booster
 

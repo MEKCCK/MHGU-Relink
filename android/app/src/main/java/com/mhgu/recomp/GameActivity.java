@@ -169,6 +169,12 @@ public class GameActivity extends SDLActivity {
         if (activity != null) activity.startActivity(new Intent(activity, LicensesActivity.class));
     }
 
+    /** Ajustes -> Importar partida. */
+    public static void showSaveImport() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, SaveImportActivity.class));
+    }
+
     /** Ajustes -> Carpeta del juego. */
     public static void showGameFolder() {
         SDLActivity activity = mSingleton;
@@ -203,6 +209,7 @@ public class GameActivity extends SDLActivity {
 
     /** Crea las carpetas del jugador y copia lo que el APK trae para ellas (la lista de pipelines). */
     private void prepareFiles() {
+        SaveImportActivity.applyPending(this);  // (before the game: Ajustes -> Importar partida)
         File home = getExternalFilesDir(null);
         if (home == null) home = getFilesDir();
         new File(home, "data").mkdirs();

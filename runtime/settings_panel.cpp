@@ -1378,6 +1378,8 @@ std::vector<Row> main_rows() {
 #ifdef __ANDROID__
         action(r, "game.folder", tr("Game folder"), []() { ui_request_game_folder(); });
         r.back().help = tr("Where the game's exefs and romfs are read from. A new folder is used the next time the game starts.");
+        action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });
+        r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });
 #endif
         if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)

@@ -73,6 +73,11 @@
         </activity>
 
         <!-- Ajustes -> Licencias -->
+        <activity android:name=".SaveImportActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false" />
+
         <activity android:name=".LicensesActivity"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"

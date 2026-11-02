@@ -27,6 +27,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 - Your phone's keyboard works for typing your character's name
 - The settings menu works by touch and matches the game's look
 - **Faster drinking and eating:** two optional cheats, off by default, under the gear, **Cheats**. They speed up the animation x1.7 or x2.5, but they don't let you walk while drinking
+- Import your save from an emulator or another device
 - The game pauses by itself when you leave the app
 - Vibration on button taps, and the game's rumble on your phone, with or without a controller
 
@@ -138,6 +139,18 @@ The app checks the folder, tells you exactly what is missing if something is wro
 
 Your saves and settings are kept separately, in `Android/data/com.mhgu.recomp/files`. To choose another folder later: gear
 button, **Menu Options**, **Game folder**.
+
+## Import your save
+
+You can bring your save from an emulator or another device:
+
+1. Find your save's file named `system`. In Ryujinx: right-click the game, **Open User Save Directory**. In yuzu: right-click the game,
+   **Open Save Data Location**.
+2. Copy that file to your device, for example to Downloads.
+3. In the game, go to the gear, **Menu Options**, **Import save**, and choose the file.
+
+All the characters on the device are replaced and the game restarts. Your previous save is kept in
+`Android/data/com.mhgu.recomp/files/MHGURecomp/save_backups`.
 
 ## Samsung: Game Booster
 

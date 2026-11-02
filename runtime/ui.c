@@ -28,6 +28,7 @@ bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 #ifdef __ANDROID__
 void ui_request_licenses(void) { SDL_SetAtomicInt(&requested_action, 3); }
 void ui_request_game_folder(void) { SDL_SetAtomicInt(&requested_action, 4); }
+void ui_request_save_import(void) { SDL_SetAtomicInt(&requested_action, 5); }
 static void activity_call(const char *method) {  // (a static void method of GameActivity: as restart_application)
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
@@ -241,6 +242,7 @@ int ui_run(void) {
 #ifdef __ANDROID__
         if (action == 3) activity_call("showLicenses");
         if (action == 4) activity_call("showGameFolder");
+        if (action == 5) activity_call("showSaveImport");
 #endif
         if (action == 2) {
             if (restart_application()) exit(0);

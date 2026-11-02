@@ -268,6 +268,11 @@ public class GameFolderActivity extends Activity {
         row.addView(leave, size2);
         row.setPadding(0, 0, 0, dp(10));
         whole.addView(row);
+        whole.setOnApplyWindowInsetsListener((v, insets) -> {  // (the buttons stay above the system's bar)
+            v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         setContentView(whole);
         pick.requestFocus();  // (a console's pad: A presses it)
         refreshButton();

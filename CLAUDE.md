@@ -33,7 +33,8 @@ To diagnose a device: `adb logcat -s MHGU`, or `Android/data/com.mhgu.recomp/fil
 - `runtime/`: the host runtime. `touch.cpp` touch controls and editor, `settings_panel.cpp` the menu, `nvn/vulkan/` the renderer,
   `hle/` game hooks, `platform/android*.c` Android, `config.c` settings and first-run defaults.
 - `tools/`: `gen.py`, `lifter.py`, `neon.py`, `nso.py` translate the game; `build_game.py` is the person's tool.
-- `android/`: the app. `GameFolderActivity` is the entry screen, `GameActivity` runs the game.
+- `android/`: the app. `GameFolderActivity` is the entry screen, `GameActivity` runs the game, `SaveImportActivity` imports a save
+  (it is only applied at the next start, before the game runs, so the game can't save over it).
 - `native/`: CMake and `build_native.sh`. `deps/`: scripts for SDL3, shaderc and FFmpeg.
 
 ## Building
