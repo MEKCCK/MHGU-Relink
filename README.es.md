@@ -69,7 +69,7 @@ Para que vaya más rápido, entra al engranaje, **Pantalla**, baja la **Resoluci
 
 ## Qué necesitas
 
-- **Un dispositivo Android:** Android 10 o superior, de 64 bits, con Vulkan 1.2. Casi cualquiera de los últimos años.
+- **Un dispositivo Android:** Android 10 o superior, de 64 bits, con Vulkan 1.2. Casi cualquiera de los últimos años. Con Vulkan 1.1 funciona de forma experimental.
 - **Unos 13 GB libres** en el dispositivo.
 - **Una PC con Windows o Linux,** solo para la instalación, con unos 10 GB libres.
 - **Tu propia copia del juego,** actualizada a la versión 1.4.0.

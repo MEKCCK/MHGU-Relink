@@ -34,7 +34,9 @@ typedef struct {
     VmaAllocator vma;
     VkPhysicalDeviceProperties props;
     VkPipelineCache pcache;
-    VkSemaphore timeline;      // value = last completed submission number
+    VkSemaphore timeline;      // value = last completed submission number (none on a Vulkan 1.1 driver: fences, exec.c)
+    bool api12, has_timeline;  // the device works as Vulkan 1.2 or later; it has timeline semaphores
+    bool mirror_clamp;         // the mirror-clamp sampler mode can be used
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
     volatile uint32_t msaa;    // samples for the 3D scene's passes (settings MSAA, as far as the GPU allows): 1 = off

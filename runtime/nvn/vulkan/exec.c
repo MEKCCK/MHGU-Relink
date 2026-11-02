@@ -11,12 +11,14 @@
 //   MHGU_SKIP_LOG=1       every draw skipped for a building program / pipeline: its shaders and colour target
 //   MHGU_NO_PREWARM=1     don't translate the game's programs ahead of their first use (see "prewarm"; the ini's
 //                         [Performance] ShaderPrewarm = Off does the same)
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>  // ftruncate (mingw pulls it in through another header; POSIX does not)
 
 #include "../../kernel.h"
@@ -74,7 +76,59 @@ static pthread_mutex_t seq_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool in_pass;
 static void ss_forget(void);
 
+// Without timeline semaphores (a Vulkan 1.1 driver) each submission signals a fence, one per slot of the ring: sub()
+// waits for a slot's old submission, so its fence is free again by then. A fence can't be reset while another thread
+// waits for it, and any thread may wait for a submission here: so this one thread waits for them all, in order, resets
+// each and only then says it is done.
+static VkFence seq_fence[SUBS];
+static pthread_mutex_t fence_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t fence_cond = PTHREAD_COND_INITIALIZER;
+static uint64_t fence_queued;        // the last submission with a fence (under fence_lock)
+static _Atomic uint64_t fence_done;  // the last one finished, its fence ready (written under fence_lock)
+
+static void *fence_thread(void *arg) {
+    (void)arg;
+    for (uint64_t seq = 1;; seq++) {
+        pthread_mutex_lock(&fence_lock);
+        while (fence_queued < seq) pthread_cond_wait(&fence_cond, &fence_lock);
+        pthread_mutex_unlock(&fence_lock);
+        VkFence f = seq_fence[seq % SUBS];
+        VkResult r;
+        while ((r = vkWaitForFences(g_vk.dev, 1, &f, VK_TRUE, 10ull * 1000000000ull)) == VK_TIMEOUT)
+            LOG("[vk] GPU did not finish submission %llu within 10 s (device lost?)\n", (unsigned long long)seq);
+        if (r != VK_SUCCESS) {
+            if (vk_exiting()) return NULL;
+            FATAL("vkWaitForFences: %d (device lost)\n", r);
+        }
+        VK_CHECK(vkResetFences(g_vk.dev, 1, &f));
+        pthread_mutex_lock(&fence_lock);
+        atomic_store(&fence_done, seq);
+        pthread_cond_broadcast(&fence_cond);
+        pthread_mutex_unlock(&fence_lock);
+    }
+}
+
+static void fence_init(void) {
+    VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    for (int i = 0; i < SUBS; i++) VK_CHECK(vkCreateFence(g_vk.dev, &fi, NULL, &seq_fence[i]));
+    pthread_t t;
+    if (pthread_create(&t, NULL, fence_thread, NULL)) FATAL("the fence thread could not start\n");
+    pthread_detach(t);
+}
+
+static VkResult fence_wait(uint64_t seq) {  // (as vkWaitSemaphores: up to 10 s)
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += 10;
+    int e = 0;
+    pthread_mutex_lock(&fence_lock);
+    while (atomic_load(&fence_done) < seq && e != ETIMEDOUT) e = pthread_cond_timedwait(&fence_cond, &fence_lock, &until);
+    pthread_mutex_unlock(&fence_lock);
+    return e == ETIMEDOUT ? VK_TIMEOUT : VK_SUCCESS;
+}
+
 uint64_t vk_completed_seq(void) {
+    if (!g_vk.has_timeline) return atomic_load(&fence_done);
     uint64_t v = 0;
     vkGetSemaphoreCounterValue(g_vk.dev, g_vk.timeline, &v);
     return v;
@@ -95,7 +149,7 @@ void vk_wait_seq(uint64_t seq) {
     uint64_t t0_ = plat_now_ns();
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_vk.timeline,
                               .pValues = &seq};
-    VkResult r = vkWaitSemaphores(g_vk.dev, &wi, 10ull * 1000000000ull);
+    VkResult r = g_vk.has_timeline ? vkWaitSemaphores(g_vk.dev, &wi, 10ull * 1000000000ull) : fence_wait(seq);
     uint64_t d_ = plat_now_ns() - t0_;
     stat_wait_ns += d_;
     if (site >= 0 && site < W_SITES) {
@@ -184,7 +238,19 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .waitSemaphoreCount = wait ? 1 : 0,
                        .pWaitSemaphores = &wait, .pWaitDstStageMask = &wait_stage, .commandBufferCount = n,
                        .pCommandBuffers = cbs, .signalSemaphoreCount = signal ? 2 : 1, .pSignalSemaphores = sig};
-    VK_CHECK(vkQueueSubmit(g_vk.queue, 1, &si, VK_NULL_HANDLE));
+    VkFence fence = VK_NULL_HANDLE;
+    if (!g_vk.has_timeline) {
+        si.pNext = NULL;
+        si.signalSemaphoreCount = signal ? 1 : 0, si.pSignalSemaphores = &signal;
+        fence = seq_fence[(submit_seq + 1) % SUBS];
+    }
+    VK_CHECK(vkQueueSubmit(g_vk.queue, 1, &si, fence));
+    if (fence) {
+        pthread_mutex_lock(&fence_lock);
+        fence_queued = submit_seq + 1;
+        pthread_cond_broadcast(&fence_cond);
+        pthread_mutex_unlock(&fence_lock);
+    }
     atomic_fetch_add(&stat_submits, 1);
     pthread_mutex_lock(&seq_lock);
     submit_seq++;
@@ -694,7 +760,10 @@ static void st_defaults(void) {
     for (int i = 0; i < 8; i++) { st.blend[i][1] = 2; st.blend[i][2] = 1; st.blend[i][3] = 2; st.blend[i][4] = 1; st.blend[i][5] = 1; st.blend[i][6] = 1; }
 }
 
-void vk_exec_init(void) { st_defaults(); }
+void vk_exec_init(void) {
+    st_defaults();
+    if (!g_vk.has_timeline) fence_init();
+}
 
 // ================================================================== render passes and framebuffers
 static pthread_mutex_t rp_lock = PTHREAD_MUTEX_INITIALIZER;  // (pipeline workers ask for render passes too)

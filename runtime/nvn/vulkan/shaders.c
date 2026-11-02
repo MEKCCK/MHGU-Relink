@@ -139,6 +139,7 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
         for (int i = 0; i < ndefs; i++)
             for (const char *p = defs[i]; ; p++) { h ^= (uint8_t)*p; h *= 0x100000001B3ull; if (!*p) break; }
     }
+    if (!g_vk.api12) h ^= 0x5D1F0B2C7A914E63ull;  // (SPIR-V 1.3, not 1.5: other entries in the disk cache)
     static int nocache = -1;
     if (nocache < 0) nocache = getenv("MHGU_VK_NO_SPIRV_CACHE") != NULL;
     uint32_t *out = nocache ? NULL : cache_load(h, nwords);
@@ -146,7 +147,8 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
     static __thread shaderc_compiler_t comp;
     if (!comp) comp = shaderc_compiler_initialize();
     shaderc_compile_options_t o = shaderc_compile_options_initialize();
-    shaderc_compile_options_set_target_env(o, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
+    shaderc_compile_options_set_target_env(o, shaderc_target_env_vulkan,
+                                           g_vk.api12 ? shaderc_env_version_vulkan_1_2 : shaderc_env_version_vulkan_1_1);
     shaderc_compile_options_set_optimization_level(o, ndefs || inc ? opt ? shaderc_optimization_level_size : shaderc_optimization_level_zero
                                                    : getenv("MHGU_VK_OPT") ? shaderc_optimization_level_performance
                                                                            : shaderc_optimization_level_zero);

@@ -59,6 +59,8 @@ A test build (`MHGU_DEV=1`) reads two files in `Android/data/com.mhgu.recomp/fil
 - `control.txt`: appended commands, read while the game runs. `A 8`, `DOWN 8`, `type <text>`, `textkey enter`,
   `memsave <hex address> <hex size> <file>`, and `gpuprof` for one frame's time per render pass.
 
+What the app writes to `cache/` under `Android/data` can't be deleted over adb, so a test folder under `MHGU_HOME` stays until the app removes it.
+
 Empty `control.txt` before starting: old commands replay. `3D resolution` needs a restart: until then the menu says so and the old
 one is still running.
 
@@ -72,6 +74,8 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   5 GB of RAM textures with mipmaps lose their largest level (`mip_skip`, `nvn/vulkan/textures.c`). Without this a 4 GB phone was killed.
 - FXAA leaves a 2 px green line at the edges on Mali and costs about a fifth of the frame rate, so it is off by default on Android.
   The cause is unknown.
+- A Vulkan 1.1 driver (seen: Mali-G57 MC2, 1.1.177) has no timeline semaphores: each submission gets a fence and one thread waits for them
+  (`nvn/vulkan/exec.c`). It also gets SPIR-V 1.3 and no FSR. `MHGU_VK11=1` in `env.txt` forces that path on a newer driver.
 - Samsung ignores the manifest's game category. Only the one set by the installer counts: see `GameFolderActivity.declareGame`.
 - On Android, a `SUBOPTIMAL` result from present must not recreate the swapchain: doing so cost two thirds of the frame rate.
 - The hunter has one class per weapon: never compare against one vtable. Virtual 94 tells a hunter of any weapon and whether the

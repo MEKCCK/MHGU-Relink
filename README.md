@@ -69,7 +69,7 @@ go to the gear button, **Display**, lower **3D resolution**, and restart the gam
 
 ## What you need
 
-- **An Android device:** Android 10 or newer, 64-bit, with Vulkan 1.2. Almost any device from the last few years.
+- **An Android device:** Android 10 or newer, 64-bit, with Vulkan 1.2. Almost any device from the last few years. Vulkan 1.1 works experimentally.
 - **About 13 GB free** on the device.
 - **A Windows or Linux PC,** only for setup, with about 10 GB free.
 - **Your own copy of the game,** updated to version 1.4.0.
