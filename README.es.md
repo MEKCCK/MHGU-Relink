@@ -19,7 +19,7 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 - **Layout propio para arcos y ballestas:** con uno en la mano, en una cacería, los controles cambian solos: un disparo grande bajo el pulgar, recarga, mira con un toque o apuntado rápido si lo mantienes, fuego agachado, y flechas para la munición. Si arrastras sobre el disparo mientras lo mantienes, también apuntas. Respeta la opción Bow Controls del juego y se acomoda aparte en el editor
 - **Cambiar munición al deslizar:** además de las flechas, desliza hacia arriba o abajo sobre la barra de ítems. La lista del juego ahora se ve completa, con los nombres de cada munición
 - **Disparos con el monstruo fijado:** salen hacia él, también si está más alto o más bajo que tú. Para elevar el tiro, una ballesta entra un momento en apuntado rápido. Sin fijarlo, apuntas como siempre
-- **Objetos:** la barra queda abajo al centro. Tócala para usar el objeto y deslízala para cambiarlo
+- **Objetos:** la barra queda abajo al centro. Tócala para usar el objeto y deslízala para cambiarlo. También puedes activar flechas a sus lados: en el engranaje, **Controles**, **Botones en pantalla**, **Flechas de ítems**
 - **Hunter Arts:** toca el panel de cada una para usarla
 - **Ataques:** tres disposiciones a elegir: píldora dividida en diagonal, botones separados o una banda en U en la esquina de la pantalla
 - **Otros botones:** esquivar, cubrirse y enfundar el arma, cada uno con su ícono
@@ -198,6 +198,7 @@ puntos, **Añadir juegos**.
 | "Falta libmhgugame.so" | Haz el paso 2 y copia los dos archivos nuevos a la carpeta de tu dispositivo |
 | "Este libmhgugame.so es de otra versión" | Una versión nueva de la app lo necesita otra vez: repite el paso 2 con la nueva descarga |
 | El juego se cierra solo | Cierra otras apps y baja la Resolución 3D. Suele ser falta de memoria |
+| Pantalla negra con solo los controles táctiles, o se cierra al presionar A | La copia de `romfs` a tu dispositivo no terminó. Cópiala de nuevo y revisa que ocupe 12,3 GB |
 
 Si sigue fallando, abre un [issue](../../issues) y adjunta el registro. Si el juego se cierra por un error, aparece una pantalla para
 compartirlo; si no, está en el engranaje, **Opciones del menú**, **Compartir registro**. No adjuntes archivos del juego.

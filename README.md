@@ -19,7 +19,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 - **A layout of their own for bows and bowguns:** with one in hand, in a hunt, the controls change by themselves: a large fire button under your thumb, reload, the scope with a tap or quick aim if you hold it, crouching fire, and arrows for the ammo. Drag on the fire button while you hold it to aim. It follows the game's Bow Controls option and has its own place in the editor
 - **Change ammo with a swipe:** besides the arrows, swipe up or down on the item bar. The game's list now shows whole, with each ammo's name
 - **Shots with a monster locked on:** they go toward it, even if it is higher or lower than you. To raise the shot, a bowgun goes into quick aim for a moment. Without the lock you aim as always
-- **Items:** the bar sits at the bottom center. Tap it to use the item and swipe it to change the item
+- **Items:** the bar sits at the bottom center. Tap it to use the item and swipe it to change the item. You can also turn on arrows beside it: under the gear, **Controls**, **Buttons on the screen**, **Item arrows**
 - **Hunter Arts:** tap each one's panel to use it
 - **Attacks:** three layouts to choose from: a diagonally split pill, separate buttons, or a U-shaped band in the corner of the screen
 - **Other buttons:** dodge, guard and sheathe, each with its own icon
@@ -53,7 +53,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 - The screen follows your FPS limit: at 60 fps it runs at 60 Hz even if it can do 120
 - **If your phone runs hot, lower the FPS limit.** Nothing helps more: going from 120 to 60 used a quarter to a third less power on a Galaxy S25 Ultra, and going from 60 to 30 a fifth less on a Moto g06
 - On Mali GPUs textures are decoded on several cores, to reduce stutter
-- **Your own GPU driver:** Adreno only, at your own risk. Under the gear, **Graphics and audio**, **GPU driver**, add a .zip with `meta.json` and the library. By default the system's is used, and if one fails at start the app goes back to it by itself
+- **Your own GPU driver:** Adreno only, at your own risk. Under the gear, **Graphics & Audio**, **GPU driver**, add a .zip with `meta.json` and the library. By default the system's is used, and if one fails at start the app goes back to it by itself
 
 ### With a controller
 
@@ -199,9 +199,10 @@ dots, **Add games**.
 | "libmhgugame.so is missing" | Do step 2, then copy the two new files to the folder on your device |
 | "This libmhgugame.so is from another version" | A new app version needs it again: repeat step 2 with the new download |
 | The game closes by itself | Close other apps and lower the 3D resolution. It's usually a lack of memory |
+| Black picture with only the touch controls, or it closes when you press A | The copy of `romfs` to your device didn't finish. Copy it again and check that it takes up 12.3 GB |
 
-If it still fails, open an [issue](../../issues) with your device model and the file
-`Android/data/com.mhgu.recomp/files/log.txt`. Don't attach game files.
+If it still fails, open an [issue](../../issues) with your device model and the log. If the game closes because of an error, a screen lets you
+share it; if not, it's under the gear, **Menu Options**, **Share log**. Don't attach game files.
 
 ## Legal
 
