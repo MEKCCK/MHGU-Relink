@@ -159,10 +159,10 @@ El panel de rendimiento de Samsung solo aparece en apps que reconoce como juegos
 tenerlo, instala el APK una vez desde una PC con [adb](https://developer.android.com/tools/adb):
 
 ```
-adb install -r -i com.mhgu.recomp MHGU-0.1.0.apk
+adb install -r -i com.mhgu.recomp MHGU-0.1.4.apk
 ```
 
-Es opcional: el juego corre igual sin esto. Para al menos verlo en Gaming Hub: **Mis juegos**, **Biblioteca**, los tres
+Usa el nombre del APK que descargaste. Es opcional: el juego corre igual sin esto. Para al menos verlo en Gaming Hub: **Mis juegos**, **Biblioteca**, los tres
 puntos, **Añadir juegos**.
 
 ## Si algo falla

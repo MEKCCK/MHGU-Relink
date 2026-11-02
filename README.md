@@ -160,10 +160,10 @@ Samsung's performance panel only appears for apps it recognizes as games, and an
 it, install the APK once from a PC with [adb](https://developer.android.com/tools/adb):
 
 ```
-adb install -r -i com.mhgu.recomp MHGU-0.1.0.apk
+adb install -r -i com.mhgu.recomp MHGU-0.1.4.apk
 ```
 
-This is optional: the game runs the same without it. To at least see it in Gaming Hub: **My games**, **Library**, the three
+Use the name of the APK you downloaded. This is optional: the game runs the same without it. To at least see it in Gaming Hub: **My games**, **Library**, the three
 dots, **Add games**.
 
 ## If something goes wrong
