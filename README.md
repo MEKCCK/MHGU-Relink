@@ -59,13 +59,13 @@ LAN play, mods, adjustable monster HP and Village quests in the Hub are also in 
 
 ## How well does it run?
 
-Measured with the on-screen counter:
+Measured with the on-screen counter. In the Low-end mode column the 3D picture is at 40% and the FPS limit was raised, except for the 5-minute session, which used the mode's 30 fps limit:
 
-| Device | Chip | RAM | Result |
-|---|---|---|---|
-| Galaxy S25 Ultra | Snapdragon 8 Elite | 12 GB | 120 fps |
-| Anbernic RG406V | Unisoc T820 | 8 GB | 48 fps at full resolution, 60 fps at 50% |
-| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps at full resolution, up to 28 fps at 50%. With Low-end mode: a steady 30 fps over a 5-minute session |
+| Device | Chip | RAM | Normal | Low-end mode |
+|---|---|---|---|---|
+| Galaxy S25 Ultra | Snapdragon 8 Elite | 12 GB | 120 fps | 120 fps in the village |
+| Anbernic RG406V | Unisoc T820 | 8 GB | 48 fps at full resolution, 60 fps at 50% | 60 fps |
+| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps at full resolution, up to 28 fps at 50% | 45 fps; a steady 30 fps over a 5-minute session |
 
 On a phone with 4 GB of RAM, close your other apps first: Android can close the game when memory runs out. For more speed,
 turn on Low-end mode: go to the gear button, **Graphics & Audio**, **Low-end mode**, save, and restart the game. It sets the 3D
