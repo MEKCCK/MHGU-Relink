@@ -94,16 +94,19 @@ typedef struct {
     int touch_hud;            // [Touch] MoveHUD: the HUD moves out of the thumbs' way while they show (nvn/vulkan/exec.c)
     float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)
     float touch_opacity;      // [Touch] Opacity: of the controls, 0.2 .. 1
-    int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (50..100)
+    int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (25..100)
     int touch_vibration;      // [Touch] Vibration: a short tick when a touch control is pressed (runtime/haptics.c)
     int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
     int show_stats;           // [Performance] ShowStats: the frame rate and the phone's temperature on screen (perfstats)
     int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
     int touch_zl, touch_zr;   // [Touch] ShowZL, ShowZR: those buttons on the screen (last: 0 by default)
+    int low_end;              // [Performance] LowEnd: a weak GPU's frame (nvn/vulkan/exec.c lowend_skipped; last: 0 by default)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // none). "" = no default: no internet hubs unless the player names a server.
 #define LDN_DEFAULT_SERVER ""
+#define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
+#define LOW_END_FPS 30
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides

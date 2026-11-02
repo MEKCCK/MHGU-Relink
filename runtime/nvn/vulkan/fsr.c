@@ -1120,6 +1120,7 @@ static FfxVkPortableImage ffx_image(TexBackend *b, VkImageUsageFlags usage) {
 static NvnTexture *g_h;                        // the full-screen image (learnt at the presents)
 static NvnTexture *last_target, *last_src;     // the frame's last draw: its target, the first texture it sampled
 static bool frame_open, redirect, frame_fsr;   // a draw seen since the present; from the start of the HUD on; FSR ran
+static bool plain_only;  // [Performance] LowEnd: the HUD at the screen's size over the scaled 3D picture, FSR itself never runs
 static uint32_t h_draws;                       // draws into H so far (post passes)
 static struct { NvnTexture *t; uint32_t n; } depths[4];
 static NvnTexture *mask_first;                 // the first render-size colour target drawn with depth (frame_mask)
@@ -1665,7 +1666,7 @@ dispatched:
 // The start of the HUD: FSR (or scaling) into H', then H, P, D are replaced from here on.
 static void hud_start(const char *why) {
     vk_end_pass();
-    NvnTexture *hs = stand(&st_h, g_h, ow, oh, true);
+    NvnTexture *hs = stand(&st_h, g_h, ow, oh, !plain_only);
     if (!hs) return;
     redirect = true;
     uint32_t dn = 0;
@@ -1674,7 +1675,7 @@ static void hud_start(const char *why) {
     bool have_cam = frame_camera(&cam);
     // (a HUD that waited for a menu's 3D models: they are the scene, however few)
     bool scene = depth && (dn >= 16 || (dn && (menu_models_late || menu_cams_late))) && have_cam;
-    frame_fsr = scene && run_fsr(g_h, hs, depth, frame_mask(), &cam);
+    frame_fsr = !plain_only && scene && run_fsr(g_h, hs, depth, frame_mask(), &cam);
     if (shot_taken) {  // (quest rewards, see the top)
         if (frame_fsr) screenshot_fill(shot_taken, g_h, hs);
         else LOG("[fsr] frame %llu: the game's screenshot %p taken in a frame without FSR: left as it is\n",
@@ -1777,7 +1778,7 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
     // jitter: on while frames are scene frames, off after 3 that are not
     if (frame_fsr) not_scene = 0;
     else if (not_scene < 1000) not_scene++;
-    bool want = not_scene < 3;
+    bool want = !plain_only && not_scene < 3;
     if (want != jitter_on) {
         jitter_on = want;
         uint32_t phases = (uint32_t)(8.0f * ((float)ow / rw) * ((float)ow / rw));
@@ -1870,8 +1871,14 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
 }
 
 void vk_fsr_init(void) {
-    if (!g_config.fsr || !g_fsr_output[0]) return;
+    if (!g_fsr_output[0] || (!g_config.fsr && !g_config.low_end)) return;
     rw = g_render_size[0], rh = g_render_size[1], ow = g_fsr_output[0], oh = g_fsr_output[1];
+    if (!g_config.fsr) {  // ([Performance] LowEnd: config.c)
+        plain_only = true;
+        g_fsr_on = true;
+        LOG("[lowend] the 3D picture at %ux%u, scaled to %ux%u under the HUD\n", rw, rh, ow, oh);
+        return;
+    }
     logging = getenv("MHGU_FSR_LOG") != NULL;
     FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
     if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||

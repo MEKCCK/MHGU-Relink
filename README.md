@@ -43,6 +43,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 - Up to 120 fps on powerful phones, with a configurable frame rate limit
 - Fills the whole screen, from ultra-wide phones to 4:3 handhelds
 - Adjustable 3D resolution to gain performance on modest devices
+- **Low-end mode:** for weak phones. It turns off bloom and depth of field, uses lighter textures and keeps the HUD sharp over a smaller 3D picture
 - Optional FPS and temperature counter
 - Uses less memory on devices with Mali GPUs and on phones with little RAM
 
@@ -64,10 +65,11 @@ Measured with the on-screen counter:
 |---|---|---|---|
 | Galaxy S25 Ultra | Snapdragon 8 Elite | 12 GB | 120 fps |
 | Anbernic RG406V | Unisoc T820 | 8 GB | 48 fps at full resolution, 60 fps at 50% |
-| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps at full resolution, up to 28 fps at 50% |
+| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps at full resolution, up to 28 fps at 50%. With Low-end mode: a steady 30 fps over a 5-minute session |
 
 On a phone with 4 GB of RAM, close your other apps first: Android can close the game when memory runs out. For more speed,
-go to the gear button, **Display**, lower **3D resolution**, and restart the game.
+turn on Low-end mode: go to the gear button, **Graphics & Audio**, **Low-end mode**, save, and restart the game. It sets the 3D
+resolution to 40% and the limit to 30 fps, and you can change both. It costs some sharpness: the game looks softer.
 
 ## What you need
 

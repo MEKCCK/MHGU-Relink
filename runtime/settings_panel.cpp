@@ -371,6 +371,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_w);
     SAME(render_h);
     SAME(render_scale);
+    SAME(low_end);
     SAME(fps);
     SAME(fsr);
     SAME(fsr_upscaler);
@@ -831,6 +832,7 @@ void reset_section() {
         c.fill_screen = f.fill_screen;
         break;
     case 1:
+        c.low_end = f.low_end;
         c.fsr = f.fsr;
         c.fsr_upscaler = f.fsr_upscaler;
         c.fsr_quality = f.fsr_quality;
@@ -1092,6 +1094,11 @@ void mods_rows(std::vector<Row> &r) {
 std::vector<Row> main_rows() {
     std::vector<Row> r;
     Config &c = s.draft;
+    auto low_end_off = [&r]() {  // (none of these with Low-end mode: config.c)
+        if (!c.low_end) return;
+        r.back().enabled = false;
+        r.back().value = tr("Off (low-end)");
+    };
     switch (s.page) {
     case 0:
 #ifndef __ANDROID__  // (a phone: the window is the screen, at its own resolution; the 3D in percent of it below)
@@ -1121,18 +1128,19 @@ std::vector<Row> main_rows() {
             number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, ini("RenderResolution"));
         } else
 #endif
-        if (!c.fsr && !c.render_w) {  // (Auto: the 3D picture in percent of the screen's, RenderScale; the nearest of the presets;
+        if ((!c.fsr || c.low_end) && !c.render_w) {  // (Auto: the 3D picture in percent of the screen's, RenderScale; the nearest of the presets;
                               // with FSR its quality sets the 3D size)
-            static const int scales[] = {100, 90, 80, 75, 66, 50};
+            static const int scales[] = {100, 90, 80, 75, 66, 50, 40, 33};
             int pick = 0;
             for (int i = 1; i < (int)std::size(scales); i++)
                 if (std::abs(scales[i] - c.render_scale) < std::abs(scales[pick] - c.render_scale))
                     pick = i;
             add_choice(
-                r, "render.scale", "3D resolution", pick, {"100%", "90%", "80%", "75%", "66%", "50%"},
+                r, "render.scale", "3D resolution", pick, {"100%", "90%", "80%", "75%", "66%", "50%", "40%", "33%"},
                 [](int v) { s.draft.render_scale = scales[v]; }, ini("RenderScale"));
             if (scales[pick] != c.render_scale)  // (another value set in the file: shown as it is)
                 r.back().value = std::to_string(c.render_scale) + "%";
+            r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
         }
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
@@ -1146,6 +1154,20 @@ std::vector<Row> main_rows() {
         add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
         break;
     case 1:
+        add_choice(
+            r, "lowend", "Low-end mode", c.low_end ? 1 : 0, {tr("Off"), tr("On")},
+            [](int v) {  // (it brings the resolution and the frame rate along; both can then be changed)
+                s.draft.low_end = v;
+                if (v) {
+                    s.draft.render_scale = std::min(s.draft.render_scale, LOW_END_SCALE);
+                    s.draft.fps = std::min(s.draft.fps, LOW_END_FPS);
+                } else {
+                    if (s.draft.render_scale <= LOW_END_SCALE) s.draft.render_scale = 100;
+                    if (s.draft.fps == LOW_END_FPS) s.draft.fps = 60;
+                }
+            },
+            ini("LowEnd"));
+        r.back().help = tr("For weak phones: turns off bloom and depth of field, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change both.");
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};
@@ -1173,6 +1195,7 @@ std::vector<Row> main_rows() {
                    : c.msaa == 2 ? 1
                                  : 0,
                    {tr("Off"), "2x", "4x", "8x"}, [](int v) { c.msaa = 1 << v; }, ini("MSAA"));
+        low_end_off();
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -1181,6 +1204,7 @@ std::vector<Row> main_rows() {
             }
         }
         add_bool(r, "fxaa", "FXAA", &c.fxaa, ini("FXAA"));
+        low_end_off();
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -1190,6 +1214,7 @@ std::vector<Row> main_rows() {
         }
         add_choice(r, "fxaamode", "FXAA mode", c.fxaa_mode, {tr("Original"), "3.11"}, [](int v) { c.fxaa_mode = v; },
                    ini("FXAAMode"));
+        low_end_off();
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -1205,7 +1230,8 @@ std::vector<Row> main_rows() {
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
-        if (c.fsr) {
+        low_end_off();
+        if (c.fsr && !c.low_end) {
 #ifndef __ANDROID__  // (FSR 4: AMD's RX 9000 cards only)
             add_choice(
                 r, "fsr.provider", "Upscaler", c.fsr_upscaler, {"FSR 3.1", "FSR 4"},

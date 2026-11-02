@@ -64,7 +64,7 @@ static const char DEFAULT_INI[] =
     "RenderResolution = Auto\n"
     "\n"
     "; With RenderResolution Auto: the 3D picture's resolution, in percent of the screen's (lower = faster, softer)\n"
-    "; Between 50 and 100\n"
+    "; Between 25 and 100\n"
     "; Default: 100\n"
     "RenderScale = 100\n"
     "\n"
@@ -164,6 +164,11 @@ static const char DEFAULT_INI[] =
     "; they appear. The first start does this in about 20 seconds while the logos play; it needs about 340 MB in the cache folder.\n"
     "; Default: On\n"
     "ShaderPrewarm = On\n"
+    "\n"
+    "; For a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays sharp over a smaller\n"
+    "; 3D picture. It does not change the resolution or the frame rate by itself: the menu's switch does that\n"
+    "; Default: Off\n"
+    "LowEnd = Off\n"
     "\n"
     "; Shows the frame rate, the frame time and the device's temperature in a corner of the screen\n"
     "; Default: Off\n"
@@ -476,7 +481,7 @@ const ConfigSetting g_settings[] = {
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
-    {"Display", "RenderScale", SET_INT, F(render_scale), 0, 50, 100, NULL, NULL, true, ERR_SIZE},
+    {"Display", "RenderScale", SET_INT, F(render_scale), 0, 25, 100, NULL, NULL, true, ERR_SIZE},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
@@ -498,6 +503,7 @@ const ConfigSetting g_settings[] = {
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
+    ON_OFF("Performance", "LowEnd", low_end, true),
     ON_OFF("Performance", "ShowStats", show_stats, false),
     {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional,Label|labels|xbox",
      NULL, false, ERR_MISC},
@@ -995,6 +1001,7 @@ void config_load(void) {
     e = getenv("MHGU_RENDER");
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)
+    if (g_config.low_end) g_config.fsr = 0, g_config.fxaa = 0, g_config.msaa = 1;  // (none of them on a weak GPU)
     if ((e = getenv("MHGU_FSR_UPSCALER"))) g_config.fsr_upscaler = !strcmp(e, "4") || !strcasecmp(e, "fsr4") ? FSR_UP_4 : FSR_UP_3;
     if ((e = getenv("MHGU_FSR_QUALITY"))) config_parse(config_setting("FSRQuality"), e, &g_config);
     if ((e = getenv("MHGU_FSR_OBJMOTION"))) g_config.fsr_objmotion = atoi(e) != 0;
@@ -1028,12 +1035,17 @@ void config_load(void) {
     } else if (render_auto) {
         // RenderScale: a smaller 3D picture (phones), stretched to the screen; not with FSR (FSRQuality sets that)
         int s = g_config.fsr ? 100 : g_config.render_scale;
+        int least = 32000 / tw + 1 > 18000 / th + 1 ? 32000 / tw + 1 : 18000 / th + 1;  // (320x180)
+        if (s < 100 && s < least) {
+            s = least < 100 ? least : 100;
+            LOG("[config] RenderScale %d%% would be below 320x180: using %d%%\n", g_config.render_scale, s);
+        }
         fit_aspect(tw * s / 100, th * s / 100, aspect, &w, &h);
-        if (s < 100 && (w < 320 || h < 180)) {
-            LOG("[config] RenderScale %d%% would be below 320x180: the 3D picture at full size\n", s);
-            fit_aspect(tw, th, aspect, &w, &h);
-        } else if (s < 100) {
-            LOG("[config] RenderScale %d%%: the 3D picture at %dx%d (screen %dx%d)\n", s, w, h, tw, th);
+        if (s < 100) LOG("[config] RenderScale %d%%: the 3D picture at %dx%d (screen %dx%d)\n", s, w, h, tw, th);
+        if (g_config.low_end && !g_config.fsr && s < 100) {
+            int ow, oh;  // (LowEnd: the HUD stays at the screen's size, fsr.c vk_fsr_init)
+            fit_aspect(tw, th, aspect, &ow, &oh);
+            g_fsr_output[0] = (uint32_t)ow, g_fsr_output[1] = (uint32_t)oh;
         }
     } else {
         fit_aspect(g_config.render_w, g_config.render_h, aspect, &w, &h);

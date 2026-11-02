@@ -82,7 +82,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
 }
 void config_runtime_init(const Config *effective) {
-    startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0;
+    startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0 || effective->low_end;  // (no FXAA, no MSAA)
     publish_live(effective, true);
     const char *override = getenv("MHGU_FRAMERATE");
     if (override && *override) {

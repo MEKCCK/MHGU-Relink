@@ -294,8 +294,8 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                 b->bcn_tb = bcn == BCN_BC4U || bcn == BCN_BC4S ? 1 : 2;
             }
             if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
-                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && low_memory_textures())
-                b->mip_skip = 1;
+                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && (low_memory_textures() || g_config.low_end))
+                b->mip_skip = g_config.low_end && levels >= 5 && (tw >= 512 || th >= 512) ? 2 : 1;
             static int nlog;
             if (nlog++ < 4) LOG("[vk] BC format %d not supported by the GPU: decoded on the CPU\n", mf.vf);
         } else if (astc && fi && fi->bpb == 16) {  // decoded on the CPU into an RGBA8 image of the same colour space
@@ -886,7 +886,10 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
     if (mf > 1) si.mipLodBias += g_fsr_lod_bias;  // (FSR: textures as sharp as at the output size; config.c)
     const char *force = getenv("MHGU_TEX_LOD");  // (debug) mipmapped samplers: only this level (shows mip contents)
     if (force && mf > 1) { si.minLod = si.maxLod = (float)atof(force); si.mipLodBias = 0; }
-    if (d->max_aniso > 1) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
+    if (d->max_aniso > 1 && !g_config.low_end) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
+    if (g_config.low_end && mf > 1) {  // (one texture fetch for each: a Mali's trilinear takes two)
+        si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    }
     if (d->compare_mode) { si.compareEnable = VK_TRUE; si.compareOp = compare_op(d->compare_func); }
     VkSamplerCustomBorderColorCreateInfoEXT cb = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
     if (border) {  // the standard colours; others need VK_EXT_custom_border_color (else the nearest standard one)

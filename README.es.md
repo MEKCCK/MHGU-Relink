@@ -43,6 +43,7 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 - Hasta 120 fps en teléfonos potentes, con límite de FPS configurable
 - Llena toda la pantalla, desde teléfonos ultra anchos hasta consolas portátiles 4:3
 - Resolución 3D ajustable para ganar rendimiento en equipos modestos
+- **Modo gama baja:** para teléfonos débiles. Apaga el bloom y el desenfoque de profundidad, usa texturas más livianas y mantiene el HUD nítido sobre una imagen 3D más chica
 - Contador opcional de FPS y temperatura
 - Usa menos memoria en dispositivos con GPU Mali y en teléfonos con poca RAM
 
@@ -64,10 +65,10 @@ Medido con el contador en pantalla:
 |---|---|---|---|
 | Galaxy S25 Ultra | Snapdragon 8 Elite | 12 GB | 120 fps |
 | Anbernic RG406V | Unisoc T820 | 8 GB | 48 fps a resolución completa, 60 fps al 50 % |
-| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps a resolución completa, hasta 28 fps al 50 % |
+| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps a resolución completa, hasta 28 fps al 50 %. Con el modo gama baja: 30 fps estables en una sesión de 5 minutos |
 
 En un teléfono con 4 GB de RAM, cierra las otras apps antes de jugar: Android puede cerrar el juego si se queda sin memoria.
-Para que vaya más rápido, entra al engranaje, **Pantalla**, baja la **Resolución 3D** y reinicia el juego.
+Para que vaya más rápido, activa el modo gama baja: entra al engranaje, **Gráficos y audio**, **Modo gama baja**, guarda y reinicia el juego. Pone la resolución 3D al 40 % y el límite en 30 fps, y puedes cambiar los dos. Cuesta algo de nitidez: el juego se ve más suave.
 
 ## Qué necesitas
 

@@ -3684,6 +3684,31 @@ static bool fxaa_skipped(Prog *pr) {
     return true;
 }
 
+// [Performance] LowEnd: what a weak GPU is spared. On a Mali more than half of a hunt's frame goes to some 30 full-screen
+// passes, and each costs about 0.15 ms whatever its size, so a lower resolution alone doesn't get rid of them.
+// The bloom and depth of field chain goes: from the picture's copy at half size to the last pass at a size below the
+// picture's, and the two draws that add its results to the picture. Its targets are marked as the GPU's: never drawn,
+// they would be uploaded from the guest's memory when sampled, and that garbage over the picture is coloured noise.
+#define BLOOM_FIRST_FS_HASH 0x6be2f1217dae4cbfull  // the picture to half size
+#define BLOOM_ADD_FS_HASH 0x414c7689cdfe5a68ull    // one result into the picture
+#define BLOOM_GLOW_FS_HASH 0xb505f15693063946ull   // the other, at the start of the HUD
+static bool bloom_open;
+static uint64_t bloom_frame;
+
+static bool small_target(void) {
+    NvnTexture *t = st.rt.ncolor ? st.rt.color[0] : NULL;
+    return t && t->width < g_render_size[0];
+}
+
+static bool lowend_skipped(Prog *pr) {
+    if (!g_config.low_end) return false;
+    uint64_t h = prog_fs_hash(pr);
+    if (h == BLOOM_FIRST_FS_HASH) bloom_open = true, bloom_frame = g_present_count;
+    if (bloom_open && (bloom_frame != g_present_count || !small_target())) bloom_open = false;
+    if (bloom_open) renderer_mark_gpu_owned(st.rt.color[0]);
+    return bloom_open || h == BLOOM_ADD_FS_HASH || h == BLOOM_GLOW_FS_HASH;
+}
+
 // A movie frame: the game draws the decoder's NV12 planes (hle/movie.c), an R8 picture and its half-size RG8 colour.
 // Its picture (NULL: not a movie frame).
 static NvnTexture *movie_picture(Prog *pr) {
@@ -3731,7 +3756,7 @@ static void draw(CmdRec *r, bool indexed) {
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
-    if (fxaa_skipped(pr)) return;
+    if (fxaa_skipped(pr) || lowend_skipped(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];
     VkPrimitiveTopology topo;
@@ -4029,6 +4054,14 @@ static void draw(CmdRec *r, bool indexed) {
         LOG("[dump]   cdraw vs %llx fs %llx (code hash %016llx) count %u inst %u mode %u | z test %d write %d op %d stencil %d\n",
             (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr,
             (unsigned long long)prog_fs_hash(pr), count, inst, mode, k.depth_test, k.depth_write, k.depth_op, k.stencil_test);
+    if (g_dump_active && getenv("MHGU_DUMP_DRAWS")) {
+        for (int i = 0; i < pr->fi->ntex; i++) {
+            NvnTexture *tx = shader_texture_object(1, &pr->fi->tex[i]);
+            LOG("[dump]     tex %d: %ux%u f%#x @%p\n", i, tx ? tx->width : 0, tx ? tx->height : 0, tx ? tx->format : 0, (void *)tx);
+        }
+        LOG("[dump]     target @%p blend %x wmask %x func %02x %02x %02x %02x\n", st.rt.ncolor ? (void *)st.rt.color[0] : NULL, k.blend_on, k.write_mask[0],
+            ((uint8_t *)k.blend[0])[0], ((uint8_t *)k.blend[0])[1], ((uint8_t *)k.blend[0])[2], ((uint8_t *)k.blend[0])[3]);
+    }
     if (g_dump_active && !st.rt.ncolor && getenv("MHGU_DUMP_VERBOSE")) {  // (debug) depth-only passes: every draw
         Range v0 = st.vbuf[k.attr_bind[0] < 16 ? k.attr_bind[0] : 0];
         LOG("[dump]   draw vs %llx vp %.0f,%.0f %.0fx%.0f sc %d,%d %dx%d count %u inst %u vb %llx clamp %d\n",
