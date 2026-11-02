@@ -61,11 +61,11 @@ Red local, mods, vida de los monstruos ajustable y misiones de la aldea en el Hu
 
 Medido con el contador en pantalla. En la columna del modo gama baja, la imagen 3D está al 40 % y el límite de FPS se subió, salvo en la sesión de 5 minutos, que usó el límite de 30 que pone el modo:
 
-| Dispositivo | Chip | RAM | Normal | Modo gama baja |
-|---|---|---|---|---|
-| Galaxy S25 Ultra | Snapdragon 8 Elite | 12 GB | 120 fps | 120 fps en el pueblo |
-| Anbernic RG406V | Unisoc T820 | 8 GB | 48 fps a resolución completa, 60 fps al 50 % | 60 fps |
-| moto g06 power | MediaTek MT6769 | 4 GB | 16 fps a resolución completa, hasta 28 fps al 50 % | 45 fps; 30 fps estables en una sesión de 5 minutos |
+| Dispositivo | Chip | GPU | RAM | Normal | Modo gama baja |
+|---|---|---|---|---|---|
+| Galaxy S25 Ultra | Snapdragon 8 Elite | Adreno 830 | 12 GB | 120 fps | 120 fps en el pueblo |
+| Anbernic RG406V | Unisoc T820 | Mali-G57 | 8 GB | 48 fps a resolución completa, 60 fps al 50 % | 60 fps |
+| moto g06 power | MediaTek MT6769 | Mali-G52 MC2 | 4 GB | 16 fps a resolución completa, hasta 28 fps al 50 % | 45 fps; 30 fps estables en una sesión de 5 minutos |
 
 En un teléfono con 4 GB de RAM, cierra las otras apps antes de jugar: Android puede cerrar el juego si se queda sin memoria.
 Para que vaya más rápido, activa el modo gama baja: entra al engranaje, **Gráficos y audio**, **Modo gama baja**, guarda y reinicia el juego. Pone la resolución 3D al 40 % y el límite en 30 fps, y puedes cambiar los dos. Cuesta algo de nitidez: el juego se ve más suave.
