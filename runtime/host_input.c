@@ -476,9 +476,10 @@ static int find_pad(SDL_JoystickID id) {
 }
 
 // A controller in the player's hands hides the touch controls (runtime/touch.cpp). Android calls other devices a
-// gamepad too: the emulator's keyboard ("qwerty2"), virtual and uinput devices, a phone's GPIO keys, keypads.
+// gamepad too: the emulator's keyboard ("qwerty2"), virtual and uinput devices, a phone's GPIO keys, keypads, and the
+// media keys of a USB or Bluetooth device ("... Consumer Control"; seen: a BSP-D8).
 static bool pad_is_real(SDL_Gamepad *p) {
-    static const char *const not_pads[] = {"qwerty", "virtual", "uinput", "gpio", "keypad"};
+    static const char *const not_pads[] = {"qwerty", "virtual", "uinput", "gpio", "keypad", "consumer control"};
     const char *name = SDL_GetGamepadName(p);
     if (!name) return true;  // (no name: SDL still maps it as a gamepad)
     for (unsigned i = 0; i < sizeof not_pads / sizeof *not_pads; i++)
