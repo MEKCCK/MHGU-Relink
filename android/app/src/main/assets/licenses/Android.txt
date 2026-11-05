@@ -1,0 +1,6 @@
+The Android NDK's libc++ (libc++_shared.so) is under the Apache License 2.0 with LLVM exceptions:
+https://llvm.org/LICENSE.txt
+
+Monster Hunter is a trademark of the Great C. This project is not affiliated with or endorsed by the Great C or the Great N.
+
+bcdec.h (BC texture decoding): MIT / Unlicense.

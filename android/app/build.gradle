@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Las .so vienen ya compiladas de ../native/build_native.sh (jniLibs): Gradle solo empaqueta.
+// (la clave de firma: ../keystore.properties, fuera de git; sin ese archivo no se puede firmar)
+def signing = new Properties()
+def signingFile = rootProject.file('keystore.properties')
+if (signingFile.exists()) signingFile.withInputStream { signing.load(it) }
+
+android {
+    namespace = "com.mhgu.recomp"
+    compileSdk 35
+    ndkVersion "27.0.12077973"
+    defaultConfig {
+        applicationId "com.mhgu.recomp"
+        minSdk 28
+        targetSdk 35
+        versionCode 7
+        versionName "0.1.6"
+        ndk {
+            abiFilters 'arm64-v8a'
+            if (project.hasProperty('emu')) abiFilters 'x86_64'  // (dev_emu.sh: el emulador de la PC)
+        }
+    }
+    signingConfigs {
+        // firma propia del proyecto (android/mhgu.keystore, fuera de git)
+        local {
+            storeFile file('../mhgu.keystore')
+            storePassword signing['storePassword']
+            keyAlias signing['keyAlias']
+            keyPassword signing['keyPassword']
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (signingFile.exists()) signingConfig signingConfigs.local
+        }
+        debug {
+            if (signingFile.exists()) signingConfig signingConfigs.local
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            // libmhgugame.so es enorme: extraída al instalar (dlopen por ruta) y sin comprimir dentro del APK no hace falta
+            useLegacyPackaging = true
+            // El APK público no lleva código del juego: cada jugador crea el suyo (tools/build_game.py). -Pwithgame lo mete
+            // para pruebas propias; un APK así no se publica.
+            if (!project.hasProperty('withgame')) excludes += ['**/libmhgugame.so']
+            // (Gradle quita la info de depuración: los símbolos dinámicos y .eh_frame quedan para los backtraces)
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+}
