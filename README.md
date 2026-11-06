@@ -16,7 +16,7 @@ Ryujinx / suyu 模拟器互通。
 | [docs/android.md](docs/android.md) | Android 安装、游戏文件、存档导入导出、排错 |
 | [docs/online.md](docs/online.md) | 局域网、hub 服务器、Ryujinx / suyu Crossplay、混合 hub |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 项目结构、构建、测试与开发约定 |
-| [docs/PROVENANCE.md](docs/PROVENANCE.md) | 三个原项目的合并来源与验证记录 |
+| [docs/PROVENANCE.md](docs/PROVENANCE.md) | 两个原项目的合并来源与验证记录 |
 
 ## 目录
 
