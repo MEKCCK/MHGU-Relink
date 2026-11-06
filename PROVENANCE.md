@@ -50,3 +50,27 @@ git 历史：以 MHGURecomp 的历史为根，`git merge -s ours` 方式并入 g
 - `cargo test --workspace`：通过。
 - `bash native/build_native.sh arm64-v8a`（NDK 27，`deps/out/arm64-v8a`）：生成 `libmain.so` 并复制到 `jniLibs`；
   Rust 交叉编译通过。未在真机上运行。
+
+
+## 上游同步（2026-11-07）
+
+上游 `morerokk/MHGURecomp` 已到 `ce0ce81`（0.15.1，标签到 0.15.1）。本仓库以 `682e8ed`（0.14.1 附近，
+即本仓库基线最匹配的提交）为有效祖先，合入其后 31 个提交的运行时/工具变更：
+
+- 设置：默认值改为 designated initializer，live 变量按 ini 分节；`LoadingIndicator`（仅 ini）。
+- 启动：加载指示器（`overlay_init_early`/`overlay_loading`，提前初始化渲染器），`forge_imgui` 早期字体。
+- 性能：解释器基本块（`interp.c`）、渲染线程加速（AVX2 索引扫描、缓存 getenv/计时器）、FXAA 改写。
+- 修复：手柄震动锁输入、Android 最小化后黑屏/Mali 崩溃（surface 生命周期）、侧键绑定、16:10 铁匠铺预览、
+  小怪同步、`emsync`、作弊热重载、引擎模块修正（`emstall.c`）。
+- 工具：`tools/gen.py` 等更新 → **GAMELIB_ID 改变**（Android/PC 都需要重新生成/编译游戏代码）。
+
+**未合入：crossplay（C）**。上游新增的 `runtime/net/{room,roomsrv,ryuldn,ryusrv,xbridge}.*`、
+`third_party/enet` 及相关测试是使用 C/C++ 与 ENet 的第二套联机栈（Ryujinx/suyu 房间）。按本仓库
+“Rust 联机模块为唯一传输层”的决定，这些文件不进入本树；Rust 侧已按上游行为更新：
+
+- `LINK_PROTO_VERSION` 2 → 3（`mhgu-protocol`；C 侧 `PROTO_VERSION` 同步为 3，否则 LAN/hub 列表不匹配）。
+- `mhgu-hub`：`-min-proto N`（拒绝旧协议，默认 0）、`-separate-phones[=false]`（Android 公共房间并入公共房间）、
+  被拒协议的日志、房间名日志。
+- 相关 Rust 测试更新到协议 3。
+
+因此当前树**不支持**与 Ryujinx/suyu 房间的 crossplay；“普通联机 + Rust hub”与上游协议 v3 客户端兼容。

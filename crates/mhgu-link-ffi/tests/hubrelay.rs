@@ -51,7 +51,14 @@ fn through_the_hub() {
     let server = std::ffi::CString::new(addr.to_string()).unwrap();
     // find the hub id from the server's list: the host lists it with room(key)
     let room = mhgu_link::room_from_key("hubtest");
-    let hubs = mhgu_link::Lobby::new(addr).list(2, room).expect("list");
+    let mut hubs = Vec::new();
+    let wait = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < wait {
+        if let Ok(list) = mhgu_link::Lobby::new(addr).list(mhgu_protocol::LINK_PROTO_VERSION, room) {
+            if !list.is_empty() { hubs = list; break; }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
     let hub = hubs.iter().max_by_key(|h| h.id).expect("a hub").id;
     let info = valid_info();
     let mut ok = false;

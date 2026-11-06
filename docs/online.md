@@ -49,6 +49,14 @@ cd build && ./mhgurecomp <游戏目录>
 传输层全部在 `crates/mhgu-link*`：主机/加入/中继、TCP/UDP 链路、踢人、NetworkInfo 广播。C 运行时只保留
 `nn::ldn` 的 HLE 包装、局域网扫描（Android 的组播锁与逐网卡探测）以及 hub 列表/检查的控制协议。
 
+链路协议为 **v3**（上游 0.15 起）。`mhgu-hub` 额外支持：
+
+- `-min-proto N`：拒绝更旧的链路协议（默认 0 = 不限）；
+- `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并；
+- `-v`：记录 hub、加入与因协议被拒的请求（不记录 IP）。
+
+本树不含上游的 crossplay（Ryujinx/suyu 房间，C/ENet 实现）；与这些模拟器房间互通需要另行移植。
+
 ### Matchmaking Key（房间）
 
 Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间

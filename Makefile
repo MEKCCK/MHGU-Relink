@@ -114,7 +114,12 @@ OSFLAGS  := -D_FILE_OFFSET_BITS=64 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_RAND_
 GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
-LDFLAGS  := $(LINKER) -Wl,--stack,16777216 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
+# the executables' icons (extras/icon/mhgurecomp.rc, mhgurecomp-updater.rc); llvm-windres comes with MSYS2's llvm-tools,
+# which not every setup has: binutils' windres makes them too
+WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windres)
+ICON_RES := $(O)/icon.res.o
+UPD_ICON_RES := $(O)/updater-icon.res.o
+LDFLAGS  := $(LINKER) -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
             -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
@@ -151,6 +156,16 @@ endif
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+# GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match:
+# neither make nor the game notices stale game code, GAMELIB_ID hashes the sources above and not what they generated.
+# (Line endings ignored: Windows and WSL builds share one generated/.)
+GEN_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py runtime/hle/hle_symbols.txt
+GEN_ID    = $(shell cat $(GEN_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
+ifneq ($(filter dist,$(MAKECMDGOALS)),)
+ifneq ($(shell cat $(GEN)/gen.id 2>/dev/null),$(GEN_ID))
+$(error dist: $(GEN)/ was not made from the current $(GEN_SRCS): run make gen GAME=<the game files> first)
+endif
+endif
 # SHADER_ID: the shader translator, whose output cache/programs.bin keeps (runtime/nvn/vulkan/exec.c): the cache stays
 # valid across builds until the translator changes. (Line endings ignored: the same sources hash the same everywhere.)
 SHADER_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
@@ -161,7 +176,7 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '\r\n' | grep . || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
-           $(O)/updater/sha256.o
+           $(O)/updater/sha256.o $(ICON_RES)
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
 IMGUI    := third_party/cimgui
@@ -287,11 +302,18 @@ $(EXE): $(RT_OBJ) $(O)/rt/touch.o $(O)/rt/perfstats.o $(AV_DEPS) $(abspath targe
 # The updater (updater/updater.c): started in place of the game, it installs the latest release and starts the game.
 UPD_OBJ  := $(patsubst updater/%.c,$(O)/updater/%.o,$(wildcard updater/*.c))
 # (the glibc wrappers and the newer SDL, as the game's)
-UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),,$(O)/rt/platform/linux_glibc.o $(if $(SDL_DEPS),$(O)/rt/platform/linux_sdl.o))
+UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),$(UPD_ICON_RES),$(O)/rt/platform/linux_glibc.o $(if $(SDL_DEPS),$(O)/rt/platform/linux_sdl.o))
 $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
 # (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
+$(ICON_RES): extras/icon/mhgurecomp.rc extras/icon/mhgurecomp.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(UPD_ICON_RES): extras/icon/mhgurecomp-updater.rc extras/icon/mhgurecomp-updater.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+
 $(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
@@ -450,6 +472,7 @@ $(B)/data/.complete:
 gen:
 	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
 	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	echo '$(GEN_ID)' > $(GEN)/gen.id
 
 # differential test of the recompiler against Unicorn (tools/test_lift.py)
 test-lift:

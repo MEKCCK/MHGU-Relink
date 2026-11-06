@@ -66,7 +66,7 @@ fn list_against_hub_server() {
 
     // A hub, hosted by a raw client (kept alive).
     let mut raw = TcpStream::connect(addr).unwrap();
-    let h = lobby::header(2, [0u8; 16]);
+    let h = lobby::header(proto::LINK_PROTO_VERSION, [0u8; 16]);
     let info = make_info();
     raw.write_all(&proto::frame(proto::T_HOST, &[&h[..], &info[..]]))
         .unwrap();
@@ -76,7 +76,7 @@ fn list_against_hub_server() {
 
     // The lobby client lists it.
     let lb = Lobby::new(addr);
-    let hubs = lb.list(2, [0u8; 16]).unwrap();
+    let hubs = lb.list(proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
     assert_eq!(hubs.len(), 1);
     assert_eq!(hubs[0].id, id);
     assert_eq!(hubs[0].info.len(), NETINFO_SIZE);
@@ -105,7 +105,7 @@ fn list_parses_many_hubs() {
         s.write_all(&proto::frame(proto::T_HUBS, &[&answer])).unwrap();
         thread::sleep(Duration::from_millis(50));
     });
-    let hubs = Lobby::new(addr).list(2, [0u8; 16]).unwrap();
+    let hubs = Lobby::new(addr).list(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
     assert_eq!(hubs.len(), 8);
     assert_eq!(hubs[7].id, 0x1007);
     h.join().unwrap();
@@ -129,7 +129,7 @@ fn join_parses_spliced() {
     });
 
     let spliced = Lobby::new(addr)
-        .join(2, [0u8; 16], 0xdead_beef)
+        .join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], 0xdead_beef)
         .unwrap();
     assert_eq!(spliced.pair, 0x1122_3344);
     assert_eq!(spliced.secret, 0x5566_7788_99aa_bbcc);
@@ -140,16 +140,16 @@ fn join_parses_spliced() {
 fn host_and_join_against_hub_server() {
     let (addr, _srv) = start_hub();
     let info = make_info();
-    let mut host = Lobby::new(addr).host(&info, 2, [0u8; 16]).unwrap();
+    let mut host = Lobby::new(addr).host(&info, proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
     let hub_id = host.hub_id();
 
     // The player lists and joins on its own thread: JOIN blocks until the host attaches.
     let pt = thread::spawn(move || {
         let lb = Lobby::new(addr);
-        let hubs = lb.list(2, [0u8; 16]).unwrap();
+        let hubs = lb.list(proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
         assert_eq!(hubs.len(), 1);
         assert_eq!(hubs[0].id, hub_id);
-        lb.join(2, [0u8; 16], hub_id).unwrap()
+        lb.join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], hub_id).unwrap()
     });
 
     // The host waits for the server's INCOMING, then opens the ATTACH connection.

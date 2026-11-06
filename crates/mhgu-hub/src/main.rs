@@ -15,6 +15,12 @@ fn main() -> ExitCode {
         "mhgu-hub: MHGU hub server on {} (TCP and UDP)",
         server.addr()
     );
+    if cfg.min_proto > 0 {
+        println!("mhgu-hub: refusing games older than link protocol {}", cfg.min_proto);
+    }
+    if !cfg.separate_phones {
+        println!("mhgu-hub: one public room: Android players' public hubs are listed with everyone's");
+    }
     if !cfg.key.is_empty() {
         let room = mhgu_protocol::room_from_key(&cfg.key);
         println!(
@@ -42,6 +48,13 @@ fn parse_args() -> Config {
             "-max-hubs" => cfg.max_hubs = number(&mut args, "-max-hubs"),
             "-max-hubs-per-ip" => cfg.max_hubs_per_ip = number(&mut args, "-max-hubs-per-ip"),
             "-list-max" => cfg.list_max = number(&mut args, "-list-max"),
+            "-min-proto" => cfg.min_proto = number(&mut args, "-min-proto"),
+            "-separate-phones" => {
+                cfg.separate_phones = match args.next().as_deref() {
+                    Some("false") | Some("0") | Some("off") => false,
+                    _ => true,
+                };
+            }
             "-bandwidth" => {
                 cfg.bandwidth = args
                     .next()
@@ -86,7 +99,11 @@ Usage: mhgu-hub [options]\n\
   -max-hubs N           hubs listed at once (default 2000)\n\
   -max-hubs-per-ip N    hubs one IP may host (default 4)\n\
   -list-max N           hubs in one search answer (default 18)\n\
-  -bandwidth N          bytes a second per player link and direction (default 1048576)\n\
+  -bandwidth N          bytes a second per player link and direction (default 1048576)
+\
+  -min-proto N          oldest link protocol served; older games are refused (default 0: any)
+\
+  -separate-phones[=false]  Android public hubs in their own room (default on; =false: one public room)\n\
   -v, --verbose         log hubs and joins (never IP addresses)\n\
   -web ADDR             web UI address (default :39511, off: none)\n\
   -web-token TOKEN      the token /admin needs (default: random, printed at startup)\n\

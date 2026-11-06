@@ -361,6 +361,27 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
         }
         Err(proto::HeaderError::BadMagic) => return,
     };
+    let (min_proto, separate_phones) = {
+        let s = shared.lock().unwrap();
+        (s.cfg.min_proto, s.cfg.separate_phones)
+    };
+    if hdr.link_proto < min_proto {
+        if t == proto::T_HOST {
+            shared.lock().unwrap().note(format!(
+                "hub refused (protocol {}, {})",
+                hdr.link_proto,
+                room_name(hdr.room)
+            ));
+        }
+        let _ = send_error(&mut c, proto::ERR_VERSION);
+        return;
+    }
+    // Android's public hubs live in the key "public-phone"'s room, as the game asks; the server may put them in the
+    // public room instead, so phones and PCs without a key see each other's hubs.
+    let mut room = hdr.room;
+    if !separate_phones && room == proto::room_from_key("public-phone") {
+        room = [0u8; 16];
+    }
     let body = &p[proto::HEADER_SIZE..];
     match t {
         proto::T_LIST => {
@@ -368,10 +389,10 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
                 let _ = send_error(&mut c, proto::ERR_BUSY);
                 return;
             }
-            list(&mut c, &shared, hdr.link_proto, hdr.room);
+            list(&mut c, &shared, hdr.link_proto, room);
         }
         proto::T_HOST => {
-            if key_mismatch(&shared, hdr.room) {
+            if key_mismatch(&shared, room) {
                 let _ = send_error(&mut c, proto::ERR_NOT_FOUND);
                 return;
             }
@@ -379,7 +400,7 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
                 let _ = send_error(&mut c, proto::ERR_BAD_REQ);
                 return;
             }
-            host(c, &shared, ip, hdr.link_proto, hdr.room, body);
+            host(c, &shared, ip, hdr.link_proto, room, body);
         }
         proto::T_ATTACH => {
             if body.len() != 8 {
@@ -397,11 +418,11 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
                 return;
             }
             let id = u64::from_le_bytes(body[..8].try_into().unwrap());
-            if key_mismatch(&shared, hdr.room) {
+            if key_mismatch(&shared, room) {
                 let _ = send_error(&mut c, proto::ERR_NOT_FOUND);
                 return;
             }
-            join(c, &shared, hdr.link_proto, hdr.room, id);
+            join(c, &shared, hdr.link_proto, room, id);
         }
         _ => {}
     }
@@ -412,6 +433,17 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
 fn key_mismatch(shared: &Arc<Mutex<Shared>>, room: [u8; 16]) -> bool {
     let s = shared.lock().unwrap();
     matches!(s.key_room, Some(want) if room != want)
+}
+
+/// A room for the log: "public", "phone" (Android's public room) or "key" and its hash (the key itself never arrives).
+fn room_name(room: [u8; 16]) -> String {
+    if room == [0u8; 16] {
+        return "public".into();
+    }
+    if room == proto::room_from_key("public-phone") {
+        return "phone".into();
+    }
+    format!("key {:02x?}", room)
 }
 
 fn send_error(c: &mut TcpStream, code: u32) -> io::Result<()> {
@@ -506,7 +538,7 @@ fn host(
                         joins: 0,
                     },
                 );
-                note_after = Some(format!("hub {cand:#x} listed ({link_proto}, {room:02x?})"));
+                note_after = Some(format!("hub {cand:#x} listed (protocol {link_proto}, {})", room_name(room)));
                 Reserved::Ok(cand)
             }
             _ => Reserved::Busy,

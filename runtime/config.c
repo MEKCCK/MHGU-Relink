@@ -28,21 +28,106 @@
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
 #ifdef __ANDROID__  // (phones: the screen's own size, full screen; the rest as on PC)
-#define CONFIG_DEFAULT_SIZE 0, 0
+#define CONFIG_DEFAULT_W 0
+#define CONFIG_DEFAULT_H 0
 #define CONFIG_DEFAULT_FXAA 0  // (as the new mhgurecomp.ini says: the first run, before that file is read, too)
 #else
-#define CONFIG_DEFAULT_SIZE 1920, 1080
+#define CONFIG_DEFAULT_W 1920
+#define CONFIG_DEFAULT_H 1080
 #define CONFIG_DEFAULT_FXAA 1
 #endif
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, \
-    39500, "", 1, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, \
-    FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, \
-    DEFAULT_BINDS, THEME_HUNTER, 1, 1, \
-    1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, TOUCH_SHOW_DEFAULT, \
-    {"", "", "", "", "", ""}, {0, 0, 0, 0, 0, 0}, \
-    0, 1, BATTERY_OFF, "", "", ""
-// (in Config's order, config.h: a new field there needs its value here, in its place - shadows, adreno_fix, bloom, reverb before
-// touch_show: without them the touch buttons' defaults moved two places and most buttons were off)
+// (designated: a new field in config.h needs its default here, and nowhere else)
+#define CONFIG_DEFAULT_VALUES                                                                       \
+    /* [Display] */                                                                                 \
+    .display_mode = DISPLAY_BORDERLESS,                                                             \
+    .width = CONFIG_DEFAULT_W,                                                                      \
+    .height = CONFIG_DEFAULT_H,                                                                     \
+    .render_w = 0,                                                                                  \
+    .render_h = 0,                                                                                  \
+    .aspect_ratio = 0.0f,                                                                           \
+    .fov = 1.0f,                                                                                    \
+    .ui_anchor = UI_CENTER,                                                                         \
+    .fill_screen = 1,                                                                               \
+    .render_scale = 100,                                                                            \
+    /* [Anti-aliasing] */                                                                           \
+    .msaa = 1,                                                                                      \
+    .fxaa = CONFIG_DEFAULT_FXAA,                                                                    \
+    .fxaa_mode = FXAA_ORIGINAL,                                                                     \
+    /* [Upscaler] */                                                                                \
+    .fsr = 0,                                                                                       \
+    .fsr_quality = FSR_NATIVE,                                                                      \
+    .fsr_sharpness = 0.8f,                                                                          \
+    .fsr_objmotion = 1,                                                                             \
+    .fsr_reactive = 0.9f,                                                                           \
+    .fsr_animsurf = 1,                                                                              \
+    .fsr_upscaler = FSR_UP_3,                                                                       \
+    /* [Graphics] */                                                                                \
+    .draw_distance = 1.0f,                                                                          \
+    .smooth_gradients = 0,                                                                          \
+    /* [Performance] */                                                                             \
+    .show_fps = 0,                                                                                  \
+    .show_battery = BATTERY_OFF,                                                                    \
+    .fps = 60,                                                                                      \
+    .vsync = 1,                                                                                     \
+    .shader_prewarm = 1,                                                                            \
+    .loading_indicator = 1,                                                                         \
+    .low_end = 0,                                                                                   \
+    .shadows = 1,                                                                                   \
+    .bloom = 1,                                                                                     \
+    .adreno_fix = 0,                                                                                \
+    .show_stats = 0,                                                                                \
+    /* [Controls] */                                                                                \
+    .face_buttons = FACE_POSITION,                                                                  \
+    .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
+    .background_input = 1,                                                                          \
+    .combo_window = COMBO_LENIENT,                                                                  \
+    .chat_key = "/",                                                                                \
+    .menu_chord = 1,                                                                                \
+    .lock_on = 1,                                                                                   \
+    .phone_rumble = 1,                                                                              \
+    /* [Touch] */                                                                                   \
+    .touch_controls = TOUCH_AUTO,                                                                   \
+    .touch_hud = 1,                                                                                 \
+    .touch_camera = 1.0f,                                                                           \
+    .touch_opacity = 0.8f,                                                                          \
+    .touch_vibration = 1,                                                                           \
+    .touch_show = TOUCH_SHOW_DEFAULT,                                                               \
+    .touch_combo = {"", "", "", "", "", ""},                                                        \
+    .touch_combo_pad = {0, 0, 0, 0, 0, 0},                                                          \
+    /* [Mouse] */                                                                                   \
+    .mouse_sensitivity = 1.0f,                                                                      \
+    /* [Keybinds] */                                                                                \
+    .binds = DEFAULT_BINDS,                                                                         \
+    /* [Multiplayer] */                                                                             \
+    .ldn_port = 39500,                                                                              \
+    .ldn_join = "",                                                                                 \
+    .ldn_server = "",                                                                               \
+    .ldn_key = "",                                                                                  \
+    .sync_small_monsters = 1,                                                                       \
+    .share_urgent = 1,                                                                              \
+    /* [Monster HP, Village Quests] */                                                              \
+    .hp = {{1, 1, 1, 1}, 2},                                                                        \
+    .village_in_hub = 1,                                                                            \
+    /* [Discord] */                                                                                 \
+    .discord = 1,                                                                                   \
+    .discord_hunter = 1,                                                                            \
+    /* [Bonus Content] */                                                                           \
+    .bonus_content = 1,                                                                             \
+    /* [Audio] */                                                                                   \
+    .volume = 100,                                                                                  \
+    .mute_in_background = 0,                                                                        \
+    .reverb = 1,                                                                                    \
+    /* [Application] */                                                                             \
+    .confirm_exit = 1,                                                                              \
+    .pause_background = 1,                                                                          \
+    .language = 0,                                                                                  \
+    .button_icons = 0,                                                                              \
+    .menu_theme = THEME_HUNTER,                                                                     \
+    .menu_scale = 100,                                                                              \
+    .updates = UPDATES_ASK,                                                                         \
+    .save_location = "",                                                                            \
+    .save_dir = "",                                                                                 \
+    .game_dir = ""
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -198,6 +283,11 @@ static const char DEFAULT_INI[] =
     "; Shows the frame rate, the frame time and the device's temperature in a corner of the screen\n"
     "; Default: Off\n"
     "ShowStats = Off\n"
+    "\n"
+    "; A \"Loading\" box in the bottom right corner while the game starts up and prepares its shaders. Not in the\n"
+    "; settings menu: turn it off here if it stays on screen or gets in the way.\n"
+    "; Default: On\n"
+    "LoadingIndicator = On\n"
     "\n"
     "[Controls]\n"
     "; Controller face button layout. Set to \"Label\" to reverse A/B and X/Y on XBox controllers to match the button prompts (not recommended)\n"
@@ -625,7 +715,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Performance", "Bloom", bloom, false),
     {"Performance", "AdrenoFix", SET_CHOICE, F(adreno_fix), 0, 0, 0, "Auto,Off", NULL, true, ERR_MISC},
     ON_OFF("Performance", "ShowStats", show_stats, false),
-    {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional,Label|labels|xbox",
+    ON_OFF("Performance", "LoadingIndicator", loading_indicator, true),  // (ini only: not in the settings menu)
+    {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional|nintendo,Label|labels|xbox",
      NULL, false, ERR_MISC},
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
     ON_OFF("Controls", "BackgroundInput", background_input, false),

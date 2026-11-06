@@ -86,6 +86,7 @@ typedef struct {
     int fsr_upscaler;         // [Upscaler] Upscaler: FSR_UP_3 (FSR 3.1) or FSR_UP_4 (FSR 4, runtime/nvn/vulkan/fsr4.c)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
+    int loading_indicator;    // [Performance] LoadingIndicator: the start-up's "Loading" corner (overlay.cpp); ini only
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
     int mute_in_background;   // [Audio] MuteInBackground: no sound while the window is not focused (config_audio_gain)
     int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button

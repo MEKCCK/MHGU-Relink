@@ -369,6 +369,16 @@ void ui_toggle_fullscreen(void) {
     set_fullscreen(!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
 }
 
+// The window is going away (Android: the activity is in the background): nothing is drawn meanwhile.
+bool ui_window_away(void) {
+#ifdef __ANDROID__
+    extern volatile int g_android_window_state;  // (nvn/vulkan/device.c: 1 in the background, 2 back)
+    return __atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE) == 1;
+#else
+    return false;
+#endif
+}
+
 int ui_run(void) {
     int background = config_live_background_input();
     for (;;) {

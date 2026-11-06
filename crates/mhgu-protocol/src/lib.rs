@@ -75,7 +75,7 @@ pub const ERR_BAD_REQ: u32 = 5;
 // ---- in-game link protocol ------------------------------------------------
 // (Used between the two clients; documented here so a Rust client can share it.)
 pub const LINK_MAGIC: [u8; 4] = *b"MHGL";
-pub const LINK_PROTO_VERSION: u16 = 2;
+pub const LINK_PROTO_VERSION: u16 = 3;
 /// Largest link frame (`MAX_FRAME 0x10000 + 64` in ldn.c).
 pub const LINK_MAX_FRAME: usize = 0x10000 + 64;
 pub const LINK_UDP_MAGIC: [u8; 4] = *b"MHGD";

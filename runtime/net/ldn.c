@@ -97,7 +97,7 @@ enum { DR_NONE, DR_BY_USER, DR_BY_SYSTEM, DR_DESTROYED_BY_USER, DR_DESTROYED_BY_
 
 // ---- link protocol
 #define PROTO_MAGIC "MHGL"
-#define PROTO_VERSION 2
+#define PROTO_VERSION 3
 enum { F_HELLO = 1, F_INFO, F_WELCOME, F_REFUSE, F_PACKET, F_DESTROY, F_AUX };  // F_AUX: the port's own messages (emsync.c, hle/hpscale.c)
 typedef struct {
     char magic[4];
@@ -285,6 +285,7 @@ uint32_t ldn_own_ip(void) { return L.own_ip; }
 uint32_t ldn_broadcast_ip(void) { return L.subnet ? L.subnet | 0xFF : 0xFFFFFFFFu; }
 bool ldn_net_up(void) { return L.state == ST_AP_CREATED || L.state == ST_STATION_CONNECTED; }
 bool ldn_hosting(void) { return L.state == ST_AP_CREATED; }
+bool ldn_crossplay(void) { return false; }  // (crossplay with emulator rooms is not built in this tree)
 bool ldn_party(int *n, int *max, char *id, size_t size) {
     pthread_mutex_lock(&L.mu);
     bool up = ldn_net_up();

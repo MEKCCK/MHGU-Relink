@@ -25,6 +25,11 @@ pub struct Config {
     pub handshake: Duration,
     /// Keep-alive interval on a host's connection.
     pub ping_every: Duration,
+    /// The oldest link protocol (the game's PROTO_VERSION) served; older games get ERR_VERSION (0: any).
+    pub min_proto: u16,
+    /// Android's public hubs (the key "public-phone") in a room of their own, as the game asks; false: they meet the
+    /// public room, so phones and PCs without a key see each other's hubs.
+    pub separate_phones: bool,
     /// Log hubs and joins (never IP addresses).
     pub verbose: bool,
     /// The web UI's address ("" = off), public page and /admin.
@@ -53,6 +58,8 @@ impl Default for Config {
             bandwidth: 1024.0 * 1024.0,
             handshake: Duration::from_secs(10),
             ping_every: Duration::from_secs(15),
+            min_proto: 0,
+            separate_phones: true,
             verbose: false,
             web: ":39511".into(),
             web_token: String::new(),
