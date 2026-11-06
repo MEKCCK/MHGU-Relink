@@ -7,7 +7,6 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,7 +42,6 @@ mod msg {
     pub const INITIALIZE: u8 = 0;
     pub const PASSPHRASE: u8 = 1;
     pub const CREATE: u8 = 2;
-    pub const CREATE_PRIVATE: u8 = 3;
     pub const EXTERNAL_PROXY: u8 = 4;
     pub const SYNC_NETWORK: u8 = 7;
     pub const REJECT: u8 = 8;
@@ -254,12 +252,12 @@ impl Conn {
         if a.len() + b.len() > MAX_PAYLOAD {
             return false;
         }
-        let mut f = self.flags.lock().unwrap();
+        let f = self.flags.lock().unwrap();
         if !f.alive || f.closing {
             return false;
         }
         drop(f);
-        let mut w = self.write.lock().unwrap();
+        let w = self.write.lock().unwrap();
         let mut h = [0u8; HDR];
         put_u32(&mut h, MAGIC);
         h[4] = ty;
@@ -763,7 +761,6 @@ fn wait_joined(c: &Arc<Conn>) -> Result<(u32, u32, [u8; RYU_NETINFO]), u32> {
 fn begin(server: i32, host: bool) -> Result<Arc<Conn>, u32> {
     leave();
     let cfg_servers = with_cfg(|c| c.servers.clone());
-    let own = with_cfg(|c| c.own.clone());
     let h = host_addr();
     let sv = if host && !h.is_empty() && server < 0 {
         parse_server(&h).ok_or(R_CONNECT_FAILURE)?
@@ -950,6 +947,7 @@ pub fn send(p: &RyuProxy, data: &[u8]) {
 }
 
 /// One more client of the server we host on, for a player in a suyu room (xbridge).
+#[derive(Clone)]
 pub struct RyuPeer(Arc<Conn>);
 
 pub fn peer_join(
@@ -959,7 +957,7 @@ pub fn peer_join(
     lcv: u16,
     hooks: RyuPeerHooks,
     ud: *mut core::ffi::c_void,
-) -> Result<RyuPeer, u32> {
+) -> Result<(RyuPeer, u32, u32, [u8; RYU_NETINFO]), u32> {
     let h = host_addr();
     let sv = parse_server(&h).ok_or(R_CONNECT_FAILURE)?;
     let c = conn_open(&sv, -1, false, true, false, true).ok_or(R_CONNECT_TIMEOUT)?;
@@ -976,7 +974,7 @@ pub fn peer_join(
     req[0x80..0x80 + RYU_NETINFO].copy_from_slice(&netinfo[..RYU_NETINFO]);
     c.send(msg::CONNECT, &req, &[]);
     match wait_joined(&c) {
-        Ok(_) => Ok(RyuPeer(c)),
+        Ok(v) => Ok((RyuPeer(c), v.0, v.1, v.2)),
         Err(r) => {
             c.close();
             Err(r)
@@ -998,7 +996,7 @@ pub fn peer_send(peer: &RyuPeer, p: &RyuProxy, data: &[u8]) {
     peer.0.send(msg::PROXY_DATA, &h, data);
 }
 
-pub fn peer_close(peer: RyuPeer) {
+pub fn peer_close(peer: &RyuPeer) {
     if peer.0.flags.lock().unwrap().in_lobby {
         peer.0.send(msg::DISCONNECT, &[0, 0, 0, 0], &[]);
     }

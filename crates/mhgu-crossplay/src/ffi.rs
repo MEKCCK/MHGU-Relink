@@ -127,14 +127,15 @@ pub extern "C" fn mhgu_ryu_peer_join(
     let sec = unsafe { std::slice::from_raw_parts(sec_cfg, 0x44) };
     let usr = unsafe { std::slice::from_raw_parts(user, 0x30) };
     match ryu::peer_join(ni, sec, usr, lcv, RyuPeerHooks { lobby, data }, ud) {
-        Ok(peer) => {
+        Ok((peer, pip, pmask, info)) => {
             let boxed = Box::new(peer);
             let ptr = Box::into_raw(boxed) as *mut c_void;
             PEER_STORE.lock().unwrap().push(ptr as usize);
-            unsafe { *result = 0; }
-            if !info_out.is_null() {
-                // The peer's info is delivered through the hook; the caller keeps its own copy.
-                let _ = (ip, mask);
+            unsafe {
+                *result = 0;
+                if !ip.is_null() { *ip = pip; }
+                if !mask.is_null() { *mask = pmask; }
+                if !info_out.is_null() { std::ptr::copy_nonoverlapping(info.as_ptr(), info_out, info.len()); }
             }
             ptr
         }
@@ -156,7 +157,7 @@ pub extern "C" fn mhgu_ryu_peer_close(peer: *mut c_void) {
     if peer.is_null() { return; }
     PEER_STORE.lock().unwrap().retain(|p| *p != peer as usize);
     let boxed = unsafe { Box::from_raw(peer as *mut ryu::RyuPeer) };
-    ryu::peer_close(*boxed);
+    ryu::peer_close(&boxed);
 }
 
 // ---- suyu-family rooms (runtime/net/room.h)
@@ -255,3 +256,100 @@ pub extern "C" fn mhgu_roomsrv_stop() { roomsrv::stop() }
 
 #[no_mangle]
 pub extern "C" fn mhgu_roomsrv_running() -> bool { roomsrv::running() }
+
+// ---- mixed hubs (runtime/net/xbridge.h)
+use crate::bridge;
+
+#[no_mangle]
+pub extern "C" fn mhgu_xb_begin(info: *const u8, host_ip: u32, mask: u32) {
+    if info.is_null() { return; }
+    bridge::begin(unsafe { std::slice::from_raw_parts(info, 0x480) }, host_ip, mask);
+}
+#[no_mangle]
+pub extern "C" fn mhgu_xb_end() { bridge::end() }
+#[no_mangle]
+pub extern "C" fn mhgu_xb_active() -> bool { bridge::active() }
+#[no_mangle]
+pub extern "C" fn mhgu_xb_players() -> i32 { bridge::players() }
+#[no_mangle]
+pub extern "C" fn mhgu_xb_lobby(info: *const u8) {
+    if info.is_null() { bridge::lobby(None) } else { bridge::lobby(Some(unsafe { std::slice::from_raw_parts(info, 0x480) })) }
+}
+#[no_mangle]
+pub extern "C" fn mhgu_xb_room_ldn(ty: u8, lip: *const u8, rip: *const u8, bc: bool, data: *const u8, len: u32) {
+    if lip.is_null() || rip.is_null() { return; }
+    let l = unsafe { [*lip, *lip.add(1), *lip.add(2), *lip.add(3)] };
+    let r = unsafe { [*rip, *rip.add(1), *rip.add(2), *rip.add(3)] };
+    let d = if data.is_null() { &[][..] } else { unsafe { std::slice::from_raw_parts(data, len as usize) } };
+    bridge::room_ldn(ty, &l, &r, bc, d);
+}
+#[no_mangle]
+pub extern "C" fn mhgu_xb_room_members(ips: *const [u8; 4], n: i32) {
+    if ips.is_null() || n <= 0 { bridge::room_members(&[]); return; }
+    let v = unsafe { std::slice::from_raw_parts(ips, n as usize) };
+    bridge::room_members(v);
+}
+#[no_mangle]
+pub extern "C" fn mhgu_xb_room_proxy(
+    sip: *const u8, sport: u16, dip: *const u8, dport: u16, proto: u8, bc: bool, data: *const u8, len: u32,
+) {
+    if sip.is_null() || dip.is_null() { return; }
+    let s = unsafe { [*sip, *sip.add(1), *sip.add(2), *sip.add(3)] };
+    let d = unsafe { [*dip, *dip.add(1), *dip.add(2), *dip.add(3)] };
+    let b = if data.is_null() { &[][..] } else { unsafe { std::slice::from_raw_parts(data, len as usize) } };
+    bridge::room_proxy(&s, sport, &d, dport, proto, bc, b);
+}
+
+// ---- RyuLdn server (runtime/net/ryusrv): one per process, the host's embedded server.
+use crate::ryu_server;
+
+#[repr(C)]
+pub struct RyuServerStatusC {
+    pub running: bool,
+    pub port: u16,
+    pub connections: u32,
+    pub lobbies: u32,
+    pub players: u32,
+}
+
+static RYU_SRV: std::sync::LazyLock<std::sync::Mutex<Option<ryu_server::Server>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+#[no_mangle]
+pub extern "C" fn mhgu_ryusrv_start(addr: *const c_char, port: u16, err: *mut c_char, err_size: i32) -> bool {
+    let mut g = RYU_SRV.lock().unwrap();
+    if g.is_some() { return true; }
+    match ryu_server::Server::start(&cstr(addr), port) {
+        Ok(s) => { *g = Some(s); true }
+        Err(e) => {
+            if !err.is_null() && err_size > 0 {
+                let b = e.as_bytes();
+                let n = b.len().min(err_size as usize - 1);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(b.as_ptr(), err as *mut u8, n);
+                    *err.add(n) = 0;
+                }
+            }
+            false
+        }
+    }
+}
+#[no_mangle]
+pub extern "C" fn mhgu_ryusrv_stop() {
+    if let Some(mut s) = RYU_SRV.lock().unwrap().take() { s.stop(); }
+}
+#[no_mangle]
+pub extern "C" fn mhgu_ryusrv_running() -> bool { RYU_SRV.lock().unwrap().is_some() }
+#[no_mangle]
+pub extern "C" fn mhgu_ryusrv_status(out: *mut RyuServerStatusC) -> bool {
+    let g = RYU_SRV.lock().unwrap();
+    let Some(s) = g.as_ref() else { return false };
+    let st = s.status();
+    if !out.is_null() {
+        unsafe { *out = RyuServerStatusC {
+            running: st.running, port: st.port, connections: st.connections as u32,
+            lobbies: st.lobbies as u32, players: st.players as u32,
+        }; }
+    }
+    true
+}

@@ -108,7 +108,7 @@ target_include_directories(main PRIVATE ${S}/third_party/volk)
 target_compile_options(main PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-include ${S}/third_party/volk/volk.h>")
 add_dependencies(main font_obj)
 target_link_libraries(main PRIVATE ${FONT_OBJ} SDL3 mhguffmpeg adrenotools
-  ${MHGU_LINK_LIB}
+  ${MHGU_LINK_LIB} ${MHGU_XP_LIB}
   ${DEPS}/shaderc/lib/libshaderc_combined.a android log dl m z)
 # The game code library binds the runtime's functions (rt_dispatch, the NEON helpers...) by name: all exported.
 # The static libraries stay inside.

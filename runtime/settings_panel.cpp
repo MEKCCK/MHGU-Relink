@@ -398,6 +398,11 @@ bool equal(const Config &a, const Config &b) {
     SAME(fxaa_mode);
     SAME(face_buttons);
     SAME(ldn_port);
+    SAME(crossplay);
+    SAME(ryu_host);
+    SAME(ryu_port);
+    SAME(room_host);
+    SAME(room_port);
     SAME(sync_small_monsters);
     SAME(bonus_content);
     SAME(village_in_hub);
@@ -441,6 +446,9 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
+        strcmp(a.ryu_servers, b.ryu_servers) || strcmp(a.ryu_password, b.ryu_password) ||
+        strcmp(a.room_server, b.room_server) ||
+        strcmp(a.room_name, b.room_name) || strcmp(a.room_password, b.room_password) ||
         strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     for (int n = 0; n < 4; ++n)
@@ -898,6 +906,16 @@ void reset_section() {
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
+        c.crossplay = f.crossplay;
+        SDL_strlcpy(c.ryu_servers, f.ryu_servers, sizeof c.ryu_servers);
+        c.ryu_host = f.ryu_host;
+        c.ryu_port = f.ryu_port;
+        SDL_strlcpy(c.ryu_password, f.ryu_password, sizeof c.ryu_password);
+        SDL_strlcpy(c.room_server, f.room_server, sizeof c.room_server);
+        c.room_host = f.room_host;
+        c.room_port = f.room_port;
+        SDL_strlcpy(c.room_name, f.room_name, sizeof c.room_name);
+        SDL_strlcpy(c.room_password, f.room_password, sizeof c.room_password);
         c.sync_small_monsters = f.sync_small_monsters;
         c.village_in_hub = f.village_in_hub;
         break;
@@ -1416,6 +1434,22 @@ std::vector<Row> main_rows() {
              ini("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
+        add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room")},
+                   [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
+        r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn) or suyu rooms.");
+        text(r, "ryu.servers", tr("RyuLdn servers"), c.ryu_servers, sizeof c.ryu_servers,
+             *c.ryu_servers ? c.ryu_servers : std::string(tr("None")), ini("RyuServers"));
+        add_bool(r, "ryu.host", tr("Run a RyuLdn server"), &c.ryu_host, ini("RyuHost"));
+        number(r, "ryu.port", tr("RyuLdn port"), &c.ryu_port, (int)lo("Port"), (int)hi("Port"), 1, ini("RyuPort"));
+        text(r, "ryu.password", tr("RyuLdn passphrase"), c.ryu_password, sizeof c.ryu_password,
+             *c.ryu_password ? "********" : tr("None"), ini("RyuPassword"));
+        text(r, "room.server", tr("Room server"), c.room_server, sizeof c.room_server,
+             *c.room_server ? c.room_server : std::string(tr("None")), ini("RoomServer"));
+        add_bool(r, "room.host", tr("Run a room server"), &c.room_host, ini("RoomHost"));
+        number(r, "room.port", tr("Room port"), &c.room_port, (int)lo("Port"), (int)hi("Port"), 1, ini("RoomPort"));
+        text(r, "room.name", tr("Room name"), c.room_name, sizeof c.room_name, c.room_name, ini("RoomName"));
+        text(r, "room.password", tr("Room password"), c.room_password, sizeof c.room_password,
+             *c.room_password ? "********" : tr("None"), ini("RoomPassword"));
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
 #ifndef __ANDROID__  // (Discord's Rich Presence is its desktop app's)

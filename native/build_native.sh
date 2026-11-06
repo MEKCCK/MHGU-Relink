@@ -45,11 +45,15 @@ esac
 HTAG=windows-x86_64; [ "$(uname -s)" = Linux ] && HTAG=linux-x86_64
 RUST_CC="$NDK/toolchains/llvm/prebuilt/$HTAG/bin/${RT%%-*}-linux-android$API-clang"
 [ -x "$RUST_CC" ] || { echo "build_native.sh: no NDK clang at $RUST_CC"; exit 1; }
-case $RT in aarch64-*) CARGO_LINKER=CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER ;; *) CARGO_LINKER=CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER ;; esac
-(cd "$ROOT" && env "$CARGO_LINKER=$RUST_CC" cargo build --release -p mhgu-link-ffi --target "$RT") \
-  || { echo "build_native.sh: cargo build -p mhgu-link-ffi --target $RT failed"; exit 1; }
+case $RT in aarch64-*) CARGO_LINKER=CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER; CCVAR=CC_aarch64_linux_android; ARVAR=AR_aarch64_linux_android ;;
+                *) CARGO_LINKER=CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER; CCVAR=CC_x86_64_linux_android; ARVAR=AR_x86_64_linux_android ;; esac
+LLVM_AR="$NDK/toolchains/llvm/prebuilt/$HTAG/bin/llvm-ar"
+(cd "$ROOT" && env "$CARGO_LINKER=$RUST_CC" "$CCVAR=$RUST_CC" "$ARVAR=$LLVM_AR" cargo build --release -p mhgu-link-ffi -p mhgu-crossplay --target "$RT") \
+  || { echo "build_native.sh: cargo build -p mhgu-link-ffi -p mhgu-crossplay --target $RT failed"; exit 1; }
 MHGU_LINK_LIB="$ROOT/target/$RT/release/libmhgu_link_ffi.a"
+MHGU_XP_LIB="$ROOT/target/$RT/release/libmhgu_crossplay.a"
 [ -f "$MHGU_LINK_LIB" ] || { echo "build_native.sh: $MHGU_LINK_LIB is missing"; exit 1; }
+[ -f "$MHGU_XP_LIB" ] || { echo "build_native.sh: $MHGU_XP_LIB is missing"; exit 1; }
 cd "$HERE"
 
 "$CMAKE" -S "$(m "$HERE")" -B "$(m "$OUT")" -G Ninja -DCMAKE_MAKE_PROGRAM="$(m "$NINJA")" \
@@ -57,7 +61,8 @@ cd "$HERE"
   -DANDROID_PLATFORM=android-$API -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=$TYPE \
   -DMHGU_SRC="$(m "$SRC")" -DDEPS="$(m "$ROOT/deps/out/$ABI")" -DGEN="$(m "$SRC/generated")" \
   -DGAMELIB_ID=$GAMELIB_ID -DSHADER_ID=$SHADER_ID -DMHGU_VERSION="$VERSION" -DMHGU_DEV=${MHGU_DEV:-OFF} \
-  -DMHGU_LINK_LIB="$(m "$MHGU_LINK_LIB")" -DMHGU_LINK_INC="$(m "$ROOT/crates/mhgu-link-ffi/include")" > "$OUT.configure.log" 2>&1 \
+  -DMHGU_LINK_LIB="$(m "$MHGU_LINK_LIB")" -DMHGU_LINK_INC="$(m "$ROOT/crates/mhgu-link-ffi/include")" \
+  -DMHGU_XP_LIB="$(m "$MHGU_XP_LIB")" > "$OUT.configure.log" 2>&1 \
   || { tail -30 "$OUT.configure.log"; exit 1; }
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} 2>&1 | grep -E "error|warning: implicit|FAILED|^ninja: build stopped" | head -60
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} > "$OUT.build.log" 2>&1 || { tail -40 "$OUT.build.log"; exit 1; }

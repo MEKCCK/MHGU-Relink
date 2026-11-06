@@ -92,6 +92,16 @@ typedef struct {
     int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
+    int crossplay;            // [Multiplayer] Crossplay: XP_OFF, XP_RYU (Ryujinx LDN server) or XP_ROOM (suyu rooms)
+    char ryu_servers[256];    // [Multiplayer] RyuServers: RyuLdn servers (host[:port], comma separated)
+    int ryu_host;             // [Multiplayer] RyuHost: run the RyuLdn server in this process when hosting
+    int ryu_port;             // [Multiplayer] RyuPort: the embedded server's TCP port
+    char ryu_password[64];    // [Multiplayer] RyuPassword: the lobby's passphrase (empty: public)
+    char room_server[256];    // [Multiplayer] RoomServer: suyu room server (host[:port]); empty: none
+    int room_host;            // [Multiplayer] RoomHost: run the room server in this process when hosting
+    int room_port;            // [Multiplayer] RoomPort: the embedded room server's port
+    char room_name[64];       // [Multiplayer] RoomName: the room's name
+    char room_password[64];   // [Multiplayer] RoomPassword: the room's password (empty: open)
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
@@ -131,6 +141,8 @@ typedef struct {
 } Config;
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
+enum { XP_OFF, XP_RYU, XP_ROOM };
+
 // The hub server used when ini Server is empty (runtime/net/ldn.c, crates/mhgu-hub): the project's public one (an Oracle
 // Cloud VM). "" = no default: no internet hubs unless the player names a server.
 #define LDN_DEFAULT_SERVER "114.66.25.224:39510"

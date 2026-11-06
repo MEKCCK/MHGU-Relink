@@ -8,6 +8,10 @@
 | gu-native | ` gu-native` | `main` @ `a62b1c6`（2026-11-02，13 个提交） | Android 主干：`runtime/` 的触摸/Android 特性、`android/`、`native/`、`deps/`、Android 字体与许可 |
 | mhgu-linux | ` mhgu-linux` | 无 git；快照 2026-11-05/06 | Rust 联机（`crates/`）、更新后的 PC 运行时副本（`base/`：engine modules、`hatestep`、SaveLocation、Rust `ldn.c`、CJK 字体合并）、打包 |
 
+crossplay：`crates/mhgu-crossplay` 由上游（suyu/MHGURecomp 0.15 的 `runtime/net/ryuldn.c`、`ryusrv/`、
+`room.c`、`roomsrv.c`、`xbridge.c`）移植为 Rust；C 侧 `runtime/net/ldn.c` 的 crossplay 分支按同样的
+状态机接入，运行时不再保留这些 C 模块。
+
 git 历史：以 MHGURecomp 的历史为根，`git merge -s ours` 方式并入 gu-native 的 13 个提交（保留可达性，树由合并结果重写）。mhgu-linux 无 git，来源记录在此文件。
 
 ## 合并方式

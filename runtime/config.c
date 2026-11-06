@@ -103,6 +103,16 @@
     .ldn_join = "",                                                                                 \
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
+    .crossplay = XP_OFF,                                                                            \
+    .ryu_servers = "",                                                                              \
+    .ryu_host = 0,                                                                                  \
+    .ryu_port = 30456,                                                                              \
+    .ryu_password = "",                                                                             \
+    .room_server = "",                                                                              \
+    .room_host = 0,                                                                                 \
+    .room_port = 24872,                                                                             \
+    .room_name = "MHGU",                                                                            \
+    .room_password = "",                                                                                  \
     .sync_small_monsters = 1,                                                                       \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
@@ -667,6 +677,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_FSR "Invalid FSR quality, provider, sharpness or reactive mask."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
+#define ERR_XP "Invalid crossplay server, room name or password (no newlines, ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -769,6 +780,16 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
+    {"Multiplayer", "Crossplay", SET_CHOICE, F(crossplay), 0, 0, 0, "Off,Ryujinx,Room", NULL, false, ERR_XP},
+    {"Multiplayer", "RyuServers", SET_TEXT, F(ryu_servers), sizeof g_config.ryu_servers, 0, 0, NULL, NULL, false, ERR_XP},
+    ON_OFF("Multiplayer", "RyuHost", ryu_host, false),
+    {"Multiplayer", "RyuPort", SET_INT, F(ryu_port), 0, 1, 65535, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RyuPassword", SET_TEXT, F(ryu_password), sizeof g_config.ryu_password, 0, 0, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomServer", SET_TEXT, F(room_server), sizeof g_config.room_server, 0, 0, NULL, NULL, false, ERR_XP},
+    ON_OFF("Multiplayer", "RoomHost", room_host, false),
+    {"Multiplayer", "RoomPort", SET_INT, F(room_port), 0, 1, 65535, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomName", SET_TEXT, F(room_name), sizeof g_config.room_name, 0, 0, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomPassword", SET_TEXT, F(room_password), sizeof g_config.room_password, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
@@ -1251,6 +1272,16 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
+    if ((e = getenv("MHGU_CROSSPLAY"))) g_config.crossplay = atoi(e);
+    if ((e = getenv("MHGU_RYU_SERVERS"))) snprintf(g_config.ryu_servers, sizeof g_config.ryu_servers, "%s", e);
+    if ((e = getenv("MHGU_RYU_HOST"))) g_config.ryu_host = atoi(e);
+    if ((e = getenv("MHGU_RYU_PORT")) && atoi(e) > 0) g_config.ryu_port = atoi(e);
+    if ((e = getenv("MHGU_RYU_PASSWORD"))) snprintf(g_config.ryu_password, sizeof g_config.ryu_password, "%s", e);
+    if ((e = getenv("MHGU_ROOM_SERVER"))) snprintf(g_config.room_server, sizeof g_config.room_server, "%s", e);
+    if ((e = getenv("MHGU_ROOM_HOST"))) g_config.room_host = atoi(e);
+    if ((e = getenv("MHGU_ROOM_PORT")) && atoi(e) > 0) g_config.room_port = atoi(e);
+    if ((e = getenv("MHGU_ROOM_NAME"))) snprintf(g_config.room_name, sizeof g_config.room_name, "%s", e);
+    if ((e = getenv("MHGU_ROOM_PASSWORD"))) snprintf(g_config.room_password, sizeof g_config.room_password, "%s", e);
     if ((e = getenv("MHGU_ASPECT"))) parse_aspect(e, &g_config.aspect_ratio);
     if ((e = getenv("MHGU_FOV")) && strtof(e, NULL) >= 0.5f && strtof(e, NULL) <= 2.0f) g_config.fov = strtof(e, NULL);
     if ((e = getenv("MHGU_UI_ANCHOR"))) config_parse(config_setting("UIAnchor"), e, &g_config);

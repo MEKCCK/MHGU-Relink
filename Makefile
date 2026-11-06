@@ -136,7 +136,7 @@ FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
 # doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
-LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(abspath target/release/libmhgu_link_ffi.a) -lpthread -ldl -lm -lrt
+LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(abspath target/release/libmhgu_link_ffi.a) $(abspath target/release/libmhgu_crossplay.a) -lpthread -ldl -lm -lrt
 # The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.
@@ -191,6 +191,7 @@ IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI
 # with the system vulkan-memory-allocator package are unaffected)
 MHGU_LINK_INC := crates/mhgu-link-ffi/include
 MHGU_LINK_LIB := $(abspath target/release/libmhgu_link_ffi.a)
+MHGU_XP_LIB   := $(abspath target/release/libmhgu_crossplay.a)
 RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
@@ -294,7 +295,7 @@ $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
 
-$(EXE): $(RT_OBJ) $(O)/rt/touch.o $(O)/rt/perfstats.o $(AV_DEPS) $(abspath target/release/libmhgu_link_ffi.a)
+$(EXE): $(RT_OBJ) $(O)/rt/touch.o $(O)/rt/perfstats.o $(AV_DEPS) $(abspath target/release/libmhgu_link_ffi.a) $(abspath target/release/libmhgu_crossplay.a)
 	@mkdir -p $(dir $@)
 	$(CXX) -o $@ $^ $(LDFLAGS)
 	$(GLIBC_CHECK)

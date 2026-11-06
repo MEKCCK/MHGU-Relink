@@ -36,6 +36,52 @@
 #include "../settings_locale.h"
 #include "net.h"
 #include "mhgu_link.h"  /* the Rust online module (crates/mhgu-link-ffi) */
+// ---- crossplay: the Rust modules (crates/mhgu-crossplay), their C API
+typedef struct { uint32_t src_ip, dst_ip; uint16_t src_port, dst_port; uint32_t proto; } RyuProxy;
+extern bool mhgu_ryu_enabled(void);
+extern void mhgu_ryu_set_config(const char *servers, const char *host, const char *pass);
+extern void mhgu_ryu_set_self(const char *addr);
+extern void mhgu_ryu_set_hooks(void (*lobby)(const uint8_t *), void (*data)(const RyuProxy *, const uint8_t *, uint32_t));
+extern int mhgu_ryu_server_count(void);
+extern int mhgu_ryu_scan(const uint8_t *filter, uint8_t *infos, int *server_of, int max);
+extern uint32_t mhgu_ryu_create(int server, const uint8_t *net, const uint8_t *sec, const uint8_t *user,
+                                const uint8_t *adv, uint32_t adv_size, uint8_t *info, uint32_t *ip, uint32_t *mask);
+extern uint32_t mhgu_ryu_connect(int server, const uint8_t *info, const uint8_t *sec, const uint8_t *user, uint16_t lcv,
+                                 uint8_t *out, uint32_t *ip, uint32_t *mask);
+extern void mhgu_ryu_leave(void);
+extern bool mhgu_ryu_in_lobby(void);
+extern void mhgu_ryu_set_advertise(const uint8_t *data, uint32_t len);
+extern void mhgu_ryu_set_accept_policy(uint8_t policy);
+extern bool mhgu_ryu_reject(uint32_t node_id, uint32_t reason);
+extern void mhgu_ryu_send(const RyuProxy *p, const uint8_t *data, uint32_t len);
+extern bool mhgu_ryusrv_start(const char *addr, uint16_t port, char *err, int err_size);
+extern void mhgu_ryusrv_stop(void);
+extern bool mhgu_ryusrv_running(void);
+
+typedef void (*RoomLdnCb)(uint8_t, const uint8_t *, const uint8_t *, bool, const uint8_t *, uint32_t);
+typedef void (*RoomProxyCb)(const uint8_t *, uint16_t, const uint8_t *, uint16_t, uint8_t, bool, const uint8_t *, uint32_t);
+extern void mhgu_room_set_hooks(RoomLdnCb ldn, RoomProxyCb proxy, void (*lost)(void), void (*members)(const uint8_t (*)[4], int));
+extern bool mhgu_room_join(const char *server, const char *nick, const char *password, uint8_t *ip, char *err, int err_size);
+extern void mhgu_room_leave(void);
+extern bool mhgu_room_connected(void);
+extern void mhgu_room_own_ip(uint8_t *ip);
+extern void mhgu_room_send_ldn(uint8_t type, const uint8_t *lip, const uint8_t *rip, bool bc, const uint8_t *data, uint32_t len);
+extern void mhgu_room_send_proxy(const uint8_t *sip, uint16_t sport, const uint8_t *dip, uint16_t dport, uint8_t proto, bool bc,
+                                 const uint8_t *data, uint32_t len);
+extern bool mhgu_roomsrv_start(int port, const char *name, const char *password, const char *host_nick, char *err, int err_size);
+extern void mhgu_roomsrv_stop(void);
+extern bool mhgu_roomsrv_running(void);
+
+extern void mhgu_xb_begin(const uint8_t *info, uint32_t host_ip, uint32_t mask);
+extern void mhgu_xb_end(void);
+extern bool mhgu_xb_active(void);
+extern int mhgu_xb_players(void);
+extern void mhgu_xb_lobby(const uint8_t *info);
+extern void mhgu_xb_room_ldn(uint8_t type, const uint8_t *lip, const uint8_t *rip, bool bc, const uint8_t *data, uint32_t len);
+extern void mhgu_xb_room_members(const uint8_t (*ips)[4], int n);
+extern void mhgu_xb_room_proxy(const uint8_t *sip, uint16_t sport, const uint8_t *dip, uint16_t dport, uint8_t proto, bool bc,
+                               const uint8_t *data, uint32_t len);
+
 
 #ifdef _WIN32
 typedef SOCKET hsock;
@@ -77,6 +123,8 @@ enum {
 enum { NODE_IP = 0x00, NODE_MAC = 0x04, NODE_ID = 0x0A, NODE_CONNECTED = 0x0B, NODE_NAME = 0x0C, NODE_LCV = 0x2E };
 #define MAX_NODES 8
 #define ADV_MAX 0x180
+// suyu-family room LDN packets (crates/mhgu-crossplay/src/room.rs)
+enum { RLDN_SCAN, RLDN_SCAN_RESP, RLDN_CONNECT, RLDN_SYNC_NETWORK, RLDN_DISCONNECT, RLDN_DESTROY_NETWORK };
 // NetworkConfig (0x20): IntentId 0x10, u16 channel, u8 node count max, u8 -, u16 local communication version
 // SecurityConfig (0x44): u16 mode, u16 passphrase size, passphrase[0x40]; UserConfig (0x30): user name[0x21]
 // SecurityParameter (0x20): data[0x10], session id[0x10]
@@ -142,11 +190,17 @@ static struct {
     // host
     bool hosting;
     int port;  // [Multiplayer] Port as it was when this hub started (a Save changes the next hub's, not this one's)
+    // crossplay
+    bool ryu;                    // the network is a lobby on a RyuLdn server
+    uint32_t ryu_mask;
+    bool room;                   // the network is a hub in a suyu-family room
+    bool room_client[MAX_NODES]; // host: the room players in the hub, by node
+    uint8_t room_cip[MAX_NODES][4];
 } L = {.mu = PTHREAD_MUTEX_INITIALIZER};
 
 // Scan results: where each found network's host is (hub: on the hub server at addr, 0: the host's own address).
 #define MAX_FOUND 32
-static struct { uint8_t bssid[6], session[16]; struct sockaddr_in addr; uint64_t hub; } found[MAX_FOUND];
+static struct { uint8_t bssid[6], session[16]; struct sockaddr_in addr; uint64_t hub; uint8_t info[NETINFO_SIZE]; int ryu; bool room; } found[MAX_FOUND];
 static int nfound;
 
 static void signal_change(void) {
@@ -285,7 +339,7 @@ uint32_t ldn_own_ip(void) { return L.own_ip; }
 uint32_t ldn_broadcast_ip(void) { return L.subnet ? L.subnet | 0xFF : 0xFFFFFFFFu; }
 bool ldn_net_up(void) { return L.state == ST_AP_CREATED || L.state == ST_STATION_CONNECTED; }
 bool ldn_hosting(void) { return L.state == ST_AP_CREATED; }
-bool ldn_crossplay(void) { return false; }  // (crossplay with emulator rooms is not built in this tree)
+bool ldn_crossplay(void) { return L.ryu || L.room; }
 bool ldn_party(int *n, int *max, char *id, size_t size) {
     pthread_mutex_lock(&L.mu);
     bool up = ldn_net_up();
@@ -304,7 +358,25 @@ bool ldn_party(int *n, int *max, char *id, size_t size) {
 }
 
 
+static void ip_bytes(uint32_t ip, uint8_t b[4]) { b[0] = (uint8_t)(ip >> 24); b[1] = (uint8_t)(ip >> 16); b[2] = (uint8_t)(ip >> 8); b[3] = (uint8_t)ip; }
+static void ryu_xmit(const VPacket *p, const void *data, uint32_t len) {
+    bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
+    RyuProxy r = {p->src_ip, all ? ldn_broadcast_ip() : p->dst_ip, p->src_port, p->dst_port, 17};
+    mhgu_ryu_send(&r, data, len);
+}
+static void room_xmit(const VPacket *p, const void *data, uint32_t len) {
+    bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
+    uint8_t s[4], d[4];
+    ip_bytes(p->src_ip, s);
+    ip_bytes(p->dst_ip, d);
+    mhgu_room_send_proxy(s, p->src_port, d, p->dst_port, 4, all, data, len);
+}
 void ldn_send(const VPacket *p, const void *data, uint32_t len) {
+    if (L.ryu || L.room) {
+        if (!ldn_net_up()) return;
+        if (L.ryu) ryu_xmit(p, data, len); else room_xmit(p, data, len);
+        return;
+    }
     if (L.state == ST_AP_CREATED) {
         bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
         if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
@@ -327,6 +399,7 @@ void ldn_send(const VPacket *p, const void *data, uint32_t len) {
 
 // The port's own messages to every other game in the network (reliable, in order: the TCP link).
 void ldn_send_aux(const void *data, uint32_t len) {
+    if (L.ryu || L.room) return;
     if (L.state == ST_AP_CREATED) {
         mhgu_ldn_send_aux(data, len);
     } else if (L.state == ST_STATION_CONNECTED) {
@@ -395,6 +468,305 @@ static void link_received(const VPacket *p, const void *data, uint32_t len) {
     lag_tail = d;
     pthread_cond_signal(&lag_cv);
     pthread_mutex_unlock(&lag_mu);
+}
+
+
+// ---- crossplay: a lobby on a RyuLdn server (Ryujinx/suyu)
+static void ryu_lobby_changed(const uint8_t *info) {
+    pthread_mutex_lock(&L.mu);
+    if (!L.ryu) { pthread_mutex_unlock(&L.mu); return; }
+    if (info) {
+        bool ok = info_sane((uint8_t *)info);
+        if (ok) memcpy(L.info, info, NETINFO_SIZE);
+        LOG("[ldn] RyuLdn lobby update: %d of %d players%s\n", info[NI_NODE_COUNT], info[NI_NODE_MAX], ok ? "" : " (rejected as malformed)");
+    } else if (L.state == ST_AP_CREATED) {
+        L.state = ST_ACCESS_POINT, L.reason = DR_DESTROYED_BY_SYSTEM;
+        LOG("[ldn] the RyuLdn server closed the hub\n");
+    } else if (L.state == ST_STATION_CONNECTED) {
+        L.state = ST_ERROR, L.reason = DR_SIGNAL_LOST;
+        LOG("[ldn] connection to the RyuLdn lobby ended\n");
+    }
+    bool gone = !info;
+    pthread_mutex_unlock(&L.mu);
+    if (mhgu_xb_active()) mhgu_xb_lobby(info);
+    if (gone) vsock_network_down();
+    signal_change();
+}
+
+static void ryu_data_received(const RyuProxy *r, const uint8_t *data, uint32_t len) {
+    if (!L.ryu || r->proto != 17) return;
+    VPacket p = {.src_ip = r->src_ip, .dst_ip = r->dst_ip, .src_port = r->src_port, .dst_port = r->dst_port,
+                 .proto = VPROTO_UDP, .kind = 0};
+    vsock_deliver(&p, data, len);
+}
+
+static void ryu_stop(void) {
+    if (!L.ryu) return;
+    mhgu_xb_end();
+    mhgu_ryu_leave();
+    L.ryu = false;
+    L.ryu_mask = 0;
+    vsock_network_down();
+}
+
+// ---- crossplay: a suyu-family room
+static uint32_t ip_u32(const uint8_t b[4]) { return (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; }
+static void room_mac(uint8_t mac[6]) { uint8_t ip[4]; mhgu_room_own_ip(ip); mac[0] = 0x02, mac[1] = 0; memcpy(mac + 2, ip, 4); }
+
+static struct { uint8_t info[NETINFO_SIZE]; } room_scan[MAX_FOUND];
+static int room_nscan;
+static bool room_scanning, room_info_dirty;
+static pthread_mutex_t room_scan_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void room_sync_all(void) {
+    uint8_t own[4], info[NETINFO_SIZE];
+    mhgu_room_own_ip(own);
+    pthread_mutex_lock(&L.mu);
+    memcpy(info, L.info, NETINFO_SIZE);
+    pthread_mutex_unlock(&L.mu);
+    for (int i = 1; i < MAX_NODES; i++)
+        if (L.room_client[i]) mhgu_room_send_ldn(RLDN_SYNC_NETWORK, own, L.room_cip[i], false, info, NETINFO_SIZE);
+}
+
+static void room_stop(void) {
+    if (!L.room) return;
+    if (L.state == ST_AP_CREATED) {
+        uint8_t own[4];
+        mhgu_room_own_ip(own);
+        for (int i = 1; i < MAX_NODES; i++)
+            if (L.room_client[i]) mhgu_room_send_ldn(RLDN_DESTROY_NETWORK, own, L.room_cip[i], false, NULL, 0);
+    } else if (L.state == ST_STATION_CONNECTED) {
+        uint8_t own[4], host[4];
+        mhgu_room_own_ip(own);
+        ip_bytes(rd32(node_at(L.info, 0) + NODE_IP), host);
+        uint8_t node[NODE_SIZE] = {0};
+        wr32(node + NODE_IP, L.own_ip);
+        room_mac(node + NODE_MAC);
+        mhgu_room_send_ldn(RLDN_DISCONNECT, own, host, false, node, NODE_SIZE);
+    }
+    memset(L.room_client, 0, sizeof L.room_client);
+    L.room = false;
+    vsock_network_down();
+}
+
+static bool room_from_host_locked(const uint8_t ip[4]) { return ip_u32(ip) == rd32(node_at(L.info, 0) + NODE_IP); }
+static bool room_in_hub_locked(uint32_t ip) {
+    for (int i = 0; i < MAX_NODES; i++)
+        if (node_at(L.info, i)[NODE_CONNECTED] && rd32(node_at(L.info, i) + NODE_IP) == ip) return true;
+    return false;
+}
+
+static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool bc, const uint8_t *data, uint32_t len) {
+    if (mhgu_xb_active() && (type == RLDN_SCAN || type == RLDN_CONNECT || type == RLDN_DISCONNECT)) {
+        mhgu_xb_room_ldn(type, lip, rip, bc, data, len);
+        return;
+    }
+    uint8_t own[4];
+    mhgu_room_own_ip(own);
+    switch (type) {
+    case RLDN_SCAN: {
+        uint8_t info[NETINFO_SIZE];
+        bool host;
+        pthread_mutex_lock(&L.mu);
+        host = L.room && L.state == ST_AP_CREATED;
+        if (host) memcpy(info, L.info, NETINFO_SIZE);
+        pthread_mutex_unlock(&L.mu);
+        if (host) mhgu_room_send_ldn(RLDN_SCAN_RESP, own, lip, false, info, NETINFO_SIZE);
+        break;
+    }
+    case RLDN_SCAN_RESP:
+        if (len >= NETINFO_SIZE && info_sane((uint8_t *)data)) {
+            pthread_mutex_lock(&room_scan_mu);
+            if (room_scanning) {
+                int i = 0;
+                while (i < room_nscan && memcmp(room_scan[i].info + NI_BSSID, (const uint8_t *)data + NI_BSSID, 6)) i++;
+                if (i < MAX_FOUND) { memcpy(room_scan[i].info, data, NETINFO_SIZE); if (i == room_nscan) room_nscan++; }
+            }
+            pthread_mutex_unlock(&room_scan_mu);
+        }
+        break;
+    case RLDN_CONNECT: {
+        if (len < NODE_SIZE) break;
+        bool changed = false, refused = false, again = false;
+        pthread_mutex_lock(&L.mu);
+        if (L.room && L.state == ST_AP_CREATED) {
+            uint16_t lcv = rd16((const uint8_t *)data + NODE_LCV);
+            for (int k = 1; k < MAX_NODES; k++) again |= L.room_client[k] && !memcmp(L.room_cip[k], lip, 4);
+            refused = !again && (L.info[NI_NODE_COUNT] >= L.info[NI_NODE_MAX] || L.info[NI_ACCEPT_POLICY] == 1 ||
+                                 (lcv && lcv != L.lcv));
+        }
+        if (L.room && L.state == ST_AP_CREATED && !again && !refused) {
+            int i = 1;
+            while (i < MAX_NODES && node_at(L.info, i)[NODE_CONNECTED]) i++;
+            refused = i == MAX_NODES;
+            if (i < MAX_NODES) {
+                uint8_t *nd = node_at(L.info, i);
+                memcpy(nd, data, NODE_SIZE);
+                nd[NODE_ID] = (uint8_t)i, nd[NODE_CONNECTED] = 1;
+                L.room_client[i] = true;
+                memcpy(L.room_cip[i], lip, 4);
+                L.info[NI_NODE_COUNT]++;
+                changed = true;
+                LOG("[ldn] room member %u.%u.%u.%u joined the hub as node %d\n", lip[0], lip[1], lip[2], lip[3], i);
+            }
+        }
+        pthread_mutex_unlock(&L.mu);
+        if (refused) mhgu_room_send_ldn(RLDN_DESTROY_NETWORK, own, lip, false, NULL, 0);
+        if (changed || again) room_sync_all();
+        if (changed) signal_change();
+        break;
+    }
+    case RLDN_DISCONNECT: {
+        if (len < NODE_SIZE) break;
+        bool changed = false;
+        pthread_mutex_lock(&L.mu);
+        if (L.room && L.state == ST_AP_CREATED)
+            for (int i = 1; i < MAX_NODES; i++)
+                if (L.room_client[i] && !memcmp(L.room_cip[i], lip, 4)) {
+                    memset(node_at(L.info, i), 0, NODE_SIZE);
+                    node_at(L.info, i)[NODE_ID] = (uint8_t)i;
+                    L.room_client[i] = false;
+                    if (L.info[NI_NODE_COUNT] > 1) L.info[NI_NODE_COUNT]--;
+                    changed = true;
+                }
+        pthread_mutex_unlock(&L.mu);
+        if (changed) { room_sync_all(); signal_change(); }
+        break;
+    }
+    case RLDN_SYNC_NETWORK:
+        if (len >= NETINFO_SIZE && info_sane((uint8_t *)data)) {
+            pthread_mutex_lock(&L.mu);
+            if (L.room && (L.state == ST_STATION || L.state == ST_STATION_CONNECTED) && room_from_host_locked(lip)) {
+                memcpy(L.info, data, NETINFO_SIZE);
+                L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
+            }
+            pthread_mutex_unlock(&L.mu);
+            signal_change();
+        }
+        break;
+    case RLDN_DESTROY_NETWORK: {
+        bool gone = false;
+        pthread_mutex_lock(&L.mu);
+        if (L.room && L.state == ST_STATION_CONNECTED && room_from_host_locked(lip)) {
+            L.state = ST_STATION, L.reason = DR_DESTROYED_BY_SYSTEM;
+            L.own_ip = L.subnet = 0, gone = true;
+            L.room = false;
+        }
+        pthread_mutex_unlock(&L.mu);
+        if (gone) { LOG("[ldn] the room's hub was closed by its host\n"); vsock_network_down(); signal_change(); }
+        break;
+    }
+    }
+}
+
+static void room_proxy_received(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], uint16_t dport, uint8_t proto, bool bc,
+                                const uint8_t *data, uint32_t len) {
+    if (mhgu_xb_active()) { mhgu_xb_room_proxy(sip, sport, dip, dport, proto, bc, data, len); return; }
+    if (!L.room || proto != 4) return;
+    pthread_mutex_lock(&L.mu);
+    bool ours = L.room && ldn_net_up() && room_in_hub_locked(ip_u32(sip));
+    pthread_mutex_unlock(&L.mu);
+    if (!ours) return;
+    VPacket p = {.src_ip = ip_u32(sip), .dst_ip = ip_u32(dip), .src_port = sport, .dst_port = dport, .proto = VPROTO_UDP, .kind = 0};
+    vsock_deliver(&p, data, len);
+}
+
+static void room_members_changed(const uint8_t (*ips)[4], int n) { if (mhgu_xb_active()) mhgu_xb_room_members(ips, n); }
+static void room_lost(void) {
+    LOG("[room] the room connection ended\n");
+    mhgu_xb_end();
+    bool gone = false;
+    pthread_mutex_lock(&L.mu);
+    if (L.room) {
+        if (L.state == ST_AP_CREATED) L.state = ST_ACCESS_POINT, L.reason = DR_DESTROYED_BY_SYSTEM, gone = true;
+        else if (L.state == ST_STATION_CONNECTED) L.state = ST_ERROR, L.reason = DR_SIGNAL_LOST, gone = true;
+        if (gone) { memset(L.room_client, 0, sizeof L.room_client); L.room = false; }
+    }
+    pthread_mutex_unlock(&L.mu);
+    if (gone) { vsock_network_down(); signal_change(); }
+}
+
+static bool ryu_configured(void) {
+    return g_config.crossplay == XP_RYU && (g_config.ryu_servers[0] || g_config.ryu_host);
+}
+static bool room_configured(void) {
+    return g_config.crossplay == XP_ROOM && (g_config.room_server[0] || g_config.room_host);
+}
+static char roomsrv_self[32];
+static const char *room_server(void) { return roomsrv_self[0] ? roomsrv_self : g_config.room_server; }
+static bool room_enabled(void) { return room_configured() && (room_server()[0] != 0); }
+
+static volatile int room_keep_gen;
+static volatile bool room_wanted;
+static void *room_keeper(void *arg) {
+    int gen = (int)(intptr_t)arg;
+    uint64_t next = 0;
+    while (room_keep_gen == gen) {
+        uint64_t now = plat_now_ns();
+        if (now >= next && room_enabled() && !mhgu_room_connected()) {
+            uint8_t ip[4];
+            char err[96];
+            if (!mhgu_room_join(room_server(), g_config.room_name, g_config.room_password, ip, err, sizeof err)) {
+                LOG("[ldn] room join failed: %s\n", err);
+                next = now + 15000000000ull;
+            }
+        }
+        plat_sleep_until_ns(plat_now_ns() + 500000000ull);
+    }
+    if (!room_wanted) mhgu_room_leave();
+    return NULL;
+}
+static void room_start(void) {
+    if (!room_enabled()) return;
+    static bool hooked;
+    if (!hooked) {
+        hooked = true;
+        mhgu_room_set_hooks(room_ldn_received, room_proxy_received, room_lost, room_members_changed);
+    }
+    pthread_t t;
+    room_wanted = true;
+    room_keep_gen++;
+    if (!pthread_create(&t, NULL, room_keeper, (void *)(intptr_t)room_keep_gen)) pthread_detach(t);
+}
+static void room_shutdown(void) {
+    room_wanted = false;
+    room_keep_gen++;
+    room_stop();
+}
+
+static void ryusrv_wanted(void) {
+    if (!g_config.ryu_host || mhgu_ryusrv_running()) return;
+    int port = g_config.ryu_port > 0 ? g_config.ryu_port : 30456;
+    char err[96] = "";
+    if (!mhgu_ryusrv_start("0.0.0.0", (uint16_t)port, err, sizeof err)) {
+        LOG("[ldn] can't run the RyuLdn server on port %d: %s\n", port, err);
+        return;
+    }
+    char addr[32];
+    snprintf(addr, sizeof addr, "127.0.0.1:%d", port);
+    mhgu_ryu_set_self(addr);
+    LOG("[ldn] Ryujinx players can use this PC as their LDN server (port %d)\n", port);
+}
+static void ryusrv_unwanted(void) {
+    if (!mhgu_ryusrv_running()) return;
+    mhgu_ryu_set_self(NULL);
+    mhgu_ryusrv_stop();
+}
+static void roomsrv_wanted(void) {
+    if (!g_config.room_host || mhgu_roomsrv_running()) return;
+    int port = g_config.room_port > 0 ? g_config.room_port : 24872;
+    char err[96] = "";
+    if (!mhgu_roomsrv_start(port, g_config.room_name, g_config.room_password, "MHGU Host", err, sizeof err)) {
+        LOG("[ldn] can't run the room server on port %d: %s\n", port, err);
+        return;
+    }
+    snprintf(roomsrv_self, sizeof roomsrv_self, "127.0.0.1:%d", port);
+    LOG("[ldn] suyu-family players can join this PC's room (port %d)\n", port);
+}
+static void roomsrv_unwanted(void) {
+    if (!mhgu_roomsrv_running()) return;
+    roomsrv_self[0] = 0;
+    mhgu_roomsrv_stop();
 }
 
 // ---- host
@@ -859,7 +1231,16 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
     lan_wifi(true);
     pthread_mutex_lock(&L.mu);
     if (!L.ev) L.ev = kernel_create_event_pair(&(uint32_t){0}, &L.ev_r);
+    static bool hooked;
+    if (!hooked) {
+        hooked = true;
+        mhgu_ryu_set_hooks(ryu_lobby_changed, ryu_data_received);
+    }
+    mhgu_ryu_set_config(g_config.ryu_servers, "", g_config.ryu_password);
     if (L.state == ST_NONE) {
+        ryusrv_wanted();
+        roomsrv_wanted();
+        room_start();
         L.state = ST_INITIALIZED, L.reason = DR_NONE;
         rand_bytes(L.mac, 6);
         L.mac[0] = (uint8_t)((L.mac[0] & 0xFC) | 0x02);  // locally administered, unicast
@@ -875,6 +1256,12 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
 
 static void to_initialized(void) {
     int st = L.state;
+    if (L.ryu || L.room) {
+        if (L.ryu) ryu_stop();
+        else room_stop();
+        L.own_ip = L.subnet = 0;
+        return;
+    }
     if (st == ST_AP_CREATED || st == ST_ACCESS_POINT) host_stop(DR_DESTROYED_BY_USER);
     if (st == ST_STATION_CONNECTED || st == ST_STATION || st == ST_ERROR) station_leave();
     if (st == ST_AP_CREATED) vsock_network_down();
@@ -884,6 +1271,9 @@ static void to_initialized(void) {
 HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
     lan_wifi(false);
     to_initialized();
+    room_shutdown();
+    roomsrv_unwanted();
+    ryusrv_unwanted();
     L.state = ST_NONE;
     (void)c;
 }
@@ -903,7 +1293,7 @@ HLE_FUNC("_ZN2nn3ldn14GetNetworkInfoEPNS0_11NetworkInfoE", ldn_get_network_info)
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
     // The players in the network come from the Rust link (it keeps the node table); the game reads it
     // here, and Pia routes by those addresses.
-    if (ldn_net_up()) mhgu_ldn_info(L.info, NETINFO_SIZE);
+    if (ldn_net_up() && !L.ryu && !L.room) mhgu_ldn_info(L.info, NETINFO_SIZE);
     pthread_mutex_lock(&L.mu);
     memcpy(ARGP(0), L.info, NETINFO_SIZE);
     trace("GetNetworkInfo -> %u node(s), host %s", L.info[NI_NODE_COUNT], ipstr(rd32(node_at(L.info, 0) + NODE_IP)));
@@ -914,7 +1304,7 @@ HLE_FUNC("_ZN2nn3ldn14GetNetworkInfoEPNS0_11NetworkInfoE", ldn_get_network_info)
 HLE_FUNC("_ZN2nn3ldn14GetIpv4AddressEPNS0_11Ipv4AddressEPNS0_10SubnetMaskE", ldn_get_ipv4) { NTRACE();
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
     if (ARG(0)) ST32(ARG(0), L.own_ip);
-    if (ARG(1)) ST32(ARG(1), 0xFFFFFF00u);
+    if (ARG(1)) ST32(ARG(1), L.ryu && L.ryu_mask ? L.ryu_mask : 0xFFFFFF00u);
     trace("GetIpv4Address -> %s", ipstr(L.own_ip));
     RET(0);
 }
@@ -954,8 +1344,32 @@ HLE_FUNC("_ZN2nn3ldn16CloseAccessPointEv", ldn_close_ap) { NTRACE();
     RET(0);
 }
 
+static uint32_t create_ryu(const uint8_t *cfg, const uint8_t *sec, const uint8_t *user) {
+    uint8_t info[NETINFO_SIZE];
+    uint32_t ip = 0, mask = 0;
+    L.ryu = true;
+    uint32_t r = mhgu_ryu_create(-1, cfg, sec, user, L.adv, L.adv_size, info, &ip, &mask);
+    if (r) {
+        L.ryu = false;
+        LOG("[ldn] creating the hub on the RyuLdn server failed (result %#x)\n", r);
+        return r;
+    }
+    pthread_mutex_lock(&L.mu);
+    if (info_sane(info)) memcpy(L.info, info, NETINFO_SIZE);
+    L.own_ip = ip, L.ryu_mask = mask, L.subnet = ip & mask, L.lcv = rd16(cfg + 0x14);
+    L.state = ST_AP_CREATED, L.reason = DR_NONE;
+    pthread_mutex_unlock(&L.mu);
+    LOG("[ldn] hub created on the RyuLdn server: %s, up to %d players\n", ipstr(L.own_ip), L.info[NI_NODE_MAX]);
+    if (g_config.ryu_host && room_configured() && mhgu_room_connected()) mhgu_xb_begin(info, ip, mask);
+    signal_change();
+    return 0;
+}
+
 static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uint8_t *sec_param, const uint8_t *user) {
     if (L.state != ST_ACCESS_POINT) return R_INVALID_STATE;
+    if (ryu_configured()) return create_ryu(cfg, sec, user);
+    bool via_room = room_configured() && mhgu_room_connected();
+    if (via_room) room_mac(L.mac);
     pthread_mutex_lock(&L.mu);
     memset(L.info, 0, NETINFO_SIZE);
     memcpy(L.info, cfg, 0x10);  // IntentId
@@ -981,8 +1395,16 @@ static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uin
     L.info[NI_NODE_MAX] = max >= 1 && max <= MAX_NODES ? max : MAX_NODES;
     L.info[NI_NODE_COUNT] = 1;
     L.lcv = rd16(cfg + 0x14);
-    L.subnet = 0xA9FE0000u | (uint32_t)(1 + arc4random() % 254) << 8;  // 169.254.x.0/24
-    L.own_ip = L.subnet | 1;
+    if (via_room) {
+        uint8_t ip[4];
+        mhgu_room_own_ip(ip);
+        L.own_ip = ip_u32(ip), L.subnet = L.own_ip & 0xFFFFFF00u;
+        memset(L.room_client, 0, sizeof L.room_client);
+        memcpy(L.info + NI_SSID, "\x12YuzuFakeSsidForLdn", 19);
+    } else {
+        L.subnet = 0xA9FE0000u | (uint32_t)(1 + arc4random() % 254) << 8;  // 169.254.x.0/24
+        L.own_ip = L.subnet | 1;
+    }
     uint8_t *nd = node_at(L.info, 0);
     wr32(nd + NODE_IP, L.own_ip);
     memcpy(nd + NODE_MAC, L.mac, 6);
@@ -995,9 +1417,10 @@ static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uin
     uint64_t auth = ((uint64_t)arc4random() << 32) | arc4random();
     memcpy(L.info + NI_AUTH_ID, &auth, 8);
     pthread_mutex_unlock(&L.mu);
-    host_start();
+    if (via_room) L.room = true;
+    else host_start();
     L.state = ST_AP_CREATED;
-    LOG("[ldn] network created: %s, up to %d players, version %u\n", ipstr(L.own_ip), L.info[NI_NODE_MAX], L.lcv);
+    LOG("[ldn] network created%s: %s, up to %d players, version %u\n", via_room ? " in the room" : "", ipstr(L.own_ip), L.info[NI_NODE_MAX], L.lcv);
     signal_change();
     return 0;
 }
@@ -1014,7 +1437,9 @@ HLE_FUNC("_ZN2nn3ldn20CreateNetworkPrivateERKNS0_13NetworkConfigERKNS0_14Securit
 
 HLE_FUNC("_ZN2nn3ldn14DestroyNetworkEv", ldn_destroy) { NTRACE();
     if (L.state != ST_AP_CREATED) { RET(R_INVALID_STATE); return; }
-    host_stop(DR_DESTROYED_BY_USER);
+    if (L.ryu) ryu_stop();
+    else if (L.room) room_stop();
+    else host_stop(DR_DESTROYED_BY_USER);
     vsock_network_down();
     L.state = ST_ACCESS_POINT;
     L.own_ip = L.subnet = 0;
@@ -1032,22 +1457,57 @@ HLE_FUNC("_ZN2nn3ldn16SetAdvertiseDataEPKvj", ldn_set_advertise) { NTRACE();
         wr16(L.info + NI_ADV_SIZE, (uint16_t)n);
         memset(L.info + NI_ADV, 0, ADV_MAX);
         memcpy(L.info + NI_ADV, L.adv, n);
-        push_info_locked(0);
+        if (L.ryu) mhgu_ryu_set_advertise(L.adv, n);
+        else if (L.room) room_info_dirty = true;
+        else push_info_locked(0);
     }
     pthread_mutex_unlock(&L.mu);
+    if (room_info_dirty) { room_info_dirty = false; room_sync_all(); }
     RET(0);
 }
 
 HLE_FUNC("_ZN2nn3ldn22SetStationAcceptPolicyENS0_12AcceptPolicyE", ldn_set_accept) { NTRACE();
     pthread_mutex_lock(&L.mu);
     L.accept_policy = (int)ARG(0);
-    if (L.state == ST_AP_CREATED) { L.info[NI_ACCEPT_POLICY] = (uint8_t)ARG(0); push_info_locked(0); }
+    if (L.state == ST_AP_CREATED) {
+        L.info[NI_ACCEPT_POLICY] = (uint8_t)ARG(0);
+        if (L.ryu) mhgu_ryu_set_accept_policy((uint8_t)ARG(0));
+        else if (L.room) room_info_dirty = true;
+        else push_info_locked(0);
+    }
     pthread_mutex_unlock(&L.mu);
+    if (room_info_dirty) { room_info_dirty = false; room_sync_all(); }
     RET(0);
 }
 
 // Reject(Ipv4Address): the host sends a player away
 HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE();
+    if (L.ryu) {
+        for (int i = 1; i < MAX_NODES; i++)
+            if (node_at(L.info, i)[NODE_CONNECTED] && rd32(node_at(L.info, i) + NODE_IP) == ARG(0))
+                mhgu_ryu_reject((uint32_t)i, DR_REJECTED);
+        RET(0);
+        return;
+    }
+    if (L.room) {
+        uint8_t own[4], to[MAX_NODES][4];
+        int n = 0;
+        mhgu_room_own_ip(own);
+        pthread_mutex_lock(&L.mu);
+        for (int i = 1; i < MAX_NODES; i++)
+            if (L.room_client[i] && rd32(node_at(L.info, i) + NODE_IP) == ARG(0)) {
+                memcpy(to[n++], L.room_cip[i], 4);
+                memset(node_at(L.info, i), 0, NODE_SIZE);
+                node_at(L.info, i)[NODE_ID] = (uint8_t)i;
+                L.room_client[i] = false;
+                if (L.info[NI_NODE_COUNT] > 1) L.info[NI_NODE_COUNT]--;
+            }
+        pthread_mutex_unlock(&L.mu);
+        for (int i = 0; i < n; i++) mhgu_room_send_ldn(RLDN_DESTROY_NETWORK, own, to[i], false, NULL, 0);
+        if (n) { room_sync_all(); signal_change(); }
+        RET(0);
+        return;
+    }
     mhgu_ldn_reject(ARG(0));  // the Rust host sends F_DESTROY (DR_REJECTED) and closes that peer
     RET(0);
 }
@@ -1090,6 +1550,8 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     hnet_init();  // (before the thread's first socket call)
     bool asked = lobby_server(online.server) && !pthread_create(&lt, NULL, lobby_list_thread, &online);
     int n = discover(infos, addrs, 16), k = 0;
+    int ryu_of[MAX_FOUND] = {0};
+    bool room_of[MAX_FOUND] = {0};
     if (asked) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
         pthread_join(lt, NULL);
         uint64_t own = mhgu_ldn_own_hub();
@@ -1103,9 +1565,39 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
             hubs[n++] = online.ids[j];
         }
     }
+    if (ryu_configured() && mhgu_ryu_server_count() > 0 && n < MAX_FOUND) {
+        static uint8_t rinfo[MAX_FOUND][NETINFO_SIZE];
+        int rsrv[MAX_FOUND];
+        int rn = mhgu_ryu_scan(filter, (uint8_t *)rinfo, rsrv, MAX_FOUND - n);
+        for (int j = 0; j < rn; j++) {
+            memcpy(infos[n], rinfo[j], NETINFO_SIZE);
+            memset(&addrs[n], 0, sizeof addrs[n]);
+            ryu_of[n++] = rsrv[j] + 1;
+        }
+    }
+    if (room_enabled() && mhgu_room_connected() && n < MAX_FOUND) {
+        uint8_t own[4], all[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+        mhgu_room_own_ip(own);
+        pthread_mutex_lock(&room_scan_mu);
+        room_nscan = 0, room_scanning = true;
+        pthread_mutex_unlock(&room_scan_mu);
+        mhgu_room_send_ldn(RLDN_SCAN, own, all, true, NULL, 0);
+        plat_sleep_until_ns(plat_now_ns() + 700000000ull);
+        pthread_mutex_lock(&room_scan_mu);
+        room_scanning = false;
+        for (int j = 0; j < room_nscan && n < MAX_FOUND; j++) {
+            memcpy(infos[n], room_scan[j].info, NETINFO_SIZE);
+            memset(&addrs[n], 0, sizeof addrs[n]);
+            room_of[n++] = true;
+        }
+        pthread_mutex_unlock(&room_scan_mu);
+    }
     nfound = 0;
     for (int i = 0; i < n; i++) {
         if (!info_sane(infos[i]) || !filter_ok(infos[i], filter)) continue;
+        found[nfound].ryu = ryu_of[i];
+        found[nfound].room = room_of[i];
+        memcpy(found[nfound].info, infos[i], NETINFO_SIZE);
         memcpy(found[nfound].bssid, infos[i] + NI_BSSID, 6);
         memcpy(found[nfound].session, infos[i] + NI_SESSION_ID, 16);
         found[nfound].hub = hubs[i];
@@ -1128,6 +1620,52 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     int i = 0;
     while (i < nfound && memcmp(found[i].bssid, info + NI_BSSID, 6)) i++;
     if (i == nfound) return R_CONNECT_NOT_FOUND;
+    if (found[i].ryu) {
+        uint8_t sec[0x44] = {0}, out[NETINFO_SIZE];
+        uint32_t ip = 0, mask = 0;
+        memcpy(sec, found[i].info + NI_SEC_MODE, 2);
+        L.ryu = true;
+        uint32_t r = mhgu_ryu_connect(found[i].ryu - 1, found[i].info, sec, user, lcv, out, &ip, &mask);
+        if (r) {
+            L.ryu = false;
+            LOG("[ldn] joining the RyuLdn lobby failed (result %#x)\n", r);
+            return r;
+        }
+        pthread_mutex_lock(&L.mu);
+        if (info_sane(out)) memcpy(L.info, out, NETINFO_SIZE);
+        L.lcv = lcv, L.own_ip = ip, L.ryu_mask = mask, L.subnet = ip & mask;
+        L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
+        pthread_mutex_unlock(&L.mu);
+        LOG("[ldn] joined a RyuLdn lobby as %s\n", ipstr(L.own_ip));
+        signal_change();
+        return 0;
+    }
+    if (found[i].room) {
+        if (!mhgu_room_connected()) return R_CONNECT_FAILURE;
+        uint8_t ipb[4], hostb[4];
+        mhgu_room_own_ip(ipb);
+        pthread_mutex_lock(&L.mu);
+        memcpy(L.info, found[i].info, NETINFO_SIZE);
+        L.room = true, L.own_ip = ip_u32(ipb), L.subnet = L.own_ip & 0xFFFFFF00u, L.lcv = lcv;
+        pthread_mutex_unlock(&L.mu);
+        uint8_t node[NODE_SIZE] = {0};
+        wr32(node + NODE_IP, L.own_ip);
+        room_mac(node + NODE_MAC);
+        node[NODE_CONNECTED] = 1;
+        memcpy(node + NODE_NAME, user, 0x20);
+        wr16(node + NODE_LCV, lcv);
+        ip_bytes(rd32(node_at(found[i].info, 0) + NODE_IP), hostb);
+        mhgu_room_send_ldn(RLDN_CONNECT, ipb, hostb, false, node, NODE_SIZE);
+        for (int w = 0; w < 300 && L.state != ST_STATION_CONNECTED; w++) plat_sleep_until_ns(plat_now_ns() + 10000000ull);
+        if (L.state != ST_STATION_CONNECTED) {
+            L.room = false, L.own_ip = L.subnet = 0;
+            LOG("[ldn] the room's host did not answer the join\n");
+            return R_CONNECT_TIMEOUT;
+        }
+        LOG("[ldn] joined a hub in the room as %s\n", ipstr(L.own_ip));
+        signal_change();
+        return 0;
+    }
     char addr[64];
     snprintf(addr, sizeof addr, "%s:%u", inet_ntoa(found[i].addr.sin_addr), (unsigned)ntohs(found[i].addr.sin_port));
     char name[0x21] = {0};
@@ -1194,6 +1732,7 @@ static uint32_t connect_private(Cpu *c) {
     for (int i = 0; i < nfound; i++)
         if (!memcmp(found[i].session, session, 0x10)) {
             uint8_t info[NETINFO_SIZE] = {0};
+            if (found[i].ryu) memcpy(info, found[i].info, NETINFO_SIZE);
             memcpy(info + NI_BSSID, found[i].bssid, 6);
             return connect_network(info, ARGP(3), (uint16_t)STK(0));
         }
@@ -1207,7 +1746,9 @@ HLE_FUNC("_ZN2nn3ldn14ConnectPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfi
 
 HLE_FUNC("_ZN2nn3ldn10DisconnectEv", ldn_disconnect) { NTRACE();
     if (L.state != ST_STATION_CONNECTED && L.state != ST_ERROR) { RET(R_INVALID_STATE); return; }
-    station_leave();
+    if (L.ryu) ryu_stop();
+    else if (L.room) room_stop();
+    else station_leave();
     L.state = ST_STATION, L.reason = DR_BY_USER;
     L.own_ip = L.subnet = 0;
     signal_change();

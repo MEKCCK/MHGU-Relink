@@ -22,6 +22,7 @@
 | `crates/mhgu-link` | link 客户端：握手、hub `LIST`/`JOIN`/`HOST`/`ATTACH`、局域网 `Scan`、`MHGD` 数据报 |
 | `crates/mhgu-hub` | hub 中继服务器（Rust），协议与 PC/Android 客户端逐字节兼容；旧 Go 实现已移除 |
 | `crates/mhgu-link-ffi` | 上面的 C 库：`libmhgu_link_ffi.a` + `include/mhgu_link.h`，C 运行时直接链接 |
+| `crates/mhgu-crossplay` | 模拟器联机（Rust）：RyuLdn 客户端/服务器、suyu 房间客户端/服务器、混合 hub；C 运行时通过 `libmhgu_crossplay.a` 链接 |
 
 ## 构建与运行（PC）
 
@@ -110,3 +111,32 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 早期版本的 Rust 运行时（`mhgu-runtime`/`mhgu-hle`/`mhgu-recomp` 等）已按决定移除；现在保留的 Rust
 只有联机模块与 hub 服务器。Android 版在同一个仓库的 `android/` + `native/`（C 运行时 + 同一套 Rust 联机库；见 `docs/android.md`）。
+
+## Crossplay（Ryujinx / suyu）
+
+`crates/mhgu-crossplay` 把上游 0.15 的模拟器联机功能移植为 Rust：`runtime/net/ldn.c` 在 `CreateNetwork` /
+`Scan` / `Connect` / `Disconnect` / `SetAdvertiseData` / `Reject` 等入口按模式分支，游戏包通过
+`ldn_send` 交给 RyuLdn 服务器或 suyu 房间中继。
+
+| 设置（INI，Network 页） | 说明 |
+|---|---|
+| `Crossplay = Off/Ryujinx/Room` | 关闭、Ryujinx LDN 服务器、suyu 房间 |
+| `RyuServers` | `host[:port]` 列表，逗号分隔；`RyuHost` 开启时也会用本机服务器 |
+| `RyuHost` / `RyuPort` / `RyuPassword` | 本进程内嵌 RyuLdn 服务器（端口默认 30456）、大厅密码短语 |
+| `RoomServer` | suyu 房间服务器 `host[:port]`；`RoomHost` 开启时本机内嵌 |
+| `RoomHost` / `RoomPort` / `RoomName` / `RoomPassword` | 本进程内嵌房间服务器（默认 24872）、房间名与密码 |
+
+行为与上游一致：
+
+- `CreateNetwork` 在 Ryu/Room 模式下由服务器分配虚拟地址（`10.114.x.y` 或 `192.168.x.y`），C 侧只保留
+  `nn::ldn` 状态；`GetIpv4Address` 返回服务器的子网掩码。
+- `Scan` 合并 LAN、hub 服务器、RyuLdn 服务器与房间内的大厅；`Connect` 按来源选择对应链路。
+- 主机同时开启 RyuHost 与 RoomHost 且两边已连接时，混合 hub（`bridge.rs`）会把房间玩家桥接到 Ryu 大厅，
+  地址/MAC 双向改写；房间客户端与服务器协议保持逐字节兼容。
+- 端口类辅助功能（`emsync`、`hpscale` 的 AUX 消息）在 crossplay 下关闭，与上游相同。
+
+测试（无需游戏文件）：
+
+```sh
+cargo test -p mhgu-crossplay      # RyuLdn 客户端/服务器、suyu 房间、混合 hub 协议
+```
