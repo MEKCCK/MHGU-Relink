@@ -23,8 +23,10 @@ git 历史：以 MHGURecomp 的历史为根，`git merge -s ours` 方式并入 g
 3. **配置**：`Config` 为两侧字段的并集，`CONFIG_DEFAULT_VALUES` 按最终字段顺序重写（PC 字段追加在
    `touch_combo_pad` 之后）；`share_urgent` 恢复；Android 与 PC 的 `ui_request_import` 语义按平台分开
    （Android：0 金手指 / 1 模组 / 2 DLC；PC：1 游戏文件 … 7 游戏目录）。
-4. **联机统一**：`runtime/net/ldn.c` 使用 `mhgu-link-ffi`（Rust）作为主机/加入/中继传输；Android 构建脚本
-   交叉编译该静态库并链接（LAN 扫描、组播锁、逐网卡探测仍由 C 侧保留）。
+4. **联机统一**：`runtime/net/ldn.c` 的传输层全部使用 `mhgu-link-ffi`（Rust）：主机/加入/中继、UDP/TCP 链路、
+   轮询、踢人（`mhgu_ldn_reject`）与 NetworkInfo 广播（`mhgu_ldn_update_info`）。C 侧只保留 `nn::ldn` 的 HLE
+   状态与结构、局域网扫描（Android 的组播锁、逐网卡探测）以及 hub 列表/检查的控制协议。旧的 C host/station
+   线程、socket 传输与 relay 已删除；Android 构建脚本交叉编译该静态库并链接。
 5. **构建统一**：
    - PC：根目录 `Makefile`（原 `base/Makefile`，去掉 `PLATFORM=android` 分支，Rust 路径改为 `target/`、`crates/`）。
    - Android：`native/CMakeLists.txt` + `android/`（原 gu-native），新增 Rust 库与 `mhgu_link.h` 链接。

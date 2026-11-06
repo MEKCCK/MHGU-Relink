@@ -117,8 +117,6 @@ typedef struct {
 #define UDP_MAGIC "MHGD"
 enum { U_DATA = 0, U_HELLO, U_HELLO_ACK };
 typedef struct { char magic[4]; uint32_t token; uint8_t kind, pad[3]; } UHdr;
-#define UDP_MAX_PAYLOAD 8192
-#define UDP_SILENCE_NS 15000000000ull
 
 // The hub server (crates/mhgu-hub/src/server.rs has the protocol): control frames like the link's; requests start with a header
 // "MHGS", u16 LOBBY_PROTO, u16 PROTO_VERSION, room[16] (the matchmaking key's hash).
@@ -127,23 +125,7 @@ typedef struct { char magic[4]; uint32_t token; uint8_t kind, pad[3]; } UHdr;
 #define LOBBY_HEADER 24
 enum { S_LIST = 1, S_HOST, S_ATTACH, S_JOIN, S_UPDATE, S_PING, S_HUBS = 16, S_HOSTED, S_INCOMING, S_SPLICED, S_ERROR };
 enum { SE_NOT_FOUND = 1, SE_NO_ANSWER, SE_BUSY, SE_VERSION };
-#define LOBBY_PING_NS 15000000000ull
-#define RELAY_MAGIC "MHGR"
-#define RELAY_PREFIX 16  // magic, u32 pair, u64 secret
 
-typedef struct {
-    hsock s;
-    pthread_mutex_t wmu;  // one writer at a time; s is closed only with it held (alive cleared first)
-    pthread_t th;
-    bool alive, has_thread;
-    uint32_t ip;
-    uint32_t token;               // UDP: identifies the station's datagrams
-    struct sockaddr_in uaddr;     // host side: where the station's datagrams come from
-    volatile bool udp_up;
-    volatile uint64_t udp_rx_ns;  // last datagram from the other end
-    uint32_t relay_pair;          // through the hub server (0: direct): its pair id and our secret for UDP
-    uint64_t relay_secret;
-} Link;
 
 static struct {
     pthread_mutex_t mu;
@@ -158,22 +140,9 @@ static struct {
     KEvent *ev;
     uint32_t ev_r;
     // host
-    hsock listen_s, disc_s;
-    pthread_t host_th;
     bool hosting;
     int port;  // [Multiplayer] Port as it was when this hub started (a Save changes the next hub's, not this one's)
-    Link nodes[MAX_NODES];  // [0] unused (the host itself)
-    // station
-    Link up;
-    hsock us;  // UDP socket connected to the host
-    pthread_t uth;
-    volatile bool uth_run;
-    // host: the hub's listing on the hub server
-    uint64_t own_hub;  // the id that listing gave us (0: not listed); the scan skips it
-    pthread_t lobby_th;
-    volatile bool lobby_run, lobby_dirty;  // dirty: the NetworkInfo changed, send it
-    struct sockaddr_in lobby_addr;
-} L = {.mu = PTHREAD_MUTEX_INITIALIZER, .listen_s = BADSOCK, .disc_s = BADSOCK, .us = BADSOCK};
+} L = {.mu = PTHREAD_MUTEX_INITIALIZER};
 
 // Scan results: where each found network's host is (hub: on the hub server at addr, 0: the host's own address).
 #define MAX_FOUND 32
@@ -247,26 +216,11 @@ static bool frame_send(hsock s, uint8_t type, const void *a, uint32_t alen, cons
     h[4] = type;
     return send_all(s, h, 5) && (!alen || send_all(s, a, alen)) && (!blen || send_all(s, b, blen));
 }
-static bool link_send(Link *l, uint8_t type, const void *a, uint32_t alen, const void *b, uint32_t blen) {
-    pthread_mutex_lock(&l->wmu);
-    bool ok = l->alive && frame_send(l->s, type, a, alen, b, blen);
-    pthread_mutex_unlock(&l->wmu);
-    return ok;
-}
 // -1: closed / error; else the payload size (buf holds MAX_FRAME bytes)
 static int frame_recv(hsock s, uint8_t *type, uint8_t *buf) {
     uint32_t size;
     if (!recv_all(s, &size, 4) || size < 1 || size > MAX_FRAME + 1 || !recv_all(s, type, 1)) return -1;
     return recv_all(s, buf, size - 1) ? (int)size - 1 : -1;
-}
-static void link_close(Link *l) {  // (caller: not holding L.mu if l has a thread to join)
-    pthread_mutex_lock(&l->wmu);
-    if (l->alive) {
-        l->alive = false;
-        shutdown(l->s, 2);
-        hclose(l->s);
-    }
-    pthread_mutex_unlock(&l->wmu);
 }
 
 static hsock connect_to(const struct sockaddr_in *a, int timeout_ms) {
@@ -294,18 +248,7 @@ static hsock connect_to(const struct sockaddr_in *a, int timeout_ms) {
 }
 
 // Through the hub server, a datagram starts with "MHGR", the pair and our secret; the server passes on the rest.
-static uint32_t relay_prefix(uint8_t *buf, const Link *l) {
-    if (!l->relay_pair) return 0;
-    memcpy(buf, RELAY_MAGIC, 4);
-    wr32(buf + 4, l->relay_pair);
-    memcpy(buf + 8, &l->relay_secret, 8);
-    return RELAY_PREFIX;
-}
 // The host tells the server where its end of a relayed link is (until the station's datagrams come through).
-static void relay_register(hsock s, const Link *l) {
-    uint8_t buf[RELAY_PREFIX];
-    sendto(s, (const char *)buf, (int)relay_prefix(buf, l), 0, (const struct sockaddr *)&l->uaddr, sizeof l->uaddr);
-}
 
 // "host[:port]" (port: def without one) -> its IPv4 address
 static bool resolve_host(const char *text, int def, struct sockaddr_in *out) {
@@ -325,25 +268,6 @@ static bool resolve_host(const char *text, int def, struct sockaddr_in *out) {
 }
 
 // One datagram on link l: header [+ packet]. to = NULL: s is connected (a station's socket).
-static bool udp_send(hsock s, const struct sockaddr_in *to, const Link *l, uint8_t kind, const VPacket *p,
-                     const void *data, uint32_t len) {
-    uint8_t buf[RELAY_PREFIX + sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
-    if (len > UDP_MAX_PAYLOAD) return false;
-    UHdr h = {{0}, l->token, kind, {0}};
-    memcpy(h.magic, UDP_MAGIC, 4);
-    uint32_t n = relay_prefix(buf, l);
-    memcpy(buf + n, &h, sizeof h);
-    n += sizeof h;
-    if (p) {
-        memcpy(buf + n, p, sizeof *p);
-        n += sizeof *p;
-        if (len) memcpy(buf + n, data, len);
-        n += len;
-    }
-    int k = to ? sendto(s, (const char *)buf, (int)n, 0, (const struct sockaddr *)to, sizeof *to)
-               : send(s, (const char *)buf, (int)n, 0);
-    return k == (int)n;
-}
 
 static Hello make_hello(bool scan_only, const uint8_t *user_name) {
     Hello h = {0};
@@ -378,20 +302,6 @@ bool ldn_party(int *n, int *max, char *id, size_t size) {
     return up;
 }
 
-static bool udp_usable(const Link *l) { return l->udp_up && plat_now_ns() - l->udp_rx_ns < UDP_SILENCE_NS; }
-
-// Host: deliver to the host's own sockets and/or forward to the stations (from: the sending node, 0 = the host).
-static void host_route(int from, const VPacket *p, const void *data, uint32_t len) {
-    bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
-    if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);
-    for (int i = 1; i < MAX_NODES; i++) {
-        Link *l = &L.nodes[i];
-        if (i == from || !l->alive || !(all || l->ip == p->dst_ip)) continue;
-        hsock ds = L.disc_s;
-        if (!(ds != BADSOCK && udp_usable(l) && udp_send(ds, &l->uaddr, l, U_DATA, p, data, len)))
-            link_send(l, F_PACKET, p, sizeof *p, data, len);
-    }
-}
 
 void ldn_send(const VPacket *p, const void *data, uint32_t len) {
     if (L.state == ST_AP_CREATED) {
@@ -408,7 +318,7 @@ void ldn_send(const VPacket *p, const void *data, uint32_t len) {
     if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
     if (p->dst_ip == L.own_ip) return;
     // The station's one link is the Rust link (mhgu-link): it sends by UDP through the hub relay when the
-    // host's datagrams get through, else over the link's TCP. There is no C socket for it (`L.up.s`).
+    // host's datagrams get through, else over the link's TCP.
     MhguVPacket mp;
     memcpy(&mp, p, sizeof mp);
     mhgu_ldn_send(&mp, data, len);
@@ -425,7 +335,7 @@ void ldn_send_aux(const void *data, uint32_t len) {
 
 // ---- MHGU_LDN_LAG=<ms>: received packets wait that long before they go on (testing high ping: set it on both
 // ends, the round trip grows by twice the value). Kept in arrival order by one delivery thread.
-typedef struct Delayed { struct Delayed *next; uint64_t due; int from; VPacket p; uint32_t len; uint8_t data[]; } Delayed;
+typedef struct Delayed { struct Delayed *next; uint64_t due; VPacket p; uint32_t len; uint8_t data[]; } Delayed;
 static Delayed *lag_head, *lag_tail;
 static pthread_mutex_t lag_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t lag_cv = PTHREAD_COND_INITIALIZER;
@@ -446,17 +356,16 @@ static void *lag_thread(void *arg) {
         lag_head = d->next;
         if (!lag_head) lag_tail = NULL;
         pthread_mutex_unlock(&lag_mu);
-        if (d->from > 0) host_route(d->from, &d->p, d->data, d->len);
-        else vsock_deliver(&d->p, d->data, d->len);
+        vsock_deliver(&d->p, d->data, d->len);
         free(d);
         pthread_mutex_lock(&lag_mu);
     }
     return NULL;
 }
 
-// A packet from the link: from = the sending station (host side) or 0 (a station: from the host).
+// A packet from the Rust link (the host already relayed it).
 // MHGU_LDN_LOSS=<percent>: that share of the received game packets is dropped (testing a lossy connection).
-static void link_received(int from, const VPacket *p, const void *data, uint32_t len) {
+static void link_received(const VPacket *p, const void *data, uint32_t len) {
     static int lag_ms = -1, loss_pct;
     if (lag_ms < 0) {
         const char *e = getenv("MHGU_LDN_LAG");
@@ -473,13 +382,12 @@ static void link_received(int from, const VPacket *p, const void *data, uint32_t
     }
     if (loss_pct && (int)(arc4random() % 100) < loss_pct) return;
     if (lag_ms <= 0) {
-        if (from > 0) host_route(from, p, data, len);
-        else vsock_deliver(p, data, len);
+        vsock_deliver(p, data, len);
         return;
     }
     Delayed *d = malloc(sizeof *d + len);
     if (!d) return;
-    d->next = NULL, d->due = plat_now_ns() + (uint64_t)lag_ms * 1000000ull, d->from = from, d->p = *p, d->len = len;
+    d->next = NULL, d->due = plat_now_ns() + (uint64_t)lag_ms * 1000000ull, d->p = *p, d->len = len;
     memcpy(d->data, data, len);
     pthread_mutex_lock(&lag_mu);
     if (lag_tail) lag_tail->next = d; else lag_head = d;
@@ -490,186 +398,13 @@ static void link_received(int from, const VPacket *p, const void *data, uint32_t
 
 // ---- host
 static void push_info_locked(int except) {  // to every station (and the hub server's list): the network changed
-    for (int i = 1; i < MAX_NODES; i++)
-        if (i != except && L.nodes[i].alive) link_send(&L.nodes[i], F_INFO, L.info, NETINFO_SIZE, NULL, 0);
-    L.lobby_dirty = true;
+    (void)except;
+    mhgu_ldn_update_info(L.info, NETINFO_SIZE);  // the Rust host sends F_INFO and refreshes its hub listing
 }
 
 // A station's connection: accepted here, or opened to the hub server for a player it announced (relay_pair != 0).
-typedef struct { hsock s; struct sockaddr_in from; uint32_t relay_pair; uint64_t relay_secret; } Accepted;
-
-static void *station_thread(void *arg) {
-    Accepted acc = *(Accepted *)arg;
-    free(arg);
-    static __thread uint8_t buf[MAX_FRAME];
-    uint8_t type;
-    hset_timeout(acc.s, 5000);
-    int n = frame_recv(acc.s, &type, buf);
-    Hello h;
-    if (n < (int)sizeof h || type != F_HELLO) { hclose(acc.s); return NULL; }
-    memcpy(&h, buf, sizeof h);
-    if (memcmp(h.magic, PROTO_MAGIC, 4) || h.version != PROTO_VERSION) {
-        uint32_t r = R_CONNECT_REJECTED;
-        frame_send(acc.s, F_REFUSE, &r, 4, NULL, 0);
-        hclose(acc.s);
-        return NULL;
-    }
-    pthread_mutex_lock(&L.mu);
-    if (h.scan_only || L.state != ST_AP_CREATED) {
-        uint8_t info[NETINFO_SIZE];
-        memcpy(info, L.info, sizeof info);
-        bool up = L.state == ST_AP_CREATED;
-        pthread_mutex_unlock(&L.mu);
-        if (up) frame_send(acc.s, F_INFO, info, sizeof info, NULL, 0);
-        hclose(acc.s);
-        return NULL;
-    }
-    uint32_t refuse = 0;
-    int slot = 0;
-    if (h.lcv < L.lcv) refuse = R_VERSION_TOO_LOW;
-    else if (h.lcv > L.lcv) refuse = R_VERSION_TOO_HIGH;
-    else if (L.accept_policy == 1) refuse = R_CONNECT_REJECTED;  // RejectAll
-    else if (L.info[NI_NODE_COUNT] >= L.info[NI_NODE_MAX]) refuse = R_TOO_MANY_PLAYERS;
-    else {
-        for (slot = 1; slot < MAX_NODES && (L.nodes[slot].alive || L.nodes[slot].has_thread); slot++) {}
-        if (slot >= MAX_NODES || slot >= L.info[NI_NODE_MAX]) refuse = R_TOO_MANY_PLAYERS;
-    }
-    if (refuse) {
-        pthread_mutex_unlock(&L.mu);
-        frame_send(acc.s, F_REFUSE, &refuse, 4, NULL, 0);
-        hclose(acc.s);
-        LOG("[ldn] refused a player%s (result %#x)\n", acc.relay_pair ? " through the hub server" : "", refuse);
-        return NULL;
-    }
-    Link *l = &L.nodes[slot];
-    l->s = acc.s, l->ip = L.subnet | (uint32_t)(slot + 1), l->alive = true, l->has_thread = true;
-    l->th = pthread_self();
-    l->token = arc4random() | 1, l->udp_up = false, l->udp_rx_ns = 0;
-    l->relay_pair = acc.relay_pair, l->relay_secret = acc.relay_secret;
-    l->uaddr = acc.from;  // (relayed: the server, whose UDP port is its TCP port)
-    if (l->relay_pair && L.disc_s != BADSOCK) relay_register(L.disc_s, l);
-    uint8_t *nd = node_at(L.info, slot);
-    memset(nd, 0, NODE_SIZE);
-    wr32(nd + NODE_IP, l->ip);
-    memcpy(nd + NODE_MAC, h.mac, 6);
-    nd[NODE_ID] = (uint8_t)slot;
-    nd[NODE_CONNECTED] = 1;
-    memcpy(nd + NODE_NAME, h.name, 0x20);
-    wr16(nd + NODE_LCV, h.lcv);
-    L.info[NI_NODE_COUNT]++;
-    uint8_t welcome[8 + NETINFO_SIZE] = {(uint8_t)slot};  // node, -, -, -, u32 UDP token, NetworkInfo
-    wr32(welcome + 4, l->token);
-    memcpy(welcome + 8, L.info, NETINFO_SIZE);
-    link_send(l, F_WELCOME, welcome, sizeof welcome, NULL, 0);
-    push_info_locked(slot);
-    pthread_mutex_unlock(&L.mu);
-    hset_timeout(acc.s, 0);
-    LOG("[ldn] %.32s joined %s as %s (node %d)\n", h.name, acc.relay_pair ? "through the hub server" : "from the LAN / by address",
-        ipstr(l->ip), slot);
-    signal_change();
-
-    while ((n = frame_recv(acc.s, &type, buf)) >= 0) {
-        if (type == F_PACKET && n >= (int)sizeof(VPacket)) {
-            VPacket p;
-            memcpy(&p, buf, sizeof p);
-            p.src_ip = l->ip;  // (a station speaks for itself only)
-            link_received(slot, &p, buf + sizeof p, (uint32_t)n - sizeof p);
-        } else if (type == F_AUX && n > 0) {  // to the host's own game and on to the other stations
-            emsync_aux_received(buf, (uint32_t)n);
-            hpscale_aux_received(buf, (uint32_t)n);
-            for (int i = 1; i < MAX_NODES; i++)
-                if (i != slot && L.nodes[i].alive) link_send(&L.nodes[i], F_AUX, buf, (uint32_t)n, NULL, 0);
-        }
-    }
-
-    pthread_mutex_lock(&L.mu);
-    bool was = l->alive;
-    link_close(l);
-    if (was && L.state == ST_AP_CREATED) {
-        memset(node_at(L.info, slot), 0, NODE_SIZE);
-        if (L.info[NI_NODE_COUNT] > 1) L.info[NI_NODE_COUNT]--;
-        push_info_locked(0);
-    }
-    l->has_thread = false;
-    pthread_mutex_unlock(&L.mu);
-    LOG("[ldn] node %d (%s) left\n", slot, ipstr(l->ip));
-    vsock_peer_gone(l->ip);
-    signal_change();
-    return NULL;
-}
 
 // Accepts stations and answers LAN discovery probes until the listening sockets close.
-static void *host_thread(void *arg) {
-    (void)arg;
-    uint64_t next_register = 0;
-    for (;;) {
-        hsock ls = L.listen_s, ds = L.disc_s;
-        if (ls == BADSOCK) break;
-        uint64_t now = plat_now_ns();
-        if (ds != BADSOCK && now >= next_register) {  // relayed links: until UDP from the station gets through
-            next_register = now + 1000000000ull;
-            for (int i = 1; i < MAX_NODES; i++)
-                if (L.nodes[i].alive && L.nodes[i].relay_pair && !udp_usable(&L.nodes[i])) relay_register(ds, &L.nodes[i]);
-        }
-        fd_set r;
-        FD_ZERO(&r);
-        FD_SET(ls, &r);
-        if (ds != BADSOCK) FD_SET(ds, &r);
-        struct timeval tv = {0, 200000};
-        int k = select((int)(ls > ds || ds == BADSOCK ? ls : ds) + 1, &r, NULL, NULL, &tv);
-        if (!L.hosting) break;
-        if (k <= 0) continue;
-        if (FD_ISSET(ls, &r)) {
-            Accepted *a = calloc(1, sizeof *a);
-            socklen_t al = sizeof a->from;
-            a->s = accept(ls, (struct sockaddr *)&a->from, &al);
-            if (a->s == BADSOCK) { free(a); continue; }
-            int one = 1;
-            setsockopt(a->s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
-            pthread_t t;
-            if (pthread_create(&t, NULL, station_thread, a)) { hclose(a->s); free(a); }
-            else pthread_detach(t);
-        }
-        if (ds != BADSOCK && FD_ISSET(ds, &r)) {
-            static uint8_t probe[sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
-            struct sockaddr_in from;
-            socklen_t fl = sizeof from;
-            int n = recvfrom(ds, (char *)probe, sizeof probe, 0, (struct sockaddr *)&from, &fl);
-            if (n >= (int)sizeof(UHdr) && !memcmp(probe, UDP_MAGIC, 4)) {  // a station's datagram
-                UHdr h;
-                memcpy(&h, probe, sizeof h);
-                int slot = 1;
-                while (slot < MAX_NODES && !(L.nodes[slot].alive && L.nodes[slot].token == h.token)) slot++;
-                if (slot == MAX_NODES) continue;
-                Link *l = &L.nodes[slot];
-                l->uaddr = from;  // (NAT may change it: the latest wins)
-                l->udp_rx_ns = plat_now_ns();
-                if (h.kind == U_HELLO) {
-                    if (!l->udp_up) LOG("[ldn] node %d: game packets go by UDP\n", slot);
-                    l->udp_up = true;
-                    udp_send(ds, &from, l, U_HELLO_ACK, NULL, NULL, 0);
-                } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
-                    VPacket p;
-                    memcpy(&p, probe + sizeof h, sizeof p);
-                    p.src_ip = l->ip;
-                    link_received(slot, &p, probe + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
-                }
-                continue;
-            }
-            if (n >= 6 && !memcmp(probe, PROTO_MAGIC, 4) && rd16(probe + 4) == PROTO_VERSION) {
-                uint8_t reply[8 + NETINFO_SIZE];
-                memcpy(reply, PROTO_MAGIC, 4);
-                wr16(reply + 4, PROTO_VERSION);
-                wr16(reply + 6, (uint16_t)L.port);
-                pthread_mutex_lock(&L.mu);
-                memcpy(reply + 8, L.info, NETINFO_SIZE);
-                pthread_mutex_unlock(&L.mu);
-                sendto(ds, (const char *)reply, sizeof reply, 0, (struct sockaddr *)&from, fl);
-            }
-        }
-    }
-    return NULL;
-}
 
 // ---- the hub server (internet hubs)
 // ini Server: empty = the default server (LDN_DEFAULT_SERVER, config.h), "Off" = none. Its name into out
@@ -795,126 +530,8 @@ static bool lobby_wait(uint32_t gen, int ms) {  // false: the network is gone
     return lobby_gen == gen;
 }
 
-static void *lobby_attach_thread(void *arg) {
-    LobbyTicket t = *(LobbyTicket *)arg;
-    free(arg);
-    static __thread uint8_t buf[MAX_FRAME];
-    hsock s = connect_to(&t.addr, 3000);
-    if (s == BADSOCK) return NULL;
-    uint8_t req[LOBBY_HEADER + 8], type;
-    lobby_header(req, NULL);
-    memcpy(req + LOBBY_HEADER, &t.ticket, 8);
-    hset_timeout(s, 5000);
-    int n;
-    if (!frame_send(s, S_ATTACH, req, sizeof req, NULL, 0) || (n = frame_recv(s, &type, buf)) < 12 || type != S_SPLICED ||
-        lobby_gen != t.gen) {
-        LOG("[ldn] a player's connection through the hub server failed\n");
-        hclose(s);
-        return NULL;
-    }
-    Accepted *a = calloc(1, sizeof *a);
-    a->s = s, a->from = t.addr, a->relay_pair = rd32(buf), a->relay_secret = rd64(buf + 4);
-    return station_thread(a);
-}
 
-static void *lobby_thread(void *arg) {
-    uint32_t gen = (uint32_t)(uintptr_t)arg;
-    static __thread uint8_t buf[MAX_FRAME];
-    uint8_t req[LOBBY_HEADER + NETINFO_SIZE], type;
-    while (lobby_gen == gen) {
-        char srv[LOBBY_NAME];
-        struct sockaddr_in addr;
-        hsock s = BADSOCK;
-        if (!lobby_server(srv)) break;
-        bool named = resolve_host(srv, LOBBY_PORT, &addr);
-        if (named) s = connect_to(&addr, 3000);
-        if (s == BADSOCK) {
-            LOG("[ldn] hub server %s %s: this hub is not listed online (trying again in 30 s)\n", srv,
-                named ? "unreachable" : "not found");
-            if (lobby_gen == gen) hub_report(NOTE_HOST, srv, named ? HUB_UNREACHABLE : HUB_NOT_FOUND, -1, -1);
-            if (!lobby_wait(gen, 30000)) break;
-            continue;
-        }
-        bool keyed = lobby_header(req, NULL);
-        pthread_mutex_lock(&L.mu);
-        memcpy(req + LOBBY_HEADER, L.info, NETINFO_SIZE);
-        L.lobby_dirty = false;
-        pthread_mutex_unlock(&L.mu);
-        hset_timeout(s, 5000);
-        int n = -1;
-        uint64_t asked = plat_now_ns();
-        if (frame_send(s, S_HOST, req, sizeof req, NULL, 0)) n = frame_recv(s, &type, buf);
-        if (n < 8 || type != S_HOSTED) {
-            bool error = n >= 4 && type == S_ERROR;
-            LOG("[ldn] hub server %s: can't list this hub (%s); trying again in 30 s\n", srv,
-                error ? lobby_error(rd32(buf)) : "no answer");
-            hclose(s);
-            if (lobby_gen == gen) hub_report(NOTE_HOST, srv, error ? lobby_state(rd32(buf)) : HUB_NO_ANSWER, -1, -1);
-            if (!lobby_wait(gen, 30000)) break;
-            continue;
-        }
-        pthread_mutex_lock(&L.mu);
-        L.own_hub = rd64(buf);
-        pthread_mutex_unlock(&L.mu);
-        LOG("[ldn] hub listed on the hub server %s: %s (hub %#llx)\n", srv,
-            keyed ? "players with the same matchmaking key see it" : "public, every player sees it",
-            (unsigned long long)rd64(buf));
-        hub_report(NOTE_HOST, srv, HUB_ONLINE, (int)((plat_now_ns() - asked) / 1000000), -1);
-        uint64_t now = plat_now_ns(), last_rx = now, next_ping = now + LOBBY_PING_NS;
-        while (lobby_gen == gen) {
-            now = plat_now_ns();
-            if (L.lobby_dirty) {
-                uint8_t info[NETINFO_SIZE];
-                pthread_mutex_lock(&L.mu);
-                memcpy(info, L.info, NETINFO_SIZE);
-                L.lobby_dirty = false;
-                pthread_mutex_unlock(&L.mu);
-                if (!frame_send(s, S_UPDATE, info, NETINFO_SIZE, NULL, 0)) break;
-            }
-            if (now >= next_ping) {
-                if (!frame_send(s, S_PING, NULL, 0, NULL, 0)) break;
-                next_ping = now + LOBBY_PING_NS;
-            }
-            if (now - last_rx > 3 * LOBBY_PING_NS) break;
-            fd_set r;
-            FD_ZERO(&r);
-            FD_SET(s, &r);
-            struct timeval tv = {0, 200000};
-            if (select((int)s + 1, &r, NULL, NULL, &tv) <= 0) continue;
-            if ((n = frame_recv(s, &type, buf)) < 0) break;
-            last_rx = plat_now_ns();
-            if (type == S_INCOMING && n >= 8) {
-                LobbyTicket *t = malloc(sizeof *t);
-                pthread_t th;
-                t->gen = gen, t->addr = addr, t->ticket = rd64(buf);
-                if (pthread_create(&th, NULL, lobby_attach_thread, t)) free(t);
-                else pthread_detach(th);
-            }
-        }
-        hclose(s);
-        if (lobby_gen != gen) break;
-        LOG("[ldn] lost the hub server: this hub is not listed online (trying again in 10 s)\n");
-        hub_report(NOTE_HOST, srv, HUB_LOST, -1, -1);
-        if (!lobby_wait(gen, 10000)) break;
-    }
-    return NULL;
-}
 
-static void lobby_host_start(void) {
-    uint32_t gen = ++lobby_gen;
-    pthread_t th;
-    char srv[LOBBY_NAME];
-    pthread_mutex_lock(&hub_mu);
-    note_last[NOTE_HOST] = HUB_ONLINE;  // (each hub tells of its own first failure)
-    pthread_mutex_unlock(&hub_mu);
-    if (lobby_server(srv) && !pthread_create(&th, NULL, lobby_thread, (void *)(uintptr_t)gen)) pthread_detach(th);
-}
-static void lobby_host_stop(void) {
-    lobby_gen++;
-    pthread_mutex_lock(&L.mu);
-    L.own_hub = 0;
-    pthread_mutex_unlock(&L.mu);
-}
 
 // Station: the hubs the server lists for a key (NULL: ini Key). A HUB_* state; ms: the request's round trip.
 #define LOBBY_LIST_MAX 24
@@ -1015,37 +632,6 @@ int ldn_hub_status(const char *server, const char *key, int *ms, int *hubs) {
 }
 
 // Joining a listed hub: the server asks its host to connect and splices the two. 0, else an nn::ldn result.
-static uint32_t lobby_join(const struct sockaddr_in *addr, uint64_t hub, hsock *out, uint32_t *pair, uint64_t *secret) {
-    static uint8_t buf[MAX_FRAME];
-    char srv[LOBBY_NAME];
-    if (!lobby_server(srv)) snprintf(srv, sizeof srv, "%s", inet_ntoa(addr->sin_addr));
-    hsock s = connect_to(addr, 3000);
-    if (s == BADSOCK) {
-        LOG("[ldn] can't reach the hub server\n");
-        hub_report(NOTE_JOIN, srv, HUB_UNREACHABLE, -1, -1);
-        return R_CONNECT_TIMEOUT;
-    }
-    uint8_t req[LOBBY_HEADER + 8], type;
-    lobby_header(req, NULL);
-    memcpy(req + LOBBY_HEADER, &hub, 8);
-    hset_timeout(s, 12000);  // (the server waits up to 10 s for the host)
-    int n = frame_send(s, S_JOIN, req, sizeof req, NULL, 0) ? frame_recv(s, &type, buf) : -1;
-    if (n >= 12 && type == S_SPLICED) {
-        *out = s, *pair = rd32(buf), *secret = rd64(buf + 4);
-        return 0;
-    }
-    hclose(s);
-    uint32_t code = n >= 4 && type == S_ERROR ? rd32(buf) : 0;
-    LOG("[ldn] joining through the hub server failed: %s\n", code ? lobby_error(code) : "no answer");
-    if (code == SE_NO_ANSWER) {  // (a hub that is gone: the game says so itself)
-        int lang = config_language();
-        overlay_notice(settings_text(lang, UI_TEXT("Could not join the hub.")),
-                       settings_text(lang, UI_TEXT("The host did not answer through the hub server.")));
-    } else if (code != SE_NOT_FOUND) {
-        hub_report(NOTE_JOIN, srv, code ? lobby_state(code) : HUB_NO_ANSWER, -1, -1);
-    }
-    return code == SE_NOT_FOUND ? R_CONNECT_NOT_FOUND : code == SE_BUSY ? R_CONNECT_REJECTED : R_CONNECT_TIMEOUT;
-}
 
 
 // ---- the Rust online module (mhgu-link-ffi) ----------------------------------------------------
@@ -1058,7 +644,7 @@ static volatile int link_poll_run;
 static void link_deliver(const MhguVPacket *p, const uint8_t *data, uint32_t len) {
     VPacket v;
     memcpy(&v, p, sizeof v);
-    link_received(0, &v, data, len);  // (0: from the network; the Rust host already relayed it)
+    link_received(&v, data, len);
 }
 
 static void link_aux(const uint8_t *data, uint32_t len) { emsync_aux_received(data, len); }
@@ -1120,80 +706,11 @@ static void host_stop(uint32_t reason) {
     L.hosting = false;
     mhgu_ldn_leave();
     link_poll_stop();
-    for (int i = 1; i < MAX_NODES; i++) link_close(&L.nodes[i]);
 }
 
 // ---- station
-static void *uplink_thread(void *arg) {
-    (void)arg;
-    static __thread uint8_t buf[MAX_FRAME];
-    uint8_t type;
-    int n, reason = DR_SIGNAL_LOST;
-    while ((n = frame_recv(L.up.s, &type, buf)) >= 0) {
-        if (type == F_PACKET && n >= (int)sizeof(VPacket)) {
-            VPacket p;
-            memcpy(&p, buf, sizeof p);
-            link_received(0, &p, buf + sizeof p, (uint32_t)n - sizeof p);
-        } else if (type == F_INFO && n >= NETINFO_SIZE && info_sane(buf)) {
-            pthread_mutex_lock(&L.mu);
-            memcpy(L.info, buf, NETINFO_SIZE);
-            pthread_mutex_unlock(&L.mu);
-            signal_change();
-        } else if (type == F_DESTROY && n >= 4) {
-            reason = (int)rd32(buf);
-        } else if (type == F_AUX && n > 0) {
-            emsync_aux_received(buf, (uint32_t)n);
-            hpscale_aux_received(buf, (uint32_t)n);
-        }
-    }
-    L.uth_run = false;
-    pthread_mutex_lock(&L.mu);
-    bool lost = L.up.alive;  // (else: we disconnected ourselves)
-    link_close(&L.up);
-    if (lost && L.state == ST_STATION_CONNECTED) {
-        L.state = ST_ERROR, L.reason = reason;
-        LOG("[ldn] connection to the host ended (reason %d)\n", reason);
-    }
-    pthread_mutex_unlock(&L.mu);
-    if (lost) { vsock_network_down(); signal_change(); }
-    return NULL;
-}
 
 // The station's datagrams: hello (every 2 s once answered, else every 0.5 s) and the host's packets.
-static void *station_udp_thread(void *arg) {
-    (void)arg;
-    static __thread uint8_t buf[sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
-    hsock us = L.us;
-    uint64_t next_hello = 0;
-    hset_timeout(us, 250);
-    while (L.uth_run) {
-        uint64_t now = plat_now_ns();
-        if (now >= next_hello) {
-            udp_send(us, NULL, &L.up, U_HELLO, NULL, NULL, 0);
-            next_hello = now + (L.up.udp_up ? 2000000000ull : 500000000ull);
-        }
-        int n = recv(us, (char *)buf, sizeof buf, 0);
-        if (n < 0) { plat_sleep_until_ns(plat_now_ns() + 20000000); continue; }  // (timeout, or ICMP unreachable)
-        UHdr h;
-        if (n < (int)sizeof h || memcmp(buf, UDP_MAGIC, 4)) continue;
-        memcpy(&h, buf, sizeof h);
-        if (h.token != L.up.token) continue;
-        L.up.udp_rx_ns = plat_now_ns();
-        if (h.kind == U_HELLO_ACK && !L.up.udp_up) {
-            L.up.udp_up = true;
-            LOG("[ldn] UDP to the host works: game packets go by UDP\n");
-        } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
-            VPacket p;
-            memcpy(&p, buf + sizeof h, sizeof p);
-            link_received(0, &p, buf + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
-        }
-        if (L.up.udp_up && plat_now_ns() - L.up.udp_rx_ns > UDP_SILENCE_NS) {
-            L.up.udp_up = false;
-            LOG("[ldn] nothing by UDP from the host for 15 s: game packets go by TCP\n");
-        }
-    }
-    return NULL;
-}
 
 static void station_leave(void) {  // (caller: not holding L.mu)
     mhgu_ldn_leave();
@@ -1474,8 +991,6 @@ static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uin
     memcpy(L.info + NI_ADV, L.adv, L.adv_size);
     uint64_t auth = ((uint64_t)arc4random() << 32) | arc4random();
     memcpy(L.info + NI_AUTH_ID, &auth, 8);
-    memset(L.nodes, 0, sizeof L.nodes);
-    for (int i = 0; i < MAX_NODES; i++) pthread_mutex_init(&L.nodes[i].wmu, NULL);
     pthread_mutex_unlock(&L.mu);
     host_start();
     L.state = ST_AP_CREATED;
@@ -1530,12 +1045,7 @@ HLE_FUNC("_ZN2nn3ldn22SetStationAcceptPolicyENS0_12AcceptPolicyE", ldn_set_accep
 
 // Reject(Ipv4Address): the host sends a player away
 HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE();
-    uint32_t r = DR_REJECTED;
-    for (int i = 1; i < MAX_NODES; i++)
-        if (L.nodes[i].alive && L.nodes[i].ip == ARG(0)) {
-            link_send(&L.nodes[i], F_DESTROY, &r, 4, NULL, 0);
-            link_close(&L.nodes[i]);
-        }
+    mhgu_ldn_reject(ARG(0));  // the Rust host sends F_DESTROY (DR_REJECTED) and closes that peer
     RET(0);
 }
 
@@ -1579,10 +1089,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     int n = discover(infos, addrs, 16), k = 0;
     if (asked) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
         pthread_join(lt, NULL);
-        uint64_t own;
-        pthread_mutex_lock(&L.mu);
-        own = L.own_hub;
-        pthread_mutex_unlock(&L.mu);
+        uint64_t own = mhgu_ldn_own_hub();
         for (int j = 0; j < online.n && n < MAX_FOUND; j++) {
             if (own && online.ids[j] == own) continue;  // our own hub: joining ourselves can't work
             bool dup = false;

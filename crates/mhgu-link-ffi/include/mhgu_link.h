@@ -62,6 +62,12 @@ uint32_t mhgu_ldn_own_ip(void);
 uint32_t mhgu_ldn_broadcast_ip(void);
 /* The current NetworkInfo blob (the game's `nn::ldn` state), copied into `buf`. */
 uint32_t mhgu_ldn_info(uint8_t *buf, uint32_t size);
+/* The host's listing id on the hub server the link opened (0: not listed). */
+uint64_t mhgu_ldn_own_hub(void);
+/* The host's NetworkInfo changed: keep it and send it to every peer (F_INFO). */
+bool mhgu_ldn_update_info(const uint8_t *info, uint32_t size);
+/* The host sends the player at `ip` away (F_DESTROY, DR_REJECTED) and closes its link. */
+bool mhgu_ldn_reject(uint32_t ip);
 
 /* Into the network: from a local virtual socket, and a port-private message. */
 void mhgu_ldn_send(const MhguVPacket *p, const uint8_t *data, uint32_t len);

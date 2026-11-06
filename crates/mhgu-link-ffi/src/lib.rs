@@ -90,6 +90,8 @@ struct State {
     udp_rx: std::time::Instant,
     /// Through a hub server (station side): the relay pair and our secret.
     relay: Option<(u32, u64)>,
+    /// The id the hub server gave this host's listing (0: not listed); ldn.c skips it in a LAN/server scan.
+    own_hub: u64,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -131,6 +133,7 @@ impl State {
             udp_up: false,
             udp_rx: std::time::Instant::now(),
             relay: None,
+            own_hub: 0,
         }
     }
 }
@@ -810,6 +813,7 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
         }
     };
     let hub_id = sess.hub_id();
+    with(|st| st.own_hub = hub_id);
     eprintln!("[link] hub {hub_id:#x} listed on {addr}");
     let stop = with(|st| Arc::clone(&st.stop));
     std::thread::spawn(move || {
@@ -1145,6 +1149,7 @@ pub extern "C" fn mhgu_ldn_leave() {
         match g.as_mut() {
             Some(st) => {
                 st.running = false;
+                st.own_hub = 0;
                 let a = st.accept_thread.take();
                 let r = st.reader_thread.take();
                 let stop = Arc::clone(&st.stop);
@@ -1216,6 +1221,39 @@ pub extern "C" fn mhgu_ldn_party(n: *mut i32, max: *mut i32, id: *mut c_char, si
 }
 
 /// Copies the current `NetworkInfo` blob out (returns its size, at most `size`).
+/// The host's listing id on the hub server the Rust lobby opened (0: not listed).
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_own_hub() -> u64 {
+    with(|st| st.own_hub)
+}
+
+/// The host's `NetworkInfo` changed (advertise data, accept policy): keep it and send it to every peer.
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_update_info(info: *const u8, size: u32) -> bool {
+    if info.is_null() || size as usize != proto::NETINFO_SIZE {
+        return false;
+    }
+    let blob = unsafe { std::slice::from_raw_parts(info, size as usize) }.to_vec();
+    with(|st| st.info = blob);
+    if with(|st| st.hosting) {
+        push_info();
+    }
+    true
+}
+
+/// The host sends a player away: `F_DESTROY` with the game's DR_REJECTED (5), then the link is closed.
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_reject(ip: u32) -> bool {
+    let target = with(|st| st.peers.iter().find(|p| p.ip == ip).map(|p| Arc::clone(&p.stream)));
+    let Some(stream) = target else { return false };
+    {
+        let mut s = stream.lock().unwrap();
+        let _ = write_frame(&mut s, proto::F_DESTROY, &[&5u32.to_le_bytes()]);
+    }
+    let _ = stream.lock().unwrap().shutdown(std::net::Shutdown::Both);
+    true
+}
+
 #[no_mangle]
 pub extern "C" fn mhgu_ldn_info(buf: *mut u8, size: u32) -> u32 {
     with(|st| {
