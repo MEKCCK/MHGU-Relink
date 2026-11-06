@@ -18,11 +18,14 @@
 
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
-static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, show_battery;
+static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, menu_chord = {1}, show_battery;
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
-                     live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent,
-                     live_binds[BINDS][BIND_KEYS];
+                     live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
+                     live_touch, live_touch_hud, live_touch_show[TB_COUNT], live_touch_combo[TOUCH_COMBOS], live_touch_combo_pad[TOUCH_COMBOS], live_touch_cam, live_touch_opacity, live_lock_on = {1},
+                     live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
+                     live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
+                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_bonus;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -30,8 +33,10 @@ static void set_float(SDL_AtomicInt *slot, float value) {
 static float get_float(SDL_AtomicInt *slot) {
     int bits = SDL_GetAtomicInt(slot); float value; memcpy(&value, &bits, sizeof value); return value;
 }
-static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key: read by the network threads (runtime/net/ldn.c)
-static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key];
+static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key / Join: read by the network threads (runtime/net/ldn.c)
+static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key], live_ldn_join[sizeof saved.ldn_join];
+static SDL_SpinLock live_hp_lock;  // [Monster HP], HubHP: read when a large monster's HP is set (runtime/hle/hpscale.c)
+static HpScale live_hp;
 // A save updates changed hot fields only. Saving the volume must not silently
 // remove an unchanged FOV/FPS override supplied by the development environment.
 static void publish_live(const Config *c, bool all) {
@@ -52,16 +57,45 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->smooth_gradients != saved.smooth_gradients) SDL_SetAtomicInt(&live_smooth, c->smooth_gradients);
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
+    if (all || c->touch_controls != saved.touch_controls) SDL_SetAtomicInt(&live_touch, c->touch_controls);
+    if (all || c->touch_hud != saved.touch_hud) SDL_SetAtomicInt(&live_touch_hud, c->touch_hud);
+    for (int i = 0; i < TB_COUNT; i++) SDL_SetAtomicInt(&live_touch_show[i], c->touch_show[i]);
+    for (int i = 0; i < TOUCH_COMBOS; i++) {
+        SDL_SetAtomicInt(&live_touch_combo[i], (int)config_combo_mask(c->touch_combo[i]));
+        SDL_SetAtomicInt(&live_touch_combo_pad[i], c->touch_combo_pad[i]);
+    }
+    if (all || c->lock_on != saved.lock_on) SDL_SetAtomicInt(&live_lock_on, c->lock_on);
+    if (all || c->touch_camera != saved.touch_camera) set_float(&live_touch_cam, c->touch_camera);
+    if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
+    if (all || c->touch_vibration != saved.touch_vibration) SDL_SetAtomicInt(&live_touch_vibration, c->touch_vibration);
+    if (all || c->phone_rumble != saved.phone_rumble) SDL_SetAtomicInt(&live_phone_rumble, c->phone_rumble);
+    if (all || c->show_stats != saved.show_stats) SDL_SetAtomicInt(&live_show_stats, c->show_stats);
+    if (all || c->pause_background != saved.pause_background) SDL_SetAtomicInt(&live_pause_bg, c->pause_background);
+    if (all || c->shadows != saved.shadows) SDL_SetAtomicInt(&live_shadows, c->shadows);
+    if (all || c->bloom != saved.bloom) SDL_SetAtomicInt(&live_bloom, c->bloom);
+    if (all || c->reverb != saved.reverb) SDL_SetAtomicInt(&live_reverb, c->reverb);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
+    if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
+    if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
+    if (all || c->village_in_hub != saved.village_in_hub) SDL_SetAtomicInt(&live_village, c->village_in_hub);
+    if (all || memcmp(&c->hp, &saved.hp, sizeof c->hp)) {
+        SDL_LockSpinlock(&live_hp_lock);
+        live_hp = c->hp;
+        SDL_UnlockSpinlock(&live_hp_lock);
+    }
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
-    if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key)) {
+    if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key) || strcmp(c->ldn_join, saved.ldn_join)) {
         SDL_LockSpinlock(&live_ldn_lock);
         if (all || strcmp(c->ldn_server, saved.ldn_server)) memcpy(live_ldn_server, c->ldn_server, sizeof live_ldn_server);
         if (all || strcmp(c->ldn_key, saved.ldn_key)) memcpy(live_ldn_key, c->ldn_key, sizeof live_ldn_key);
+        if (all || strcmp(c->ldn_join, saved.ldn_join)) memcpy(live_ldn_join, c->ldn_join, sizeof live_ldn_join);
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
+    if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
+    if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
+    if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -71,10 +105,11 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
     SDL_SetAtomicInt(&show_fps, c->show_fps);
+    SDL_SetAtomicInt(&menu_chord, c->menu_chord);
     SDL_SetAtomicInt(&show_battery, c->show_battery);
 }
 void config_runtime_init(const Config *effective) {
-    startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0;
+    startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0 || effective->low_end;  // (no FXAA, no MSAA)
     publish_live(effective, true);
     const char *override = getenv("MHGU_FRAMERATE");
     if (override && *override) {
@@ -98,9 +133,74 @@ int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
+float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
+float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
+int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
+int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
+int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
+int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
+void config_live_ldn_join(char *join, size_t size) {
+    SDL_LockSpinlock(&live_ldn_lock);
+    SDL_strlcpy(join, live_ldn_join, size);
+    SDL_UnlockSpinlock(&live_ldn_lock);
+}
+void config_live_hp(HpScale *out) {
+    SDL_LockSpinlock(&live_hp_lock);
+    *out = live_hp;
+    SDL_UnlockSpinlock(&live_hp_lock);
+}
+float config_live_hp_village(void) {
+    SDL_LockSpinlock(&live_hp_lock);
+    float v = live_hp.village;
+    SDL_UnlockSpinlock(&live_hp_lock);
+    return v;
+}
 int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
+int config_live_touch_controls(void) { return SDL_GetAtomicInt(&live_touch); }
+int config_live_touch_hud(void) { return SDL_GetAtomicInt(&live_touch_hud); }
+int config_live_lock_on(void) { return SDL_GetAtomicInt(&live_lock_on); }
+int config_live_touch_show(int button) { return SDL_GetAtomicInt(&live_touch_show[button]); }
+uint32_t config_live_touch_combo(int index) { return (uint32_t)SDL_GetAtomicInt(&live_touch_combo[index]); }
+int config_live_touch_combo_pad(int index) { return SDL_GetAtomicInt(&live_touch_combo_pad[index]); }
+
+// The names of a combined button's parts, in BTN_* order (hle/input.h)
+static const char *const COMBO_NAMES[16] = {"A", "B", "X", "Y", "L3", "R3", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down"};
+uint32_t config_combo_mask(const char *text) {
+    uint32_t mask = 0;
+    while (*text) {
+        const char *end = strchr(text, '+');
+        size_t n = end ? (size_t)(end - text) : strlen(text);
+        bool known = false;
+        for (int i = 0; i < 16; i++)
+            if (strlen(COMBO_NAMES[i]) == n && !strncmp(text, COMBO_NAMES[i], n)) mask |= 1u << i, known = true;
+        if (!known) return 0;
+        text += n + (end ? 1 : 0);
+    }
+    return mask;
+}
+void config_combo_text(uint32_t mask, char *out, size_t size) {
+    size_t n = 0;
+    out[0] = 0;
+    for (int i = 0; i < 16; i++)
+        if (mask >> i & 1) n += (size_t)snprintf(out + n, size - n, "%s%s", n ? "+" : "", COMBO_NAMES[i]);
+}
+float config_live_touch_camera(void) { return get_float(&live_touch_cam); }
+float config_live_touch_opacity(void) { return get_float(&live_touch_opacity); }
+int config_live_touch_vibration(void) { return SDL_GetAtomicInt(&live_touch_vibration); }
+int config_live_phone_rumble(void) { return SDL_GetAtomicInt(&live_phone_rumble); }
+int config_live_show_stats(void) { return SDL_GetAtomicInt(&live_show_stats); }
+int config_live_pause_background(void) { return SDL_GetAtomicInt(&live_pause_bg); }
+int config_live_shadows(void) { return SDL_GetAtomicInt(&live_shadows); }
+int config_live_bloom(void) { return SDL_GetAtomicInt(&live_bloom); }
+int config_live_reverb(void) { return SDL_GetAtomicInt(&live_reverb); }
+// (config.c: a test run's MHGU_SHADOWS, MHGU_BLOOM, MHGU_FPS_LIMIT, after the file: live, not saved)
+void config_live_test(const Config *c) {
+    SDL_SetAtomicInt(&live_shadows, c->shadows);
+    SDL_SetAtomicInt(&live_bloom, c->bloom);
+    set_float(&live_fps, (float)c->fps);
+}
 int config_live_bind(int bind, int slot) { return SDL_GetAtomicInt(&live_binds[bind][slot]); }
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size) {
     SDL_LockSpinlock(&live_ldn_lock);
@@ -116,17 +216,16 @@ float config_audio_gain(void) {
 }
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
+bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }
 int config_show_battery(void) { return SDL_GetAtomicInt(&show_battery); }
 bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;
-    if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX) return true;
     for (int i = 0; i < g_nsettings; i++) {
         const ConfigSetting *s = &g_settings[i];
         if (s->restart && (!config_valid(s, c) || !config_equal(s, c, &startup))) return true;
     }
-    return c->hp.quests != startup.hp.quests ||
-        memcmp(c->hp.quest, startup.hp.quest, sizeof c->hp.quest[0] * (size_t)c->hp.quests);
+    return false;  // ([Monster HP] Quest<number> overrides: live, config_live_hp)
 }
 
 static bool fail(char *error, size_t size, const char *message) {

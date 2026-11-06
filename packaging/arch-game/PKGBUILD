@@ -1,0 +1,35 @@
+# Maintainer: mhgu
+pkgname=mhgu-recomp
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Monster Hunter Generations Ultimate recompiled runtime (Linux, Vulkan) with the Rust link library"
+arch=('x86_64')
+url="https://github.com/elite/mhgu"
+license=('MIT')
+depends=('glibc' 'vulkan-icd-loader' 'sdl3' 'ffmpeg' 'shaderc')
+optdepends=('pipewire: audio' 'libpulse: audio')
+provides=('mhgurecomp')
+conflicts=('mhgurecomp')
+# The translated game library (libmhgugame.so / mhgugame.so) is game code derived from the player's own
+# dump: it is NOT packaged or distributed (the same rule as the Android APK, which only ships
+# assets/gamelib_id.txt). The launcher loads it from your game folder. Run:
+#   mhgu-recomp /path/to/MHGU-1.4        (a folder with exefs/ and romfs/, 1.4.0 merged)
+options=(!strip)
+
+package() {
+  cd "$startdir/../.."
+  install -Dm755 build/mhgurecomp "$pkgdir/usr/lib/mhgu-recomp/mhgurecomp"
+  # The defaults (empty save/game folders): the program writes them out on its first run too.
+  install -Dm644 packaging/default/mhgurecomp.ini "$pkgdir/usr/lib/mhgu-recomp/mhgurecomp.ini"
+  # pipelines.list is a pipeline cache: shipped when this checkout built one, else the game builds it.
+  if [ -f build/pipelines.list ]; then
+    install -Dm644 build/pipelines.list "$pkgdir/usr/lib/mhgu-recomp/pipelines.list"
+  fi
+  if [ -d build/licenses ]; then cp -a build/licenses "$pkgdir/usr/lib/mhgu-recomp/"; fi
+
+  install -Dm755 packaging/arch-game/mhgu-recomp.sh "$pkgdir/usr/bin/mhgu-recomp"
+  install -Dm644 packaging/arch-game/mhgu-recomp.desktop "$pkgdir/usr/share/applications/mhgu-recomp.desktop"
+  install -Dm644 docs/pc.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES"
+}

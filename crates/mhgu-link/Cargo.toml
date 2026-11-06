@@ -1,0 +1,12 @@
+[package]
+name = "mhgu-link"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The in-game Local Play link (MHGL/MHGD) as a Rust client library, wire-compatible with MHGURecomp and gu-native."
+
+[dependencies]
+mhgu-protocol = { path = "../mhgu-protocol" }
+
+[dev-dependencies]
+mhgu-hub = { path = "../mhgu-hub" }

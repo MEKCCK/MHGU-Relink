@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <strings.h>
 
 #include "camera_jitter.h"
 #include "gamelib.h"
@@ -12,10 +14,11 @@
 #include "hle/mousecam.h"
 #include "kernel.h"
 #include "mods.h"
+#include "engine_module.h"
 #include "app_actions.h"
 #include "net/discord.h"
 #ifdef __ANDROID__
-#include <SDL3/SDL_main.h>  // (main becomes SDL_main, which SDL's Java activity calls in libmain.so)
+static void game_lib_failed(const char *why);
 #endif
 
 #ifndef MHGU_VERSION
@@ -26,11 +29,14 @@ const char *g_game_dir = "game";  // folder holding exefs/ and romfs/ (the playe
 
 // where the player puts the game files, for the messages below
 #ifdef __ANDROID__
-#define DATA_FOLDER "Android/data/io.github.morerokk.mhgurecomp/files/data on this device"
+#define DATA_FOLDER "Android/data/com.mhgu.recomp/files/data on this device"
 #define DATA_SUB(s) "data/" s
-#else
+#elif defined(_WIN32)
 #define DATA_FOLDER "the data folder next to mhgurecomp.exe"
 #define DATA_SUB(s) "data\\" s
+#else
+#define DATA_FOLDER "the data folder next to mhgurecomp"
+#define DATA_SUB(s) "data/" s
 #endif
 
 // rtld normally runs every module's DT_INIT (which registers it with musl and runs its init_array) before
@@ -64,6 +70,9 @@ static void boot(const char *root) {
     snprintf(npdm_path, sizeof npdm_path, "%s/main.npdm", exefs);
 
     char why[512];
+#ifdef __ANDROID__
+    if (!gamelib_load(why, sizeof why)) game_lib_failed(why);
+#endif
     if (!gamelib_load(why, sizeof why)) FATAL("%s\n", why);
     loader_load(exefs);
     kernel_init();
@@ -72,8 +81,8 @@ static void boot(const char *root) {
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
-    urgentcredit_init();  // (Urgent quests count for all who clear them: runtime/hle/urgentcredit.c)
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
+    hatestep_init();  // (monsters' attention scores at high frame rates: runtime/hle/hatestep.c)
     inflate_init();  // (zlib's inflate_fast as host code, for loading: runtime/hle/inflate.c)
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
@@ -82,7 +91,6 @@ static void boot(const char *root) {
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
-    dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
     { void sampler_init(void); sampler_init(); }  // (debug, Windows, MHGU_SAMPLE: runtime/sampler.c)
@@ -106,6 +114,121 @@ static void boot(const char *root) {
     uint32_t main_init_fn = hle_register("<rtld_init_main>", rtld_init_main);
     KThread *t = kernel_create_main_thread(start, stack_size, prio);
     kernel_run_main(t, t->handle, 0, init_fn, main_init_fn);
+}
+
+#ifdef __ANDROID__
+// Android: SDL's activity starts this library and calls SDL_main (the macro in SDL_main.h). The player's files go in
+// the app's external files folder (Android/data/<package>/files: data/exefs, data/romfs, mods/, cheats/; reachable
+// over USB or adb), the saves in its MHGURecomp/save; the game code library sits beside this one in the APK's lib
+// folder. The activity can set any of these first (MHGU_HOME, MHGU_GAME_LIB).
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <dlfcn.h>
+#include "settings_locale.h"
+// A message before the settings are read: in the phone's language, as the settings' first run (config.c)
+static const char *boot_text(const char *english) {
+    int n = 0;
+    SDL_Locale **loc = SDL_GetPreferredLocales(&n);
+    bool spanish = loc && n > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "es", 2);
+    SDL_free(loc);
+    return settings_text(spanish ? 1 : 0, english);
+}
+// These files can't be played: GameFolderActivity shows what is wrong with them at the next start
+static void files_rejected(void) {
+    const char *ext = SDL_GetAndroidExternalStoragePath();
+    char path[1100];
+    snprintf(path, sizeof path, "%s/game_folder_bad.txt", ext ? ext : ".");
+    FILE *f = fopen(path, "w");
+    if (f) fclose(f);
+}
+// The game code (the player's own, made by tools/build_game.py and kept by GameFolderActivity) didn't load
+static void game_lib_failed(const char *why) {
+    LOG("[gamelib] %s\n", why);
+    plat_error_box(boot_text("The game code (libmhgugame.so) does not fit this version of the app.\n\nMake it again with this "
+                             "version's tool, then open the game to choose the folder."));
+    files_rejected();
+    exit(1);
+}
+static void android_env(void) {
+    const char *ext = SDL_GetAndroidExternalStoragePath();
+    if (!ext) ext = SDL_GetAndroidInternalStoragePath();
+    if (ext) {
+        setenv("MHGU_HOME", ext, 0);
+        setenv("XDG_DATA_HOME", ext, 0);
+        // the player's game code (GameFolderActivity keeps it in the app's private folder: nothing runs from shared storage)
+        const char *own = SDL_GetAndroidInternalStoragePath();
+        char lib_path[1100];
+        struct stat lib_st;
+        snprintf(lib_path, sizeof lib_path, "%s/game/libmhgugame.so", own ? own : ".");
+        if (stat(lib_path, &lib_st) == 0) setenv("MHGU_GAME_LIB", lib_path, 1);
+        // the folder the player chose for the game's files (GameFolderActivity); without one, data/ here
+        char chosen[1100], folder[1024];
+        snprintf(chosen, sizeof chosen, "%s/game_folder.txt", ext);
+        FILE *g = fopen(chosen, "r");
+        if (g) {
+            if (fgets(folder, sizeof folder, g)) {
+                folder[strcspn(folder, "\r\n")] = 0;
+                if (folder[0]) setenv("MHGU_DATA_DIR", folder, 1);
+            }
+            fclose(g);
+        }
+#ifdef MHGU_DEV  // (test builds, MHGU_DEV=1 for native/build_native.sh: a public build reads neither file)
+        // (testing over adb) a control.txt there at start-up drives the game as MHGU_CONTROL (host_input.c)
+        char ctl[1100];
+        struct stat sb;
+        snprintf(ctl, sizeof ctl, "%s/control.txt", ext);
+        if (!getenv("MHGU_CONTROL") && stat(ctl, &sb) == 0) setenv("MHGU_CONTROL", ctl, 0);
+        // (testing) env.txt there: NAME=value lines, the environment a desktop run would be given (MHGU_QUICKHUNT...)
+        snprintf(ctl, sizeof ctl, "%s/env.txt", ext);
+        FILE *f = fopen(ctl, "r");
+        char line[1024];
+        while (f && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            char *eq = strchr(line, '=');
+            if (line[0] != '#' && eq && eq != line) *eq = 0, setenv(line, eq + 1, 1);
+        }
+        if (f) fclose(f);
+#endif
+    }
+    Dl_info di;
+    if (!getenv("MHGU_GAME_LIB") && dladdr((void *)android_env, &di) && di.dli_fname) {
+        char lib[1100];
+        snprintf(lib, sizeof lib, "%s", di.dli_fname);
+        char *s = strrchr(lib, '/');
+        if (s) { snprintf(s + 1, sizeof lib - (size_t)(s + 1 - lib), "libmhgugame.so"); setenv("MHGU_GAME_LIB", lib, 0); }
+    }
+}
+#endif
+
+// base/rel as it is spelled on disk, into found (rel's own spelling where it matches): 0 rel is there with those exact
+// capitals, 1 it is there with other capitals (found: how; Windows' stat finds it either way, the game would not), -1
+// not there. first_any: the first part in any case (romfs.c uses the top folder whatever its spelling).
+static int spelled_on_disk(const char *base, const char *rel, bool first_any, char *found, size_t size) {
+    char dir[1600], part[256];
+    snprintf(dir, sizeof dir, "%s", base);
+    found[0] = 0;
+    int result = 0;
+    for (const char *p = rel; *p;) {
+        size_t n = strcspn(p, "/");
+        snprintf(part, sizeof part, "%.*s", (int)n, p);
+        DIR *d = opendir(dir);
+        if (!d) return -1;
+        char hit[256] = "";
+        for (struct dirent *e; (e = readdir(d));) {
+            if (!strcmp(e->d_name, part)) { snprintf(hit, sizeof hit, "%s", e->d_name); break; }
+            if (!hit[0] && !strcasecmp(e->d_name, part)) snprintf(hit, sizeof hit, "%s", e->d_name);
+        }
+        closedir(d);
+        if (!hit[0]) return -1;
+        if (strcmp(hit, part) && !(first_any && p == rel)) result = 1;
+        size_t len = strlen(found);
+        snprintf(found + len, size - len, "%s%s", len ? "/" : "", hit);
+        len = strlen(dir);
+        snprintf(dir + len, sizeof dir - len, "/%s", hit);
+        p += n;
+        if (*p == '/') p++;
+    }
+    return result;
 }
 
 // What is wrong with the game files in data (into msg), or false when they are fine.
@@ -132,12 +255,24 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
     // an incomplete romfs starts, then crashes or quits with the game's own error: players' dumps of the base game
     // without the update merged (34149 files) or of the update alone (12 files, no shader package) did. 1.4.0
     // merged has 35531; the margin is for dump tools that leave out a few. MHGU_ROMFS_ANY=1 skips the check.
-    char romfs[1200], shaders[1300];
+    char romfs[1200];
     snprintf(romfs, sizeof romfs, "%s/romfs", data);
-    snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
-    struct stat st;
     int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
-    bool have_shaders = stat(shaders, &st) == 0;
+    // (spelled out, not stat: Linux's would miss a NativeNX folder, which romfs.c takes as nativeNX)
+    char spelled[600];
+    int case_check = spelled_on_disk(romfs, "nativeNX/system/app_shader/AppShaderPackage.mfx", true, spelled, sizeof spelled);
+    bool have_shaders = case_check >= 0;
+    // Names with other capitals than the game's (a dump tool that writes them all in small letters): on Windows they
+    // pass the count, then the game can't find its first file and quits with "Shader compile failed" (#136)
+    if (case_check == 1) {
+        const char sep = DATA_SUB("")[4];  // (the folder separator the messages use: \\ or /)
+        for (char *p = spelled; *p; p++) if (*p == '/') *p = sep;
+        snprintf(msg, size, "The game files in " DATA_SUB("romfs") " have names with the wrong capital letters, so the "
+                 "game can't find them: for example %s, which should be nativeNX%csystem%capp_shader%cAppShaderPackage.mfx. "
+                 "Extract the romfs again with a tool that keeps the names as they are, and replace " DATA_SUB("romfs")
+                 " with it.", spelled, sep, sep, sep);
+        return true;
+    }
     if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
         snprintf(msg, size, "The game files in " DATA_SUB("romfs") " are incomplete: %d files, where Monster Hunter "
                  "Generations Ultimate 1.4.0 has 35531%s. Extract the romfs again with the 1.4.0 update applied (the "
@@ -148,12 +283,10 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
     return false;
 }
 
-#ifdef __ANDROID__
-bool android_offer_import(const char *msg, char *data, size_t size);  // (runtime/platform/android.c)
-void android_game_folder(char *out, size_t size);
-#endif
-
 int main(int argc, char **argv) {
+#ifdef __ANDROID__
+    android_env();
+#endif
     for (int i = 1; i < argc; ++i) {
         if (!strncmp(argv[i], "--recomp-wait=", 14)) {
             char *end; unsigned long pid = strtoul(argv[i] + 14, &end, 10);
@@ -176,14 +309,13 @@ int main(int argc, char **argv) {
             if (s2 > s) s = s2;
             if (s) *s = 0, snprintf(data, sizeof data, "%s/data", exe);
         }
-#ifdef __ANDROID__
-        android_game_folder(data, sizeof data);  // ([Android] GameFolder: the game files on a USB drive, an SD card...)
-#endif
-        // (MHGU_DATA_DIR: the game files elsewhere, also on a PC; on Android from env.txt)
-        if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));
+        if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));  // (Android: chosen)
         g_game_dir = data;
         mods_make_dir();
         cheats_make_dir();
+#ifndef __ANDROID__
+        engine_modules_make_dir();
+#endif
         static char save[1024];
         if (plat_user_dir(save, sizeof save - 8)) {
             strcat(save, "/save");
@@ -191,19 +323,88 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "[main] no user data folder: saves go to save\\ beside the executable\n");
         }
-        for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
-            fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
-            if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
+        char main_path[1200];
+        snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
+        FILE *f = fopen(main_path, "rb");
+        if (!f) {
+#ifdef __ANDROID__
+            const char *msg = boot_text("The game files were not found.\n\nOpen the game again to choose the folder with "
+                                        "exefs and romfs.");
+            files_rejected();
+#else
+            const char *msg = "The game files were not found. Put your own dump's exefs and romfs folders in the data "
+                              "folder next to mhgurecomp.exe (data\\exefs, data\\romfs).";
 #endif
+            fprintf(stderr, "%s\n", msg);
             plat_error_box(msg);
             return 1;
         }
+        // the recompiled code is v1.4.0's: another version's files don't fit it (NSO header +0x40: build id)
+        static const uint8_t want[8] = {0xfb, 0x08, 0xf1, 0xd2, 0x0f, 0xd1, 0x20, 0x4f};
+        uint8_t hdr[0x48] = {0};
+        bool ok = fread(hdr, 1, sizeof hdr, f) == sizeof hdr && !memcmp(hdr, "NSO0", 4) && !memcmp(hdr + 0x40, want, 8);
+        fclose(f);
+        if (!ok) {
+#ifdef __ANDROID__
+            const char *msg = boot_text("These game files are not version 1.4.0.\n\nOpen the game again to see what it "
+                                        "needs and choose another folder.");
+            files_rejected();
+#else
+            const char *msg = "The game files in the data folder are not version 1.4.0 of Monster Hunter Generations "
+                              "Ultimate (data\\exefs\\main, build id FB08F1D20FD1204F). Dump the game with its 1.4.0 "
+                              "update applied (exefs from the update, romfs merged).";
+#endif
+            fprintf(stderr, "%s\n", msg);
+            plat_error_box(msg);
+            return 1;
+        }
+        // an incomplete romfs starts, then crashes or quits with the game's own error: players' dumps of the base game
+        // without the update merged (34149 files) or of the update alone (12 files, no shader package) did. 1.4.0
+        // merged has 35531; the margin is for dump tools that leave out a few. MHGU_ROMFS_ANY=1 skips the check.
+        char romfs[1200], shaders[1300];
+        snprintf(romfs, sizeof romfs, "%s/romfs", data);
+        snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
+        struct stat st;
+        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
+        bool have_shaders = stat(shaders, &st) == 0;
+        if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
+            char msg[700];
+#ifdef __ANDROID__
+            snprintf(msg, sizeof msg, boot_text("The game files are incomplete: romfs has %d files and version 1.4.0 has "
+                                                "35531%s.\n\nOpen the game again to see what it needs and choose another "
+                                                "folder."), nfiles,
+                     !have_shaders ? boot_text(", and its shader package is missing") : "");
+            files_rejected();
+#else
+            snprintf(msg, sizeof msg, "The game files in data\\romfs are incomplete: %d files, where Monster Hunter "
+                     "Generations Ultimate 1.4.0 has 35531%s. Extract the romfs again with the 1.4.0 update applied (the "
+                     "base game's files with the update's merged over them) and replace data\\romfs with it.", nfiles,
+                     !have_shaders ? ", and nativeNX\\system\\app_shader\\AppShaderPackage.mfx is missing" : "");
+#endif
+            fprintf(stderr, "%s\n", msg);
+            plat_error_box(msg);
+            return 1;
+        }
+#else
+        for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
+            fprintf(stderr, "%s\n", msg);
+            plat_error_box(msg);
+            return 1;
+        }
+#endif
     }
     LOG("MHGU Recomp %s\n", MHGU_VERSION);
+#ifdef __ANDROID__
+    void plat_log_device(void);
+    plat_log_device();
+#endif
     { void fnprof_init(void); fnprof_init(); }
     crash_handler_install();
     ui_init();
+#ifndef __ANDROID__
+    engine_modules_init(MHGU_VERSION);  // (the ones engine_modules/enabled.txt lists: runtime/engine_module.c)
+#endif
     boot(g_game_dir);
     return ui_run();
 }

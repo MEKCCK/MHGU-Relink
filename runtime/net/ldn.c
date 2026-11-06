@@ -18,6 +18,7 @@
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -34,6 +35,7 @@
 #include "../overlay.h"
 #include "../settings_locale.h"
 #include "net.h"
+#include "mhgu_link.h"  /* the Rust online module (crates/mhgu-link-ffi) */
 
 #ifdef _WIN32
 typedef SOCKET hsock;
@@ -159,6 +161,7 @@ static struct {
     hsock listen_s, disc_s;
     pthread_t host_th;
     bool hosting;
+    int port;  // [Multiplayer] Port as it was when this hub started (a Save changes the next hub's, not this one's)
     Link nodes[MAX_NODES];  // [0] unused (the host itself)
     // station
     Link up;
@@ -166,6 +169,7 @@ static struct {
     pthread_t uth;
     volatile bool uth_run;
     // host: the hub's listing on the hub server
+    uint64_t own_hub;  // the id that listing gave us (0: not listed); the scan skips it
     pthread_t lobby_th;
     volatile bool lobby_run, lobby_dirty;  // dirty: the NetworkInfo changed, send it
     struct sockaddr_in lobby_addr;
@@ -390,23 +394,32 @@ static void host_route(int from, const VPacket *p, const void *data, uint32_t le
 }
 
 void ldn_send(const VPacket *p, const void *data, uint32_t len) {
-    if (L.state == ST_AP_CREATED) { host_route(0, p, data, len); return; }
+    if (L.state == ST_AP_CREATED) {
+        bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
+        if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
+        if (p->dst_ip == L.own_ip) return;
+        MhguVPacket mp;
+        memcpy(&mp, p, sizeof mp);
+        mhgu_ldn_send(&mp, data, len);
+        return;
+    }
     if (L.state != ST_STATION_CONNECTED) return;
     bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
     if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
     if (p->dst_ip == L.own_ip) return;
-    hsock us = L.us;
-    if (!(us != BADSOCK && udp_usable(&L.up) && udp_send(us, NULL, &L.up, U_DATA, p, data, len)))
-        link_send(&L.up, F_PACKET, p, sizeof *p, data, len);
+    // The station's one link is the Rust link (mhgu-link): it sends by UDP through the hub relay when the
+    // host's datagrams get through, else over the link's TCP. There is no C socket for it (`L.up.s`).
+    MhguVPacket mp;
+    memcpy(&mp, p, sizeof mp);
+    mhgu_ldn_send(&mp, data, len);
 }
 
 // The port's own messages to every other game in the network (reliable, in order: the TCP link).
 void ldn_send_aux(const void *data, uint32_t len) {
     if (L.state == ST_AP_CREATED) {
-        for (int i = 1; i < MAX_NODES; i++)
-            if (L.nodes[i].alive) link_send(&L.nodes[i], F_AUX, data, len, NULL, 0);
+        mhgu_ldn_send_aux(data, len);
     } else if (L.state == ST_STATION_CONNECTED) {
-        link_send(&L.up, F_AUX, data, len, NULL, 0);
+        mhgu_ldn_send_aux(data, len);
     }
 }
 
@@ -647,7 +660,7 @@ static void *host_thread(void *arg) {
                 uint8_t reply[8 + NETINFO_SIZE];
                 memcpy(reply, PROTO_MAGIC, 4);
                 wr16(reply + 4, PROTO_VERSION);
-                wr16(reply + 6, (uint16_t)g_config.ldn_port);
+                wr16(reply + 6, (uint16_t)L.port);
                 pthread_mutex_lock(&L.mu);
                 memcpy(reply + 8, L.info, NETINFO_SIZE);
                 pthread_mutex_unlock(&L.mu);
@@ -677,8 +690,6 @@ static bool lobby_server(char *out) {
 
 // A request's header. The room is a hash of the matchmaking key (key NULL: ini Key; spaces around it ignored): hubs
 // are listed only for players whose key matches, all of them without one. The server never sees the key itself.
-// Android without a key: the room of the key "public-phone", so a phone's public hubs are among phones only and no key
-// reaches the PCs' public room (all zero): phones play with PCs only by sharing a key.
 static bool lobby_header(uint8_t *h, const char *key) {
     static const char salt[] = "MHGURecomp matchmaking key:";
     char live[sizeof g_config.ldn_key];
@@ -691,9 +702,6 @@ static bool lobby_header(uint8_t *h, const char *key) {
     while (*k == ' ') k++;
     size_t n = strlen(k);
     while (n && k[n - 1] == ' ') n--;
-#ifdef __ANDROID__
-    if (!n) k = "public-phone", n = strlen(k);
-#endif
     if (!n) return false;
     Sha256 s;
     char hex[65];
@@ -770,7 +778,9 @@ static void hub_report(int what, const char *srv, int state, int ms, int hubs) {
     char line[LOBBY_NAME + 128];
     snprintf(line, sizeof line, settings_text(lang, title), srv);
     const char *text = state == HUB_ONLINE ? UI_TEXT("Your hub is listed online again.") : next[what];
-    if (what == NOTE_SEARCH && g_config.ldn_join[0]) text = UI_TEXT("Only hubs on your local network and Join addresses are shown.");
+    char join[sizeof g_config.ldn_join];
+    config_live_ldn_join(join, sizeof join);
+    if (what == NOTE_SEARCH && join[0]) text = UI_TEXT("Only hubs on your local network and Join addresses are shown.");
     overlay_notice(line, settings_text(lang, text));
 }
 
@@ -843,8 +853,12 @@ static void *lobby_thread(void *arg) {
             if (!lobby_wait(gen, 30000)) break;
             continue;
         }
-        LOG("[ldn] hub listed on the hub server %s: %s\n", srv,
-            keyed ? "players with the same matchmaking key see it" : "public, every player sees it");
+        pthread_mutex_lock(&L.mu);
+        L.own_hub = rd64(buf);
+        pthread_mutex_unlock(&L.mu);
+        LOG("[ldn] hub listed on the hub server %s: %s (hub %#llx)\n", srv,
+            keyed ? "players with the same matchmaking key see it" : "public, every player sees it",
+            (unsigned long long)rd64(buf));
         hub_report(NOTE_HOST, srv, HUB_ONLINE, (int)((plat_now_ns() - asked) / 1000000), -1);
         uint64_t now = plat_now_ns(), last_rx = now, next_ping = now + LOBBY_PING_NS;
         while (lobby_gen == gen) {
@@ -895,7 +909,12 @@ static void lobby_host_start(void) {
     pthread_mutex_unlock(&hub_mu);
     if (lobby_server(srv) && !pthread_create(&th, NULL, lobby_thread, (void *)(uintptr_t)gen)) pthread_detach(th);
 }
-static void lobby_host_stop(void) { lobby_gen++; }
+static void lobby_host_stop(void) {
+    lobby_gen++;
+    pthread_mutex_lock(&L.mu);
+    L.own_hub = 0;
+    pthread_mutex_unlock(&L.mu);
+}
 
 // Station: the hubs the server lists for a key (NULL: ini Key). A HUB_* state; ms: the request's round trip.
 #define LOBBY_LIST_MAX 24
@@ -1028,57 +1047,80 @@ static uint32_t lobby_join(const struct sockaddr_in *addr, uint64_t hub, hsock *
     return code == SE_NOT_FOUND ? R_CONNECT_NOT_FOUND : code == SE_BUSY ? R_CONNECT_REJECTED : R_CONNECT_TIMEOUT;
 }
 
-static bool host_start(void) {
-    hnet_init();
-    struct sockaddr_in a = {0};
-    a.sin_family = AF_INET;
-    a.sin_port = htons((uint16_t)g_config.ldn_port);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
-    hsock ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    bool bound = ls != BADSOCK && !bind(ls, (struct sockaddr *)&a, sizeof a);
-    bool any_port = false;  // the port is taken: still hosting through the hub server, on a port of the system's choice
-    char srv[LOBBY_NAME];
-    bool online = lobby_server(srv);
-    if (ls != BADSOCK && !bound && online) {
-        a.sin_port = 0;
-        any_port = bound = !bind(ls, (struct sockaddr *)&a, sizeof a);
+
+// ---- the Rust online module (mhgu-link-ffi) ----------------------------------------------------
+// The host's transport, the LAN answer and the relay live there now; this file keeps the `nn::ldn`
+// handlers and the guest structures, and hands the packets to the same local path as before.
+
+static pthread_t link_poll_th;
+static volatile int link_poll_run;
+
+static void link_deliver(const MhguVPacket *p, const uint8_t *data, uint32_t len) {
+    VPacket v;
+    memcpy(&v, p, sizeof v);
+    link_received(0, &v, data, len);  // (0: from the network; the Rust host already relayed it)
+}
+
+static void link_aux(const uint8_t *data, uint32_t len) { emsync_aux_received(data, len); }
+
+static void *link_poll_thread(void *arg) {
+    (void)arg;
+    int last_nodes = -1;
+    while (link_poll_run) {
+        mhgu_ldn_poll();
+        // A player joined or left: the host's game learns it from the state-change event, as ldn.c's
+        // own host thread told it (signal_change), and refreshes its NetworkInfo.
+        int n = 0, max = 0;
+        char id[16];
+        if (mhgu_ldn_party(&n, &max, id, sizeof id) && n != last_nodes) {
+            last_nodes = n;
+            signal_change();
+        }
+        plat_sleep_until_ns(plat_now_ns() + 2000000ull);
     }
-    if (!bound || listen(ls, 8)) {
-        LOG("[ldn] can't listen on TCP port %d (in use by another program?): nobody can join this hub\n", g_config.ldn_port);
-        if (ls != BADSOCK) hclose(ls);
+    return NULL;
+}
+
+static void link_poll_start(void) {
+    if (link_poll_run) return;
+    mhgu_ldn_set_delivery(link_deliver, link_aux);
+    link_poll_run = 1;
+    if (pthread_create(&link_poll_th, NULL, link_poll_thread, NULL)) link_poll_run = 0;
+}
+
+static void link_poll_stop(void) {
+    if (!link_poll_run) return;
+    link_poll_run = 0;
+    pthread_join(link_poll_th, NULL);
+}
+
+static bool host_start(void) {
+    int port = config_live_ldn_port();
+    char name[0x21] = {0};
+    memcpy(name, node_at(L.info, 0) + NODE_NAME, 0x20);
+    uint16_t bound = 0;
+    if (!mhgu_ldn_host((uint16_t)port, &bound, name, L.info, NETINFO_SIZE)) {
+        LOG("[ldn] mhgu-link could not host on port %u (another game instance or another program holds it?)\n",
+            (unsigned)port);
         return false;
     }
-    hsock ds = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (ds != BADSOCK && bind(ds, (struct sockaddr *)&a, sizeof a)) {
-        a.sin_port = 0;  // (for the hub server's relay; LAN search needs the port)
-        if (!online || bind(ds, (struct sockaddr *)&a, sizeof a)) { hclose(ds); ds = BADSOCK; }
-        if (!any_port) LOG("[ldn] UDP port %d is in use: no LAN search (only Join addresses)\n", g_config.ldn_port);
-    }
-    L.listen_s = ls, L.disc_s = ds, L.hosting = true;
-    pthread_create(&L.host_th, NULL, host_thread, NULL);
-    if (any_port) LOG("[ldn] port %d is in use: hosting only through the hub server\n", g_config.ldn_port);
-    else LOG("[ldn] hosting: players join this computer's address, port %d (TCP, and UDP for LAN search and game packets)\n",
-             g_config.ldn_port);
-    lobby_host_start();
+    L.hosting = true;
+    L.port = port;
+    link_poll_start();
+    LOG("[ldn] hosting via mhgu-link on port %u\n", bound);
+    char server[LOBBY_NAME], key[LOBBY_NAME];
+    config_live_ldn(server, sizeof server, key, sizeof key);
+    if (server[0] && mhgu_ldn_host_server(server, key)) LOG("[ldn] hub listed on %s\n", server);
     return true;
 }
 
-static void host_stop(uint32_t reason) {  // (caller: not holding L.mu)
-    lobby_host_stop();
-    if (L.hosting) {
-        L.hosting = false;
-        pthread_join(L.host_th, NULL);
-        hclose(L.listen_s);
-        if (L.disc_s != BADSOCK) hclose(L.disc_s);
-        L.listen_s = L.disc_s = BADSOCK;
-    }
-    for (int i = 1; i < MAX_NODES; i++) {
-        Link *l = &L.nodes[i];
-        if (l->alive) link_send(l, F_DESTROY, &reason, 4, NULL, 0);
-        link_close(l);
-    }
-    for (int i = 1; i < MAX_NODES; i++)  // (their threads see the closed sockets and end)
-        for (int t = 0; t < 200 && L.nodes[i].has_thread; t++) plat_sleep_until_ns(plat_now_ns() + 5000000);
+static void host_stop(uint32_t reason) {
+    (void)reason;
+    if (!L.hosting) return;
+    L.hosting = false;
+    mhgu_ldn_leave();
+    link_poll_stop();
+    for (int i = 1; i < MAX_NODES; i++) link_close(&L.nodes[i]);
 }
 
 // ---- station
@@ -1154,33 +1196,66 @@ static void *station_udp_thread(void *arg) {
 }
 
 static void station_leave(void) {  // (caller: not holding L.mu)
-    if (L.up.has_thread) {
-        link_close(&L.up);
-        pthread_join(L.up.th, NULL);
-        L.up.has_thread = false;
-    }
-    if (L.us != BADSOCK) {
-        L.uth_run = false;
-        pthread_join(L.uth, NULL);
-        hclose(L.us);
-        L.us = BADSOCK;
-    }
-    L.up.udp_up = false;
+    mhgu_ldn_leave();
+    link_poll_stop();
     vsock_network_down();
 }
+
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#include <ifaddrs.h>
+#include <jni.h>
+#include <net/if.h>
+// Android's Wi-Fi drops broadcasts to save battery unless an app asks otherwise: on while the local play service is up
+// (GameActivity.lanSearch)
+static void lan_wifi(bool on) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "lanSearch", "(Z)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jboolean)on);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+// The probe to each network's own broadcast address as well: 255.255.255.255 follows the default route, and on a phone
+// that can be mobile data, or nothing when it is the Wi-Fi hotspot
+static void probe_networks(hsock u, const uint8_t *probe, size_t size, struct sockaddr_in to) {
+    struct ifaddrs *all = NULL;
+    if (getifaddrs(&all)) return;
+    int sent = 0;
+    for (struct ifaddrs *i = all; i; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || !(i->ifa_flags & IFF_BROADCAST) || !(i->ifa_flags & IFF_UP) ||
+            !i->ifa_broadaddr)
+            continue;
+        to.sin_addr = ((struct sockaddr_in *)(void *)i->ifa_broadaddr)->sin_addr;
+        sendto(u, (const char *)probe, size, 0, (struct sockaddr *)&to, sizeof to);
+        ONCE("[ldn] searching on %s (%s)\n", i->ifa_name, inet_ntoa(to.sin_addr));
+        sent++;
+    }
+    freeifaddrs(all);
+    ONCE("[ldn] %d local network(s) to search\n", sent);
+}
+#else
+static void lan_wifi(bool on) { (void)on; }
+#endif
 
 // Hosts to ask: ini Join (comma separated host[:port]) and this computer.
 static int scan_addresses(struct sockaddr_in *out, int max) {
     int n = 0;
     char list[sizeof g_config.ldn_join];
-    snprintf(list, sizeof list, "%s", g_config.ldn_join);
+    config_live_ldn_join(list, sizeof list);  // (as saved now: a Save counts from the next search)
+    int port = config_live_ldn_port();
     for (char *t = strtok(list, ", ;"); t && n < max; t = strtok(NULL, ", ;")) {
-        if (resolve_host(t, g_config.ldn_port, &out[n])) n++;
+        if (resolve_host(t, port, &out[n])) n++;
         else LOG("[ldn] Join address \"%s\" not found\n", t);
     }
     return n;
 }
 
+#define SEARCH_NS 1500000000ull      // how long a LAN search listens
+#define SEARCH_ASK_NS 500000000ull   // and how often it asks
 // Collects the networks of hosts that answer: by address (TCP) and by LAN broadcast (UDP).
 static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, int max) {
     hnet_init();
@@ -1211,19 +1286,27 @@ static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, i
     wr16(probe + 6, 0);
     struct sockaddr_in to = {0};
     to.sin_family = AF_INET;
-    to.sin_port = htons((uint16_t)g_config.ldn_port);
-    to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
-    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
-    uint64_t end = plat_now_ns() + 400000000ull;
+    to.sin_port = htons((uint16_t)config_live_ldn_port());
+    // Asked more than once, and given time: on Wi-Fi a broadcast waits at the router for the next beacon that wakes a
+    // device saving power (a phone's reply took longer than the 400 ms this used to wait)
+    uint64_t next_ask = 0, end = plat_now_ns() + SEARCH_NS;
     for (uint64_t now; (now = plat_now_ns()) < end && n < max;) {
+        if (now >= next_ask) {
+            next_ask = now + SEARCH_ASK_NS;
+            to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+            sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
+#ifdef __ANDROID__
+            probe_networks(u, probe, sizeof probe, to);
+#endif
+            to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
+        }
         fd_set r;
         FD_ZERO(&r);
         FD_SET(u, &r);
-        uint64_t left = (end - now) / 1000;
+        uint64_t left = ((next_ask < end ? next_ask : end) - now) / 1000;
         struct timeval tv = {(long)(left / 1000000), (long)(left % 1000000)};
-        if (select((int)u + 1, &r, NULL, NULL, &tv) <= 0) break;
+        if (select((int)u + 1, &r, NULL, NULL, &tv) <= 0) continue;
         struct sockaddr_in from;
         socklen_t fl = sizeof from;
         int k = recvfrom(u, (char *)buf, MAX_FRAME, 0, (struct sockaddr *)&from, &fl);
@@ -1241,17 +1324,32 @@ static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, i
 
 // ---- nn::ldn
 
+static uint64_t trace_until;  // set at a join: log the game's ldn calls for a few seconds
+static void trace(const char *fmt, ...) {
+    if (!trace_until || plat_now_ns() > trace_until) return;
+    va_list ap;
+    va_start(ap, fmt);
+    char b[256];
+    vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    LOG("[ldn] trace: %s\n", b);
+}
+
 HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
+    lan_wifi(true);
     pthread_mutex_lock(&L.mu);
     if (!L.ev) L.ev = kernel_create_event_pair(&(uint32_t){0}, &L.ev_r);
     if (L.state == ST_NONE) {
         L.state = ST_INITIALIZED, L.reason = DR_NONE;
         rand_bytes(L.mac, 6);
         L.mac[0] = (uint8_t)((L.mac[0] & 0xFC) | 0x02);  // locally administered, unicast
+        mhgu_ldn_set_mac(L.mac);  // the join Hello carries it: the host's node table must name us as the game does
     }
     pthread_mutex_unlock(&L.mu);
-    ONCE("[ldn] local play over IP: host port %d, join %s (state event %x)\n", g_config.ldn_port,
-         g_config.ldn_join[0] ? g_config.ldn_join : "(LAN search only)", L.ev_r);
+    char join[sizeof g_config.ldn_join];
+    config_live_ldn_join(join, sizeof join);  // (as saved now, like the hosting and the search)
+    ONCE("[ldn] local play over IP: host port %d, join %s (state event %x)\n", config_live_ldn_port(),
+         join[0] ? join : "(LAN search only)", L.ev_r);
     RET(0);
 }
 
@@ -1264,11 +1362,12 @@ static void to_initialized(void) {
 }
 
 HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
+    lan_wifi(false);
     to_initialized();
     L.state = ST_NONE;
     (void)c;
 }
-HLE_FUNC("_ZN2nn3ldn8GetStateEv", ldn_get_state) { NTRACE(); RET(L.state); }
+HLE_FUNC("_ZN2nn3ldn8GetStateEv", ldn_get_state) { NTRACE(); trace("GetState -> %d", L.state); RET(L.state); }
 HLE_FUNC("_ZN2nn3ldn19GetDisconnectReasonEv", ldn_get_reason) { NTRACE(); RET(L.reason); }
 
 // AttachStateChangeEvent(SystemEventType *): the event fires on every change of the state or the network
@@ -1282,8 +1381,12 @@ HLE_FUNC("_ZN2nn3ldn22AttachStateChangeEventEPNS_2os15SystemEventTypeE", ldn_att
 
 HLE_FUNC("_ZN2nn3ldn14GetNetworkInfoEPNS0_11NetworkInfoE", ldn_get_network_info) { NTRACE();
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
+    // The players in the network come from the Rust link (it keeps the node table); the game reads it
+    // here, and Pia routes by those addresses.
+    if (ldn_net_up()) mhgu_ldn_info(L.info, NETINFO_SIZE);
     pthread_mutex_lock(&L.mu);
     memcpy(ARGP(0), L.info, NETINFO_SIZE);
+    trace("GetNetworkInfo -> %u node(s), host %s", L.info[NI_NODE_COUNT], ipstr(rd32(node_at(L.info, 0) + NODE_IP)));
     pthread_mutex_unlock(&L.mu);
     RET(0);
 }
@@ -1292,6 +1395,7 @@ HLE_FUNC("_ZN2nn3ldn14GetIpv4AddressEPNS0_11Ipv4AddressEPNS0_10SubnetMaskE", ldn
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
     if (ARG(0)) ST32(ARG(0), L.own_ip);
     if (ARG(1)) ST32(ARG(1), 0xFFFFFF00u);
+    trace("GetIpv4Address -> %s", ipstr(L.own_ip));
     RET(0);
 }
 
@@ -1299,6 +1403,8 @@ HLE_FUNC("_ZN2nn3ldn20GetSecurityParameterEPNS0_17SecurityParameterE", ldn_get_s
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
     memcpy(ARGP(0), L.info + NI_SEC_PARAM, 0x10);
     memcpy((uint8_t *)ARGP(0) + 0x10, L.info + NI_SESSION_ID, 0x10);
+    trace("GetSecurityParameter -> param %02x%02x.. session %02x%02x..", L.info[NI_SEC_PARAM], L.info[NI_SEC_PARAM+1],
+          L.info[NI_SESSION_ID], L.info[NI_SESSION_ID+1]);
     RET(0);
 }
 
@@ -1473,7 +1579,12 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     int n = discover(infos, addrs, 16), k = 0;
     if (asked) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
         pthread_join(lt, NULL);
+        uint64_t own;
+        pthread_mutex_lock(&L.mu);
+        own = L.own_hub;
+        pthread_mutex_unlock(&L.mu);
         for (int j = 0; j < online.n && n < MAX_FOUND; j++) {
+            if (own && online.ids[j] == own) continue;  // our own hub: joining ourselves can't work
             bool dup = false;
             for (int i = 0; i < n; i++) dup |= !memcmp(infos[i] + NI_BSSID, online.infos[j] + NI_BSSID, 6);
             if (dup) continue;
@@ -1507,61 +1618,54 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     int i = 0;
     while (i < nfound && memcmp(found[i].bssid, info + NI_BSSID, 6)) i++;
     if (i == nfound) return R_CONNECT_NOT_FOUND;
-    hsock s;
-    uint32_t pair = 0;
-    uint64_t secret = 0;
+    char addr[64];
+    snprintf(addr, sizeof addr, "%s:%u", inet_ntoa(found[i].addr.sin_addr), (unsigned)ntohs(found[i].addr.sin_port));
+    char name[0x21] = {0};
+    memcpy(name, user, 0x20);
+    // The Rust client does the MHGL handshake and keeps the link; the game reads the network it answered.
+    mhgu_ldn_set_lcv(lcv);
+    char key[LOBBY_NAME];
+    config_live_ldn(NULL, 0, key, sizeof key);
     if (found[i].hub) {
-        uint32_t r = lobby_join(&found[i].addr, found[i].hub, &s, &pair, &secret);
-        if (r) return r;
-    } else if ((s = connect_to(&found[i].addr, 3000)) == BADSOCK) {
-        LOG("[ldn] can't reach the host at %s\n", inet_ntoa(found[i].addr.sin_addr));
+        // A hub on a server: the server splices us to the host, and keeps relaying.
+        if (!mhgu_ldn_join_server(addr, key, found[i].hub, name, NULL, 0)) {
+            LOG("[ldn] mhgu-link could not join hub %#llx on %s\n", (unsigned long long)found[i].hub, addr);
+            return R_CONNECT_TIMEOUT;
+        }
+    } else if (!mhgu_ldn_join(addr, name, NULL, 0)) {
+        LOG("[ldn] mhgu-link could not join %s\n", addr);
         return R_CONNECT_TIMEOUT;
     }
-    L.lcv = lcv;
-    Hello h = make_hello(false, user);
-    static uint8_t buf[MAX_FRAME];
-    uint8_t type;
-    int n;
-    hset_timeout(s, 5000);
-    if (!frame_send(s, F_HELLO, &h, sizeof h, NULL, 0) || (n = frame_recv(s, &type, buf)) < 4) {
-        hclose(s);
-        return R_CONNECT_TIMEOUT;
-    }
-    if (type == F_REFUSE) {
-        hclose(s);
-        uint32_t r = rd32(buf);
-        LOG("[ldn] the host refused (result %#x)\n", r);
-        return (r & 0x1FF) == 203 ? r : R_CONNECT_REJECTED;  // (an nn::ldn result only)
-    }
-    int node = buf[0];
-    if (type != F_WELCOME || n < 8 + NETINFO_SIZE || node < 1 || node >= MAX_NODES || !info_sane(buf + 8) ||
-        !node_at(buf + 8, node)[NODE_CONNECTED]) {
-        hclose(s);
-        return R_CONNECT_FAILURE;
-    }
-    hset_timeout(s, 0);
+    uint8_t theirs[NETINFO_SIZE] = {0};
+    mhgu_ldn_info(theirs, NETINFO_SIZE);
     pthread_mutex_lock(&L.mu);
-    memcpy(L.info, buf + 8, NETINFO_SIZE);
-    L.own_ip = rd32(node_at(L.info, node) + NODE_IP);
+    memcpy(L.info, theirs, NETINFO_SIZE);
+    L.own_ip = mhgu_ldn_own_ip();
     L.subnet = L.own_ip & 0xFFFFFF00u;
-    pthread_mutex_init(&L.up.wmu, NULL);
-    L.up.s = s, L.up.alive = true, L.up.ip = L.subnet | 1;
-    L.up.token = rd32(buf + 4), L.up.udp_up = false, L.up.udp_rx_ns = 0;
-    L.up.relay_pair = pair, L.up.relay_secret = secret;
+    L.lcv = lcv;
     L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
     pthread_mutex_unlock(&L.mu);
-    L.up.has_thread = pthread_create(&L.up.th, NULL, uplink_thread, NULL) == 0;
-    // UDP to the same address and port as the TCP connection (the host's hello answers tell whether it gets through)
-    L.us = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (L.us != BADSOCK && !connect(L.us, (const struct sockaddr *)&found[i].addr, sizeof found[i].addr)) {
-        L.uth_run = true;
-        if (pthread_create(&L.uth, NULL, station_udp_thread, NULL)) { hclose(L.us); L.us = BADSOCK; }
-    } else if (L.us != BADSOCK) {
-        hclose(L.us);
-        L.us = BADSOCK;
+    trace_until = plat_now_ns() + 5000000000ull;
+    link_poll_start();
+    LOG("[ldn] joined %s as %s via mhgu-link\n", addr, ipstr(L.own_ip));
+    {   // what the game gets: its own node entry must be the one the host wrote for us
+        int cnt = L.info[NI_NODE_COUNT], max = L.info[NI_NODE_MAX];
+        const uint8_t *n0 = node_at(L.info, 0);
+        LOG("[ldn] info: ssid %u ch %u level %u type %u secmode %04x policy %u adv %u, localcomm %02x%02x scene %02x%02x\n",
+            L.info[NI_SSID], rd16(L.info + NI_CHANNEL), L.info[NI_LINK_LEVEL], L.info[NI_NETWORK_TYPE],
+            rd16(L.info + NI_SEC_MODE), L.info[NI_ACCEPT_POLICY], rd16(L.info + NI_ADV_SIZE),
+            L.info[NI_LOCAL_COMM_ID], L.info[NI_LOCAL_COMM_ID + 1], L.info[NI_SCENE_ID], L.info[NI_SCENE_ID + 1]);
+        LOG("[ldn] connected network: %d/%d node(s), host %s mac %02x:%02x:%02x:%02x:%02x:%02x, session %02x%02x%02x%02x\n",
+            cnt, max, ipstr(rd32(n0 + NODE_IP)), n0[NODE_MAC], n0[NODE_MAC+1], n0[NODE_MAC+2],
+            n0[NODE_MAC+3], n0[NODE_MAC+4], n0[NODE_MAC+5], L.info[NI_SESSION_ID], L.info[NI_SESSION_ID+1],
+            L.info[NI_SESSION_ID+2], L.info[NI_SESSION_ID+3]);
+        for (int i = 0; i < cnt && i < MAX_NODES; i++) {
+            const uint8_t *nd = node_at(L.info, i);
+            LOG("[ldn]   node %d: ip %s mac %02x:%02x:%02x:%02x:%02x:%02x id %u conn %u\n", i,
+                ipstr(rd32(nd + NODE_IP)), nd[NODE_MAC], nd[NODE_MAC+1], nd[NODE_MAC+2],
+                nd[NODE_MAC+3], nd[NODE_MAC+4], nd[NODE_MAC+5], nd[NODE_ID], nd[NODE_CONNECTED]);
+        }
     }
-    if (pair) LOG("[ldn] joined a hub through the hub server as %s (node %d)\n", ipstr(L.own_ip), node);
-    else LOG("[ldn] joined %s's network as %s (node %d)\n", inet_ntoa(found[i].addr.sin_addr), ipstr(L.own_ip), node);
     signal_change();
     return 0;
 }

@@ -1,0 +1,6 @@
+[package]
+name = "mhgu-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wire formats of the MHGU Local Play networking (hub server + in-game link), shared by mhgu-hub and clients."

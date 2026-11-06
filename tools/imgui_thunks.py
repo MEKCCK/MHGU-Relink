@@ -31,14 +31,13 @@ DEFS, SE, TD = J('definitions.json'), J('structs_and_enums.json'), J('typedefs_d
 STRUCTS, ENUMS, ENUMTYPES, LOC = SE['structs'], SE['enums'], SE['enumtypes'], SE['locations']
 
 # hand-written in runtime/forge_imgui.c (contexts, allocators, the frame itself, context hooks, files, texture pixels,
-# glyph ranges, point lists)
+# glyph ranges)
 OVERRIDE = {'igCreateContext', 'igDestroyContext', 'igSetAllocatorFunctions', 'igGetAllocatorFunctions', 'igMemAlloc',
             'igMemFree', 'igNewFrame', 'igEndFrame', 'igRender', 'igGetDrawData', 'igAddContextHook',
             'igImFileOpen', 'igImFileClose', 'igImFileGetSize', 'igImFileRead', 'igImFileWrite',
             'ImTextureData_GetPixels', 'ImTextureData_GetPixelsAt', 'igRegisterUserTexture', 'ImTextureData_destroy',
             'ImFont_CalcTextSizeA', 'ImFontAtlas_GetGlyphRangesDefault',
-            'ImFontGlyphRangesBuilder_BuildRanges', 'ImDrawList_AddPolyline', 'ImDrawList_AddConvexPolyFilled',
-            'ImDrawList_AddConcavePolyFilled'}
+            'ImFontGlyphRangesBuilder_BuildRanges'}
 # structs whose mirrors are refreshed around every call (the plugin reads and writes them at any time)
 HOT = {'ImGuiIO', 'ImGuiStyle', 'ImGuiPlatformIO'}
 # callbacks run through trampolines in runtime/forge_imgui.c (type as cimgui writes it -> trampoline)

@@ -1,0 +1,19 @@
+[Unit]
+Description=MHGU hub server (Local Play over the internet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/mhgu-hub -addr :39510 -web :39511
+# Your own web UI: uncomment and point it at your files.
+#ExecStart=/usr/bin/mhgu-hub -addr :39510 -web :39511 -web-dir /etc/mhgu-hub/web
+Restart=on-failure
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

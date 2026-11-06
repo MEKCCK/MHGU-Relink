@@ -63,18 +63,22 @@ int main(int argc, char **argv) {
     assert(camera_fovy(0.5f,426.0f/118.0f)!=0.5f && camera_fovy(0.5f,3.3f)==0.5f);
     g_render_aspect=aspect_was, g_render_size[0]=size_was[0], g_render_size[1]=size_was[1];
     assert(g_config.fps==60 && g_config.fxaa==1 && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
-    c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
+    c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1; // (monster HP is live: config_live_hp)
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
     assert(config_language() == 1);
+    assert(!config_restart_required(&c));
+    snprintf(c.save_location, sizeof c.save_location, "/tmp/mhgu-save"); // (SaveLocation restarts)
+    assert(config_save(&c, error, sizeof error));
     assert(config_restart_required(&c));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;
     restored.hp.quest[1]=c.hp.quest[0];
-    assert(!config_restart_required(&restored));
+    assert(config_restart_required(&restored));
     assert(!strcmp(settings_text(1, "Language"), "Idioma"));
     assert(!strcmp(settings_text(0, "Language"), "Language"));
+    assert(!strcmp(settings_text(2, "Language"), "语言"));
     assert(!strcmp(settings_text(1, "Duplicate quest ID."), "ID de misión repetido."));
     char *text = read_file(path);
     assert(strstr(text, "; Keep this comment\r\n"));
@@ -95,7 +99,7 @@ int main(int argc, char **argv) {
     bad.menu_scale=201;assert(!config_save(&bad,error,sizeof error));
     bad = c; bad.button_icons = 3;
     assert(!config_save(&bad, error, sizeof error));
-    bad = c; bad.language = 2;
+    bad = c; bad.language = 3;
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.fov = NAN;
     assert(!config_save(&bad, error, sizeof error));
@@ -156,7 +160,7 @@ int main(int argc, char **argv) {
     assert(menu_confirm_position(MENU_CONFIRM_SOUTH,1,0,0)==0);
     assert(menu_confirm_position(MENU_CONFIRM_SOUTH,1,0,1)==1);
     Config fsr_config=config_editable();
-    assert(config_defaults().sync_small_monsters==0);
+    assert(config_defaults().sync_small_monsters==1);
     assert(config_defaults().share_urgent==1);
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().draw_distance==1.0f);
@@ -165,6 +169,7 @@ int main(int argc, char **argv) {
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);
     fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
+    fsr_config.fsr_upscaler=FSR_UP_4;  // (FSR 4 is a setting again: runtime/nvn/vulkan/fsr4.c)
     fsr_config.msaa=8;fsr_config.fxaa=1;
     assert(config_save(&fsr_config,error,sizeof error));assert(config_restart_required(&fsr_config));
     text = read_file(path);
@@ -230,6 +235,6 @@ int main(int argc, char **argv) {
     assert(config_editable().binds[BIND_B][0] == SDL_SCANCODE_F && !config_editable().binds[BIND_B][1]);
     assert(config_editable().binds[BIND_RSTICK][1] == SDL_SCANCODE_RALT);
     remove(path);
-    puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish, icons, hot settings, keybinds and restart classification.");
+    puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish/Chinese, icons, hot settings, keybinds and restart classification.");
     return 0;
 }

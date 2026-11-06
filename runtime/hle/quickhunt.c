@@ -30,7 +30,11 @@ static uint32_t g_quest;          // the quest to start (0: off)
 static volatile bool g_in_town;   // set by the game thread at the first town update
 static bool g_done;
 
+volatile uint64_t g_town_ns;  // when a town's walking-around update last ran (plat_now_ns: the touch controls'
+                              // layout, runtime/touch.cpp)
+
 static void town_idle(Cpu *c) {
+    g_town_ns = plat_now_ns();
     if (g_quest && !g_done) {
         g_done = true;
         g_in_town = true;
@@ -58,11 +62,12 @@ void quickhunt_poll(void) {
 }
 
 void quickhunt_init(void) {
+    // (always: the touch controls know from it that the hunter walks a town)
+    fnhook_set(FN_TOWN_IDLE, hle_register("quickhunt:town_idle", town_idle));
     const char *e = getenv("MHGU_QUICKHUNT");
     if (!e || !*e) return;
     g_quest = !strcmp(e, "town") ? TOWN_ONLY : (uint32_t)strtoul(e, NULL, 10);
     if (!g_quest) return;
-    fnhook_set(FN_TOWN_IDLE, hle_register("quickhunt:town_idle", town_idle));
     if (g_quest == TOWN_ONLY) LOG("[quickhunt] pressing A to the town\n");
     else LOG("[quickhunt] quest %u: pressing A to the town, then departing\n", g_quest);
 }

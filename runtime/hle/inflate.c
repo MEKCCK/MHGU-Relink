@@ -3,7 +3,7 @@
 // time went to the game's inflate, 72% to inflate_fast alone (2026-10-31, quest 101's load, sampled); with it as host
 // code, adler32 (the check of every stream's data) was the next 15%. Together: the loader thread's time from title
 // to a quest -60%. The game's zlib is 1.2.8
-// ("1.2.8.f-NINTENDO-SDK-v1"); this is zlib 1.2.8's inffast.c on the game's own structures, in guest memory:
+// (the SDK's 1.2.8.f build); this is zlib 1.2.8's inffast.c on the game's own structures, in guest memory:
 // z_stream as zlib's (32-bit), inflate_state 8 bytes shorter at the front than stock 1.2.8 (window +0x2c, hold +0x30,
 // bits +0x34, lencode +0x44, distcode +0x48, lenbits +0x4c, distbits +0x50), its modes TYPE 11 and BAD 27, no
 // INFLATE_STRICT (dmax), and a distance too far back always an error (no `sane` test), as the game's function does.

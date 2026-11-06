@@ -1,3 +1,3 @@
-module github.com/morerokk/MHGURecomp/server
+module mhgurecomp/server
 
 go 1.22

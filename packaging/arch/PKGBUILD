@@ -1,0 +1,30 @@
+# Maintainer: mhgu
+pkgname=mhgu-hub
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="MHGU Local Play hub server (Rust, wire-compatible with MHGURecomp and gu-native)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/elite/mhgu"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo' 'rust')
+source=()
+sha256sums=()
+
+# A source package for this checkout: `cd packaging/arch && makepkg -f`.
+# ($startdir is packaging/arch, the workspace root is two levels up.)
+build() {
+  cd "$startdir/../.."
+  cargo build --release --locked -p mhgu-hub
+}
+
+package() {
+  cd "$startdir/../.."
+  install -Dm755 target/release/mhgu-hub "$pkgdir/usr/bin/mhgu-hub"
+  install -Dm644 packaging/mhgu-hub.service "$pkgdir/usr/lib/systemd/system/mhgu-hub.service"
+  install -Dm644 packaging/web-example/index.html "$pkgdir/usr/share/mhgu-hub/web/index.html"
+  install -Dm644 packaging/web-example/assets/app.css "$pkgdir/usr/share/mhgu-hub/web/assets/app.css"
+  install -Dm644 docs/online.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES"
+}

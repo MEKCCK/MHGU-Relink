@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 
@@ -25,7 +27,22 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0, BATTERY_OFF, ""
+#ifdef __ANDROID__  // (phones: the screen's own size, full screen; the rest as on PC)
+#define CONFIG_DEFAULT_SIZE 0, 0
+#define CONFIG_DEFAULT_FXAA 0  // (as the new mhgurecomp.ini says: the first run, before that file is read, too)
+#else
+#define CONFIG_DEFAULT_SIZE 1920, 1080
+#define CONFIG_DEFAULT_FXAA 1
+#endif
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, \
+    39500, "", 1, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, \
+    FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, \
+    DEFAULT_BINDS, THEME_HUNTER, 1, 1, \
+    1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, TOUCH_SHOW_DEFAULT, \
+    {"", "", "", "", "", ""}, {0, 0, 0, 0, 0, 0}, \
+    0, 1, BATTERY_OFF, "", "", ""
+// (in Config's order, config.h: a new field there needs its value here, in its place - shadows, adreno_fix, bloom, reverb before
+// touch_show: without them the touch buttons' defaults moved two places and most buttons were off)
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -35,6 +52,7 @@ uint32_t g_ui_size[2] = {1280, 720};
 float g_ui_anchor_aspect = 16.0f / 9.0f;
 uint32_t g_fsr_output[2];
 float g_fsr_lod_bias;
+const char *g_fsr4_fallback;
 
 static const char DEFAULT_INI[] =
     "; MHGU Recomp settings. Delete this file to reset to default settings, the file is regenerated.\n"
@@ -44,12 +62,21 @@ static const char DEFAULT_INI[] =
     "Mode = Borderless\n"
     "\n"
     "; Resolution (WxH)\n"
+#ifdef __ANDROID__
+    "Resolution = Desktop\n"
+#else
     "Resolution = 1920x1080\n"
+#endif
     "\n"
     "; Rendering resolution (WxH)\n"
     "; Higher = sharper (for supersampling)\n"
     "; Default: Auto\n"
     "RenderResolution = Auto\n"
+    "\n"
+    "; With RenderResolution Auto: the 3D picture's resolution, in percent of the screen's (lower = faster, softer)\n"
+    "; Between 25 and 100\n"
+    "; Default: 100\n"
+    "RenderScale = 100\n"
     "\n"
     "; Set to 16:9 to preserve the game's native aspect ratio\n"
     "; Default: Auto\n"
@@ -65,6 +92,11 @@ static const char DEFAULT_INI[] =
     "; Default: Center\n"
     "UIAnchor = Center\n"
     "\n"
+    "; On a screen wider than 16:9, movies and the menus' backdrops fill it (a little is cut above and below) instead\n"
+    "; of showing bars at the sides\n"
+    "; Default: On\n"
+    "FillScreen = On\n"
+    "\n"
     "[Anti-aliasing]\n"
     "; Multi-Sample Anti Aliasing, cycle modes with F7 key\n"
     "; Off, 2x, 4x, 8x\n"
@@ -73,7 +105,11 @@ static const char DEFAULT_INI[] =
     "\n"
     "; GU's default FXAA\n"
     "; Default: On\n"
+#ifdef __ANDROID__  // (off on phones: a fifth of the frame rate on a Mali, and a green line at the screen's edges there)
+    "FXAA = Off\n"
+#else
     "FXAA = On\n"
+#endif
     "\n"
     "; Which FXAA: Original is GU's own, 3_11 is FXAA 3.11, which keeps textures sharper\n"
     "; Original, 3_11\n"
@@ -84,6 +120,11 @@ static const char DEFAULT_INI[] =
     "; FSR temporal upscaling\n"
     "; Default: Off\n"
     "FSR = Off\n"
+    "\n"
+    "; Which upscaler to use (FSR3 is FSR 3.1)\n"
+    "; FSR3, FSR4\n"
+    "; Default: FSR3\n"
+    "Upscaler = FSR3\n"
     "\n"
     "; FSR quality\n"
     "; NativeAA, Quality, Balanced, Performance, UltraPerformance\n"
@@ -121,15 +162,6 @@ static const char DEFAULT_INI[] =
     "SmoothGradients = Off\n"
     "\n"
     "[Performance]\n"
-    "; Show the frame rate (FPS) in a small box on the screen. Drag it with the mouse while the settings menu is open\n"
-    "; Default: Off\n"
-    "ShowFPS = Off\n"
-    "\n"
-    "; Android only: show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
-    "; Off, WithFPS, ByItself\n"
-    "; Default: Off\n"
-    "ShowBattery = Off\n"
-    "\n"
     "; Framerate cap\n"
     "; Between 30 and 240\n"
     "; Default: 60\n"
@@ -142,6 +174,30 @@ static const char DEFAULT_INI[] =
     "; they appear. The first start does this in about 20 seconds while the logos play; it needs about 340 MB in the cache folder.\n"
     "; Default: On\n"
     "ShaderPrewarm = On\n"
+    "\n"
+    "; Off, On or Toaster. On, for a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays\n"
+    "; sharp over a smaller 3D picture. Toaster: all of that and more, for speed and the battery before looks: the HUD at\n"
+    "; most 540 lines tall and lighter textures still. It does not change the resolution, the frame rate, Shadows, Bloom or\n"
+    "; Reverb by itself: the menu's switch does that\n"
+    "; Default: Off\n"
+    "LowEnd = Off\n"
+    "\n"
+    "; The shadows of the hunters, monsters and scenery. Off: none, a little faster on a weak GPU\n"
+    "; Default: On\n"
+    "Shadows = On\n"
+    "\n"
+    "; The glow around lights and the blur of what is far away (bloom and depth of field). Off: faster on a weak GPU\n"
+    "; Default: On\n"
+    "Bloom = On\n"
+    "\n"
+    "; An Adreno GPU with a Vulkan 1.1 driver can show the 3D picture repeated in a grid below 720 lines without MSAA.\n"
+    "; Auto keeps 2x MSAA there; Off leaves MSAA as set (faster, and some of those drivers look better without it)\n"
+    "; Auto, Off\n"
+    "AdrenoFix = Auto\n"
+    "\n"
+    "; Shows the frame rate, the frame time and the device's temperature in a corner of the screen\n"
+    "; Default: Off\n"
+    "ShowStats = Off\n"
     "\n"
     "[Controls]\n"
     "; Controller face button layout. Set to \"Label\" to reverse A/B and X/Y on XBox controllers to match the button prompts (not recommended)\n"
@@ -165,15 +221,97 @@ static const char DEFAULT_INI[] =
     "; Default: Lenient\n"
     "ComboInputWindow = Lenient\n"
     "\n"
+    "; Plus and Minus pressed together (Start + Back on a controller, Enter + Backspace on a keyboard by default) open\n"
+    "; the settings menu. Turn it off to keep that combination for the game or a cheat: F1 still opens the menu\n"
+    "; Default: On\n"
+    "MenuChord = On\n"
+    "\n"
     "; The key that opens a line of chat, anywhere (in a quest too): a key's name as the settings menu shows it, or\n"
     "; nothing for none\n"
     "; Default: /\n"
     "ChatKey = /\n"
     "\n"
+    "; The game's rumble also on the phone's own vibrator (with or without a controller)\n"
+    "; Default: On\n"
+    "PhoneRumble = On\n"
+    "\n"
+    "; The lock-on, as in the newer games: the target icon or the right stick's click keep the camera on the monster,\n"
+    "; and a bow's or a bowgun's shots go to it. Off: the icon turns the camera to it once, as in the original game\n"
+    "; Default: On\n"
+    "LockOn = On\n"
+    "\n"
     "[Mouse]\n"
     "; Mouse sensitivity\n"
     "; Default: 1.0\n"
     "MouseSensitivity = 1.0\n"
+    "\n"
+    "[Touch]\n"
+    "; The controls on the screen (a phone): Auto shows them while no controller is connected\n"
+    "; Auto, On, Off\n"
+    "; Default: Auto\n"
+    "Controls = Auto\n"
+    "\n"
+    "; While they show, the HUD moves out of the thumbs' way: the status to the left edge, the item bar to the bottom\n"
+    "; middle, the Hunter Arts and the target camera to the top right\n"
+    "; Default: On\n"
+    "MoveHUD = On\n"
+    "\n"
+    "; Which of the game's buttons are on the screen in a hunt. A hunt needs none of those off by default\n"
+    "ShowAttacks = On\n"
+    "ShowDodge = On\n"
+    "ShowGuard = On\n"
+    "ShowSheathe = On\n"
+    "ShowPlus = On\n"
+    "ShowMinus = Off\n"
+    "ShowDpad = Off\n"
+    "ShowL = Off\n"
+    "ShowZL = Off\n"
+    "ShowZR = Off\n"
+    "ShowL3 = Off\n"
+    "ShowR3 = Off\n"
+    "ShowStick = On\n"
+    "\n"
+    "; With a bow or a bowgun in hand, a layout of their own in a hunt, and which of its buttons show\n"
+    "ShowRanged = On\n"
+    "ShowFire = On\n"
+    "ShowSecond = On\n"
+    "ShowAim = On\n"
+    "ShowRangedSpecial = On\n"
+    "ShowAmmo = On\n"
+    "\n"
+    "; Arrows beside the item bar. A swipe on the bar turns it too\n"
+    "; Default: Off\n"
+    "ShowItemArrows = Off\n"
+    "\n"
+    "; Buttons of your own, each pressing several of the game's together: A+X, ZL+R, L+Up...\n"
+    "; A B X Y L R ZL ZR Plus Minus Up Down Left Right L3 R3, joined by +\n"
+    "; ComboNPad: a controller's button that does the same: None, L3, R3, Minus, Guide, Misc, Paddle1 to Paddle4, Touchpad\n"
+    "Combo1 =\n"
+    "Combo1Pad = None\n"
+    "Combo2 =\n"
+    "Combo2Pad = None\n"
+    "Combo3 =\n"
+    "Combo3Pad = None\n"
+    "Combo4 =\n"
+    "Combo4Pad = None\n"
+    "Combo5 =\n"
+    "Combo5Pad = None\n"
+    "Combo6 =\n"
+    "Combo6Pad = None\n"
+    "\n"
+    "; How far a drag turns the camera (1: about 90 degrees for a drag the screen's height)\n"
+    "; Between 0.2 and 5\n"
+    "; Default: 1.0\n"
+    "CameraSpeed = 1.0\n"
+    "\n"
+    "; How solid the controls are drawn\n"
+    "; Between 0.2 and 1\n"
+    "; Default: 0.8\n"
+    "Opacity = 0.8\n"
+    "\n"
+    "; A short vibration when a touch control is pressed\n"
+    "; Default: On\n"
+    "Vibration = On\n"
     "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
@@ -206,7 +344,7 @@ static const char DEFAULT_INI[] =
     "ItemRight = Wheel Down\n"
     "\n"
     "[Multiplayer]\n"
-    "; Which port to host/join hubs on (TCP and UDP)\n"
+    "; Which port to host/join hubs on (TCP and UDP). A change counts from the next hub you host or search for\n"
     "; Default: 39500\n"
     "Port = 39500\n"
     "\n"
@@ -217,26 +355,18 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Hub server for playing over the internet without port forwarding: hubs you create are listed there, and\n"
     "; Search Hubs shows its hubs next to the LAN's. host or host:port (default port 39510).\n"
-    "; Empty: the default server. Off: no internet hubs.\n"
+    "; Empty or Off: no internet hubs.\n"
     "; Default:\n"
     "Server =\n"
     "\n"
     "; Matchmaking key: hubs are only seen by players with the same key, so friends who all enter the same key\n"
     "; only see each other's hubs. Empty: public, your hubs are seen by (and you see) everyone without a key.\n"
-    "; On Android, empty means public among Android players only: to play with friends on PC, all enter the same key.\n"
     "; Default:\n"
     "Key =\n"
     "\n"
-    "; Sync small monsters between players in multiplayer.\n"
-    "; (Currently off by default, pending a bug investigation where small monsters may refuse to attack players)\n"
-    "; Default: Off\n"
-    "SyncSmallMonsters = Off\n"
-    "\n"
-    "; Clearing an Urgent quest posted by someone else also counts for you, if you have unlocked it yourself. The\n"
-    "; original game only counts it for the hunter who posted it. This only changes your own save, the others in the\n"
-    "; quest have their own setting.\n"
+    "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
-    "ShareUrgentCredit = On\n"
+    "SyncSmallMonsters = On\n"
     "\n"
     "[Monster HP]\n"
     "; Playercount-specific HP multipliers for monsters in Hub quests.\n"
@@ -273,7 +403,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "[Bonus Content]\n"
     "; If enabled, the free online downloadable content (Event Quests, item packs, Palicoes) are automatically copied from the provided savegame inside the `bonus/` folder into your own savegame.\n"
-    "; This only happens if your savegame hasn't received any downloadable content yet.\n"
+    "; This only happens if your savegame hasn't received any downloadable content yet. A change counts the next time\n"
+    "; the game opens the save file.\n"
     "; Default: On\n"
     "BonusContent = On\n"
     "\n"
@@ -287,7 +418,16 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MuteInBackground = Off\n"
     "\n"
+    "; The echo of caves and rooms (the game's reverb). Off: the sound is dry, and a weak phone's processor does less\n"
+    "; Default: On\n"
+    "Reverb = On\n"
+    "\n"
     "[Application]\n"
+    "; The game stops while the app is in the background (a phone: another app or the home screen), so it uses no\n"
+    "; battery there; it goes on where it was when you come back\n"
+    "; Default: On\n"
+    "PauseInBackground = On\n"
+    "\n"
     "; Ask before the game window closes (closing does not save the game)\n"
     "; Default: On\n"
     "ConfirmExit = On\n"
@@ -318,6 +458,11 @@ static const char DEFAULT_INI[] =
     "; Default: Ask\n"
     "Updates = Ask\n"
     "\n"
+    "; PC only. The folder the save is kept in (the one that holds save_0), for example on another drive or in a synced\n"
+    "; folder. Empty: the default (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux).\n"
+    "; Your save is not moved: copy save_0 there yourself. Takes effect at the next start\n"
+    "SaveLocation =\n"
+    "\n"
     "[Android]\n"
     "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
     "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
@@ -332,7 +477,25 @@ static const char DEFAULT_INI[] =
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
     if (e && *e) { snprintf(buf, size, "%s", e); return; }
-    snprintf(buf, size, "mhgurecomp.ini");  // (started on its own the game runs in its folder, or MHGU_HOME: main.c)
+    // Started on its own the game runs in its folder (or MHGU_HOME: main.c), where mhgurecomp.ini lives. A
+    // package install runs from its own (root owned) folder instead, so a settings change could not be saved
+    // ("Cannot create a temporary settings file"): fall back to the user's config folder.
+    if (access(".", W_OK) != 0) {
+        const char *base = getenv("XDG_CONFIG_HOME");
+        char dir[900];
+        if (base && *base) {
+            snprintf(dir, sizeof dir, "%s/MHGURecomp", base);
+        } else if ((base = getenv("HOME")) && *base) {
+            snprintf(dir, sizeof dir, "%s/.config/MHGURecomp", base);
+        } else {
+            snprintf(buf, size, "mhgurecomp.ini");
+            return;
+        }
+        mkdir(dir, 0755);
+        snprintf(buf, size, "%s/mhgurecomp.ini", dir);
+        return;
+    }
+    snprintf(buf, size, "mhgurecomp.ini");
 }
 
 // lower case, spaces and '_' / '-' removed: "Borderless Window" == "borderlesswindow"
@@ -370,10 +533,10 @@ static int parse_factors(const char *v, float f[4]) {
 // The vertical field of view (radians) a camera of this aspect gets (tools/gen.py PATCHES: the three callers of the
 // perspective matrix that load a camera's). One made for the screen (its 16:9 aspect replaced with g_render_aspect)
 // gets the FOV factor and, on a picture narrower than 16:9 (16:10), the height that keeps 16:9's width (Vert+): more
-// above and below instead of less to the sides. Other cameras keep their own. (A picture is a whole number of pixels:
-// a camera made from its size has an aspect within rounding of g_render_aspect, 1918x1050 for 1.828, not equal to it;
-// a small picture, 426x118 for 3.578 with FSR Ultra Performance at 1280x720, is further off, so its size counts too.)
+// above and below instead of less to the sides. Other cameras keep their own.
 float camera_fovy(float fovy, float aspect) {
+    // (a small 3D picture's size is rounded to whole pixels: its shape can be 0.9% off the screen's - FSR Ultra
+    // Performance at 1280x720 is 426x118 - and that camera is still the screen's; 0.5% covers the rounding)
     if (fabsf(aspect / g_render_aspect - 1.0f) > 0.005f && aspect != (float)g_render_size[0] / (float)g_render_size[1])
         return fovy;
     fovy *= config_live_fov();
@@ -411,11 +574,9 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_VIEW "FOV must be 0.5-2.0 and mouse sensitivity 0.1-10."
 #define ERR_MISC "Invalid frame cap, anti-aliasing, controller, HUD or volume setting."
 #define ERR_TOGGLE "Invalid On/Off value."
-#define ERR_FSR "Invalid FSR quality, sharpness or reactive mask."
+#define ERR_FSR "Invalid FSR quality, provider, sharpness or reactive mask."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
-#define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
-#define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -425,6 +586,8 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_UPDATES "Invalid update setting."
 #define ERR_DRAW "Draw distance must be 0-10 (0: no limit)."
 #define ERR_KEYS "Invalid keybind."
+#define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
+#define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
@@ -434,65 +597,109 @@ const ConfigSetting g_settings[] = {
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
+    {"Display", "RenderScale", SET_INT, F(render_scale), 0, 25, 100, NULL, NULL, true, ERR_SIZE},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
      ERR_MISC},
+    ON_OFF("Display", "FillScreen", fill_screen, true),
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
     ON_OFF("Anti-aliasing", "FXAA", fxaa, false),
     {"Anti-aliasing", "FXAAMode", SET_CHOICE, F(fxaa_mode), 0, 0, 0, "Original,3_11", NULL, false, ERR_MISC},
     ON_OFF("Upscaler", "FSR", fsr, true),
+    {"Upscaler", "Upscaler", SET_CHOICE, F(fsr_upscaler), 0, 0, 0, "FSR3|fsr3.1|3,FSR4|4", NULL, true, ERR_FSR},
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
      "NativeAA|native|aa,Quality,Balanced,Performance,UltraPerformance|ultraperf", NULL, true, ERR_FSR},
-    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
-    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
-    ON_OFF("Performance", "ShowFPS", show_fps, false),
-    {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
-    {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional|nintendo,Label|labels|xbox",
+    {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
+     ERR_MISC},
+    ON_OFF("Performance", "Shadows", shadows, false),
+    ON_OFF("Performance", "Bloom", bloom, false),
+    {"Performance", "AdrenoFix", SET_CHOICE, F(adreno_fix), 0, 0, 0, "Auto,Off", NULL, true, ERR_MISC},
+    ON_OFF("Performance", "ShowStats", show_stats, false),
+    {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional,Label|labels|xbox",
      NULL, false, ERR_MISC},
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
     ON_OFF("Controls", "BackgroundInput", background_input, false),
+    ON_OFF("Controls", "MenuChord", menu_chord, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
+    ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
+    ON_OFF("Controls", "LockOn", lock_on, false),
+    {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
+    ON_OFF("Touch", "MoveHUD", touch_hud, false),
+    ON_OFF("Touch", "ShowAttacks", touch_show[TB_ATTACKS], false),
+    ON_OFF("Touch", "ShowDodge", touch_show[TB_DODGE], false),
+    ON_OFF("Touch", "ShowGuard", touch_show[TB_GUARD], false),
+    ON_OFF("Touch", "ShowSheathe", touch_show[TB_SHEATHE], false),
+    ON_OFF("Touch", "ShowPlus", touch_show[TB_PLUS], false),
+    ON_OFF("Touch", "ShowMinus", touch_show[TB_MINUS], false),
+    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], false),
+    ON_OFF("Touch", "ShowL", touch_show[TB_L], false),
+    ON_OFF("Touch", "ShowZL", touch_show[TB_ZL], false),
+    ON_OFF("Touch", "ShowZR", touch_show[TB_ZR], false),
+    ON_OFF("Touch", "ShowMenuZL", touch_show[TB_MENU_ZL], false),
+    ON_OFF("Touch", "ShowMenuZR", touch_show[TB_MENU_ZR], false),
+    ON_OFF("Touch", "ShowL3", touch_show[TB_L3], false),
+    ON_OFF("Touch", "ShowR3", touch_show[TB_R3], false),
+    ON_OFF("Touch", "ShowStick", touch_show[TB_STICK], false),
+    ON_OFF("Touch", "ShowRanged", touch_show[TB_RANGED], false),
+    ON_OFF("Touch", "ShowFire", touch_show[TB_FIRE], false),
+    ON_OFF("Touch", "ShowSecond", touch_show[TB_SECOND], false),
+    ON_OFF("Touch", "ShowAim", touch_show[TB_AIM], false),
+    ON_OFF("Touch", "ShowRangedSpecial", touch_show[TB_RSPECIAL], false),
+    ON_OFF("Touch", "ShowAmmo", touch_show[TB_AMMO], false),
+    ON_OFF("Touch", "ShowItemArrows", touch_show[TB_ITEM_ARROWS], false),
+#define COMBO(n) {"Touch", "Combo" #n, SET_TEXT, F(touch_combo[n - 1]), sizeof g_config.touch_combo[0], 0, 0, NULL, NULL, false, ERR_MISC}, \
+    {"Touch", "Combo" #n "Pad", SET_CHOICE, F(touch_combo_pad[n - 1]), 0, 0, 0, \
+     "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
+    COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
+    {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
+    {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
+    ON_OFF("Touch", "Vibration", touch_vibration, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),
     KEYS("Plus", BIND_PLUS), KEYS("Minus", BIND_MINUS), KEYS("DpadUp", BIND_DPAD_UP), KEYS("DpadDown", BIND_DPAD_DOWN),
     KEYS("DpadLeft", BIND_DPAD_LEFT), KEYS("DpadRight", BIND_DPAD_RIGHT), KEYS("LeftStickClick", BIND_LSTICK),
     KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
-    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, false, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
-    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
-    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, true),
+    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
-    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
-    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
+    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
+    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
-    ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
+    ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
+    ON_OFF("Audio", "Reverb", reverb, false),
+    ON_OFF("Application", "PauseInBackground", pause_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
-    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
+    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es,Chinese|zh|中文", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
     {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
+    {"Application", "SaveLocation", SET_TEXT, F(save_location), sizeof g_config.save_location, 0, 0, NULL, NULL, true, ERR_FOLDER},
 };
 #undef ON_OFF
 #undef KEYS
@@ -797,6 +1004,7 @@ bool config_help(const char *key, char *buf, size_t size) {
 
 static int desktop_w, desktop_h;
 static bool render_auto = true;
+static bool g_shadows_set, g_bloom_set;  // (the file says Shadows / Bloom: an older one doesn't, and LowEnd then takes them off)
 
 static void set_key(const char *key, char *val, int line) {
     char k[64], v[256];
@@ -824,6 +1032,8 @@ static void set_key(const char *key, char *val, int line) {
     }
     const ConfigSetting *s = config_setting(key);
     if (!s) { LOG("[config] line %d: unknown setting \"%s\" (ignored)\n", line, key); return; }
+    if (s->field == offsetof(Config, shadows)) g_shadows_set = true;
+    if (s->field == offsetof(Config, bloom)) g_bloom_set = true;
     if (!config_parse(s, val, &g_config))
         LOG("[config] line %d: \"%s\" is not a value %s takes; using the default\n", line, val, key);
 }
@@ -870,8 +1080,29 @@ void config_load(void) {
     FILE *f = fopen(path, "r");
     if (!f) {
         FILE *o = fopen(path, "w");
-        if (o) { fputs(DEFAULT_INI, o); fclose(o); LOG("[config] wrote the default settings to %s\n", path); }
-        else LOG("[config] %s is missing and could not be written; using the defaults\n", path);
+        const char *ini = DEFAULT_INI, *lang = NULL;
+#ifdef __ANDROID__
+        // (a phone set to Spanish: the settings menu in Spanish from the start)
+        int nloc = 0;
+        SDL_Locale **loc = SDL_GetPreferredLocales(&nloc);
+        bool spanish = loc && nloc > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "es", 2);
+        SDL_free(loc);
+        if (spanish) lang = strstr(ini, "Language = English\n");
+#endif
+        if (o && lang) {
+            fwrite(ini, 1, (size_t)(lang - ini), o);
+            fputs("Language = Spanish\n", o);
+            fputs(lang + strlen("Language = English\n"), o);
+            fclose(o);
+            g_config.language = 1;
+            LOG("[config] wrote the default settings to %s (the menu in Spanish, as the system)\n", path);
+        } else if (o) {
+            fputs(ini, o);
+            fclose(o);
+            LOG("[config] wrote the default settings to %s\n", path);
+        } else {
+            LOG("[config] %s is missing and could not be written; using the defaults\n", path);
+        }
     } else {
         char buf[512], seen[512] = "|";
         int line = 0;
@@ -897,12 +1128,22 @@ void config_load(void) {
         append_missing_sections(path, seen);
     }
 
+    // (a file of an older version, with LowEnd on and no Shadows: off, as the menu's Low-end mode now sets them)
+    if (f && !g_shadows_set && g_config.low_end) g_config.shadows = 0;
+    if (f && !g_bloom_set && g_config.low_end) g_config.bloom = 0;  // (LowEnd alone left the bloom out up to 0.1.6)
     // Keep Auto/Desktop and file values, rather than persisting temporary environment overrides.
     render_auto = !g_config.render_w;
     config_store_loaded(&g_config);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
-    // (in pixels: on a scaled Wayland desktop, SDL's size is the logical one, 1280x800 at density 2 on a 2560x1600 screen)
-    desktop_w = dm ? (int)lround(dm->w * dm->pixel_density) : 1920, desktop_h = dm ? (int)lround(dm->h * dm->pixel_density) : 1080;
+    desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
+#ifdef __ANDROID__
+    // (the game is always landscape, but a phone that is locked or still upright says otherwise: the 3D picture and the
+    // HUD would be laid out for that shape, narrow, with black at the sides, until the next start)
+    if (desktop_h > desktop_w) {
+        int upright = desktop_w;
+        desktop_w = desktop_h, desktop_h = upright;
+    }
+#endif
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
 
     const char *e = getenv("MHGU_WINDOW");
@@ -924,7 +1165,16 @@ void config_load(void) {
     if ((e = getenv("MHGU_UI_ANCHOR"))) config_parse(config_setting("UIAnchor"), e, &g_config);
     e = getenv("MHGU_RENDER");
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
+    // (test runs, the device's own settings left as they are: MHGU_LOWEND=0|1|2 (Toaster), MHGU_SCALE=<percent>,
+    // MHGU_SHADOWS=0|1, MHGU_BLOOM=0|1, MHGU_FPS_LIMIT=<fps>; not saved)
+    if ((e = getenv("MHGU_LOWEND"))) g_config.low_end = atoi(e) < 0 ? 0 : atoi(e) > 2 ? 2 : atoi(e);
+    if ((e = getenv("MHGU_BLOOM"))) g_config.bloom = atoi(e) != 0, config_live_test(&g_config);
+    if ((e = getenv("MHGU_FPS_LIMIT")) && atoi(e) >= 30 && atoi(e) <= 240) g_config.fps = atoi(e), config_live_test(&g_config);
+    if ((e = getenv("MHGU_SCALE")) && atoi(e) >= 10 && atoi(e) <= 100) g_config.render_scale = atoi(e);
+    if ((e = getenv("MHGU_SHADOWS"))) g_config.shadows = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)
+    if (g_config.low_end) g_config.fsr = 0, g_config.fxaa = 0, g_config.msaa = 1;  // (none of them on a weak GPU)
+    if ((e = getenv("MHGU_FSR_UPSCALER"))) g_config.fsr_upscaler = !strcmp(e, "4") || !strcasecmp(e, "fsr4") ? FSR_UP_4 : FSR_UP_3;
     if ((e = getenv("MHGU_FSR_QUALITY"))) config_parse(config_setting("FSRQuality"), e, &g_config);
     if ((e = getenv("MHGU_FSR_OBJMOTION"))) g_config.fsr_objmotion = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_ANIMSURF"))) g_config.fsr_animsurf = atoi(e) != 0;
@@ -933,14 +1183,19 @@ void config_load(void) {
 
     int tw = g_config.width, th = g_config.height;  // (Borderless shows the image at the desktop size)
     if (g_config.display_mode == DISPLAY_BORDERLESS) tw = tw < desktop_w ? tw : desktop_w, th = th < desktop_h ? th : desktop_h;
-    // The picture's shape: the window's or AspectRatio's, at least 16:10. The game lays its HUD out for 16:9, which
-    // still fits down to 16:10 (a little flatter, nvn/vulkan/exec.c), so a narrower window (4:3) shows 16:10 with bars.
-    // Wider than 16:9 shows more to the sides, 16:9 to 16:10 more above and below (camera_fovy, gen.py PATCHES).
+    // The picture's shape: the window's or AspectRatio's. The game lays its HUD out for 16:9; on a narrower picture it keeps
+    // that shape, smaller, its parts at the top and bottom edges (nvn/vulkan/exec.c). Android: down to 5:4, a console's 4:3
+    // screen filled. Wider than 16:9 shows more to the sides, narrower more above and below (camera_fovy, gen.py PATCHES).
     float aspect = g_config.aspect_ratio > 0 ? g_config.aspect_ratio : (float)tw / (float)th;
-    if (aspect < 1.6f - 0.005f) {
+#ifdef __ANDROID__
+    const float narrowest = 1.25f;
+#else
+    const float narrowest = 1.6f;
+#endif
+    if (aspect < narrowest - 0.005f) {
         if (g_config.aspect_ratio > 0)
-            LOG("[config] AspectRatio %.3f is narrower than 16:10, which the HUD needs: using 16:10\n", aspect);
-        aspect = 1.6f;
+            LOG("[config] AspectRatio %.3f is narrower than the HUD allows: using %.2f\n", aspect, narrowest);
+        aspect = narrowest;
     }
     if (fabsf(aspect - 16.0f / 9.0f) < 0.01f) aspect = 16.0f / 9.0f;  // (1366x768 and the like)
     if (render_auto && g_config.fsr && g_config.display_mode == DISPLAY_BORDERLESS && (tw < desktop_w || th < desktop_h)) {
@@ -950,13 +1205,33 @@ void config_load(void) {
         LOG("[config] FSR, Borderless: upscaling to %dx%d (the screen, in the picture's shape) instead of Resolution %dx%d\n",
             w, h, tw, th);
     } else if (render_auto) {
-        fit_aspect(tw, th, aspect, &w, &h);
+        // RenderScale: a smaller 3D picture (phones), stretched to the screen; not with FSR (FSRQuality sets that)
+        int s = g_config.fsr ? 100 : g_config.render_scale;
+        int least = 32000 / tw + 1 > 18000 / th + 1 ? 32000 / tw + 1 : 18000 / th + 1;  // (320x180)
+        if (s < 100 && s < least) {
+            s = least < 100 ? least : 100;
+            LOG("[config] RenderScale %d%% would be below 320x180: using %d%%\n", g_config.render_scale, s);
+        }
+        fit_aspect(tw * s / 100, th * s / 100, aspect, &w, &h);
+        if (s < 100) LOG("[config] RenderScale %d%%: the 3D picture at %dx%d (screen %dx%d)\n", s, w, h, tw, th);
+        if (g_config.low_end && !g_config.fsr && s < 100) {
+            // (LowEnd: the HUD stays sharp over the smaller 3D picture, fsr.c vk_fsr_init: at the screen's size up to
+            // 720 lines or twice the 3D's, whichever is more. At a 2712x1220 screen's whole size it drew 9 times the
+            // pixels of the 3D at 33%, and a phone with an Adreno 710 was slower with LowEnd than without)
+            // (Toaster: at most TOASTER_HUD_LINES, for the HUD, the game's last draw and the window's copy)
+            int ow, oh, cap = g_config.low_end == LOW_END_TOASTER ? TOASTER_HUD_LINES : h * 2 > 720 ? h * 2 : 720;
+            if (th > cap) fit_aspect(tw * cap / th, cap, aspect, &ow, &oh);
+            else fit_aspect(tw, th, aspect, &ow, &oh);
+            g_fsr_output[0] = (uint32_t)ow, g_fsr_output[1] = (uint32_t)oh;
+        }
     } else {
         fit_aspect(g_config.render_w, g_config.render_h, aspect, &w, &h);
         if (w != g_config.render_w || h != g_config.render_h)
             LOG("[config] RenderResolution %dx%d is not the picture's shape (%.3f): using %dx%d\n", g_config.render_w,
                 g_config.render_h, aspect, w, h);
     }
+    if (render_auto && g_config.fsr && g_config.render_scale < 100)
+        LOG("[config] RenderScale %d%% not used: FSR is on (FSRQuality sets the 3D size)\n", g_config.render_scale);
     if (g_config.fsr) {  // FSR: that size is its output; the game renders smaller (runtime/nvn/vulkan/fsr.c)
         static const float ratio[] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
         static const char *const names[] = {"NativeAA", "Quality", "Balanced", "Performance", "UltraPerformance"};
@@ -970,8 +1245,8 @@ void config_load(void) {
         // overrides (A/B)
         g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
         if ((e = getenv("MHGU_FSR_LODBIAS"))) g_fsr_lod_bias = strtof(e, NULL);
-        LOG("[config] FSR 3.1 %s (x%.1f): the 3D picture at %dx%d, upscaled to %ux%u, sharpness %.2f, texture LOD bias "
-            "%.2f\n", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
+        LOG("[config] FSR %s %s (x%.1f): the 3D picture at %dx%d, upscaled to %ux%u, sharpness %.2f, texture LOD bias "
+            "%.2f\n", g_config.fsr_upscaler == FSR_UP_4 ? "4 (3.1 if it cannot start)" : "3.1", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
             g_fsr_lod_bias);
     }
     g_config.render_w = w, g_config.render_h = h;

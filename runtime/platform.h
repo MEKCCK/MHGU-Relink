@@ -13,6 +13,7 @@
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
+#include <sys/types.h>  // (ssize_t, off_t: plat_pread)
 #endif
 
 #ifdef __cplusplus
@@ -22,8 +23,17 @@ extern "C" {
 // ---- guest address space
 // Claim the 4 GB guest window at GUEST_BASE (pages are backed lazily, on first touch).
 bool plat_reserve_guest(uint64_t base, uint64_t size);
-// Make sure host [p, p+size) inside the window is backed before the OS itself writes there (file reads).
+// Make sure host [p, p+size) inside the window is backed before the OS itself writes there (file reads), and writable
+// (Android: its page write tracking leaves pages the renderer watches read-only).
 void plat_commit(uint64_t host_addr, uint64_t size);
+// pread into memory that may be guest memory. Android: the kernel can't write a page the write tracking keeps read-only
+// (EFAULT, or a short read, where a store would just fault and go on): this one gets it written, and reads on past a
+// short read (short only at the end of the file). Elsewhere: pread.
+#ifdef __ANDROID__
+ssize_t plat_pread(int fd, void *buf, size_t n, off_t off);
+#else
+#define plat_pread pread
+#endif
 enum { PLAT_PROT_NONE = 0, PLAT_PROT_READ = 1, PLAT_PROT_RW = 3 };
 int plat_protect(uint64_t host_addr, uint64_t size, int prot);
 #define PLAT_PAGE 0x1000ull
@@ -52,6 +62,9 @@ bool plat_user_dir(char *buf, size_t size);
 // The files in a folder and its subfolders, 0 if it can't be read (main.c: whether the player's romfs is complete;
 // the system's own listing, not a stat per file: ~80 ms for the game's 35531 on Windows).
 int plat_count_files(const char *dir);
+// A folder the player named (UTF-8, as the settings file has it), created if missing, as a path the runtime's file
+// functions can open: Windows' narrow ones take the ANSI code page, so one it can't spell becomes its 8.3 short form.
+bool plat_use_folder(const char *utf8, char *buf, size_t size);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
 
@@ -63,6 +76,14 @@ void plat_crash_handler_install(void);
 // 1 write / 0 read / -1 unknown. Runs in the fault handler: Forge uses it to name a plugin's bad pointer.
 extern void (*plat_touch_hook)(uint64_t guest_addr, int write);
 void rt_fault_report(const char *what, uint64_t fault_addr, uint64_t host_pc, uint64_t host_lr) __attribute__((noreturn));
+
+#ifdef __ANDROID__
+// ---- performance hints (runtime/platform/android_perf.c: an ADPF session for the threads the frame rate rests on)
+enum { PERF_GAME, PERF_RENDER, PERF_SUBMIT };
+void perf_hint_thread(int role);  // the calling thread is that one (after its first call: a thread-local load; for
+                                  // PERF_SUBMIT also a store: the frames it submits in)
+void perf_hint_frame(void);       // a frame was presented (the presenting thread, once per frame)
+#endif
 
 #ifdef __cplusplus
 }

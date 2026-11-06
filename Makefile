@@ -5,24 +5,22 @@
 #   make -j4                                        build build/mhgurecomp(.exe) and the game code library, with its
 #                                                   DLLs and the game files (build/data): start build/mhgurecomp.exe
 # build/ holds only the game folder (what a player copies); the compiler's files go to obj/.
-#   make PLATFORM=android ABI=arm64-v8a|x86_64      the Android APK instead (android/android.mk): build-android/
+# The Android app is built from android/ with native/build_native.sh (see docs/android.md).
 UNAME := $(shell uname -s)
 ifneq ($(filter MINGW% MSYS% CYGWIN% Windows_NT,$(UNAME) $(OS)),)
 PLATFORM := windows
 else
 PLATFORM := linux
 endif
-ANDROID  := $(filter android,$(PLATFORM))
-ABI      ?= arm64-v8a
-
-GAME     ?= ../mhgu/game
+GAME     ?= game
 GEN      ?= generated
-B        ?= $(if $(ANDROID),build-android,build)
-O        ?= $(if $(ANDROID),obj-android/$(ABI),obj)
+B        ?= build
+O        ?= obj
 CC       := clang
 CXX      := clang++
-# AVX2 + FMA (Haswell or newer); Android: the ABI's baseline (arm64-v8a: ARMv8.0, x86_64: SSE4.2)
-GENARCH  ?= $(if $(ANDROID),,-march=x86-64-v3)
+LINKER   ?= -fuse-ld=lld
+# AVX2 + FMA (Haswell or newer)
+GENARCH  ?= -march=x86-64-v3
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
 
@@ -116,16 +114,14 @@ OSFLAGS  := -D_FILE_OFFSET_BITS=64 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_RAND_
 GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
-LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
+LDFLAGS  := $(LINKER) -Wl,--stack,16777216 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
             -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
-GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
+GAMELIB_LDFLAGS := -shared $(LINKER) -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
-UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
-else ifeq ($(PLATFORM),android)
-include android/android.mk
+UPD_LDFLAGS := $(LINKER) -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
@@ -135,7 +131,7 @@ FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
 # doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
-LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) -lpthread -ldl -lm
+LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(abspath target/release/libmhgu_link_ffi.a) -lpthread -ldl -lm -lrt
 # The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.
@@ -144,11 +140,11 @@ GLIBC_WRAP := sqrtf acosf asinf atan2f log10f sinh cosh
 GLIBC_WRAP_FLAGS := $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
 LDFLAGS  += $(GLIBC_WRAP_FLAGS)
 GAMELIB  := $(B)/mhgugame.so
-GAMELIB_LDFLAGS := -shared -fuse-ld=lld
+GAMELIB_LDFLAGS := -shared $(LINKER)
 UPDATER  := $(B)/mhgurecomp-updater
 # (libcurl: opened at run time, updater/http.c; -lm for runtime/platform/linux_glibc.c: SDL_LIBS has it only with
 # the bundled SDL3)
-UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
+UPD_LDFLAGS := $(LINKER) $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
@@ -162,7 +158,7 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 # VERSION: this build's release (git describe: 0.10.3 on a release's tag, 0.10.3-4-gabc1234 after it), in the log and
 # the updater's (updater/updater.c: only a build of exactly a release updates itself). make dist VERSION=0.10.4 for a
 # release built before its tag is made.
-VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
+VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '\r\n' | grep . || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
            $(O)/updater/sha256.o
@@ -178,7 +174,9 @@ IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,$(O)/imgui/%.o,$(IMGUI_SRC))
 IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI)/imgui $(LIB_INC)
 # (vendored VulkanMemoryAllocator fallback: -I on a missing dir is ignored, so MSYS2 builds
 # with the system vulkan-memory-allocator package are unaffected)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) $(OSFLAGS) $(LIB_INC)
+MHGU_LINK_INC := crates/mhgu-link-ffi/include
+MHGU_LINK_LIB := $(abspath target/release/libmhgu_link_ffi.a)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.
@@ -253,6 +251,14 @@ $(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) $(if $(filter 1,$(NULL_GPU)),-DMHGU_NULL_BACKEND) -Wall -Iruntime -c $< -o $@
 
+$(O)/rt/touch.o: runtime/touch.cpp runtime/touch.h runtime/config.h runtime/hle/input.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
+
+$(O)/rt/perfstats.o: runtime/perfstats.cpp runtime/perfstats.h runtime/config.h runtime/rt.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
+
 $(O)/rt/settings_panel.o: runtime/settings_panel.cpp runtime/settings_panel.h runtime/modorder.h runtime/config.h runtime/settings_locale.h runtime/settings_icons.h runtime/app_actions.h runtime/overlay.h runtime/net/net.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
@@ -273,7 +279,7 @@ $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
 
-$(EXE): $(RT_OBJ) $(AV_DEPS)
+$(EXE): $(RT_OBJ) $(O)/rt/touch.o $(O)/rt/perfstats.o $(AV_DEPS) $(abspath target/release/libmhgu_link_ffi.a)
 	@mkdir -p $(dir $@)
 	$(CXX) -o $@ $^ $(LDFLAGS)
 	$(GLIBC_CHECK)
@@ -459,32 +465,16 @@ clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game
 # Windows-MHGURecomp.<version>.zip or Linux-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
 # the game code, the DLLs, licenses/, BONUS (the donor save for bonus/system, when given) and the empty folders the
 # player fills; never the game files, mods, settings or caches of $(B). It prints each archive's size and SHA-256.
-# On Windows, with the Android SDK installed (android/android.mk), it then makes the Android one too (android/apk.mk):
-# Android-MHGURecomp.<version>.apk, arm64 only, signed with the release key. ANDROID_DIST= leaves it out.
 DIST  ?= dist
 BONUS ?= $(wildcard $(B)/bonus/system)
-ANDROID_DIST ?= $(if $(filter windows,$(PLATFORM)),$(wildcard $(if $(ANDROID_HOME),$(shell cygpath -u '$(ANDROID_HOME)'),/c/Android/Sdk)/ndk/*))
 CHECK_VERSION = @echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
 	{ echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
-ifndef ANDROID
 dist: all
 	$(CHECK_VERSION)
 	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
-	$(if $(ANDROID_DIST),$(MAKE) PLATFORM=android ABI=arm64-v8a dist $(if $(BONUS),BONUS="$(abspath $(BONUS))"),@echo "dist: no Android SDK: no APK")
-endif
 
 .PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
 
-ifeq ($(PLATFORM),android)
-include android/apk.mk
-endif
-
-# Exercise real ImGui navigation without a game dump or graphics device.
-.PHONY: test-settings-panel
-test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/modorder.o $(O)/rt/arcmerge.o $(O)/rt/config.o $(O)/rt/config_store.o $(O)/imgui/imgui/imgui.o $(O)/imgui/imgui/imgui_draw.o $(O)/imgui/imgui/imgui_tables.o $(O)/imgui/imgui/imgui_widgets.o $(LIB_STAMPS)
-	@mkdir -p $(O)/settings-test
-	$(CXX) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $(filter %.o,$^) $(SDL_LIBS) -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
-	$(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 
 # Translation coverage for both host-menu languages; no game files required.
 .PHONY: test-settings-locale

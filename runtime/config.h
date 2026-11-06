@@ -10,7 +10,9 @@ extern "C" {
 
 enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
-enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/hle/combowin.c)
+enum { COMBO_LENIENT, COMBO_STRICT };
+enum { TOUCH_AUTO, TOUCH_ON, TOUCH_OFF };  // [Touch] Controls (runtime/touch.cpp)
+enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };  // [Performance] ShowBattery
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
 
@@ -32,6 +34,14 @@ enum {
 #define HP_QUESTS_MAX 256
 #define HP_SCALE_MIN 0.05f
 #define HP_SCALE_MAX 20.0f
+// The game's buttons, for showing each on the screen or not ([Touch] Show*: runtime/touch.cpp)
+enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, TB_L, TB_ZL, TB_ZR, TB_L3, TB_R3, TB_STICK,
+       TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_ZL, TB_MENU_ZR, TB_COUNT };
+#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0}
+#define TOUCH_COMBOS 6
+// a controller's buttons a combined button can be on (the less used ones)
+enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
+       PADB_TOUCHPAD, PADB_COUNT };
 typedef struct {
     float scale[4];  // by the number of hunters (index: hunters - 1)
     float village;   // Village quests posted in the Hub / Pub: this first, then scale ([Village Quests] HubHP)
@@ -73,6 +83,7 @@ typedef struct {
     int fsr_objmotion;        // FSR: motion vectors of moving objects (characters, monsters): 1 on, 0 camera only
     float fsr_reactive;       // FSR: reactive mask strength on the game's moving-object mask, 0 (off) .. 1
     int fsr_animsurf;         // FSR: surfaces animated through their texture (banners, water): 1 detected, 0 off
+    int fsr_upscaler;         // [Upscaler] Upscaler: FSR_UP_3 (FSR 3.1) or FSR_UP_4 (FSR 4, runtime/nvn/vulkan/fsr4.c)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
@@ -88,18 +99,49 @@ typedef struct {
     int menu_theme;           // [Application] Theme: THEME_*, the settings menu's colours (runtime/settings_panel.cpp)
     int discord;              // [Discord] RichPresence: what you play, on your Discord profile (runtime/net/discord.c)
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
+    int fill_screen;          // [Display] FillScreen: movies and menu backdrops cover a wider screen (nvn/vulkan/exec.c)
+    int touch_controls;       // [Touch] Controls: TOUCH_*, the controls on the screen (runtime/touch.cpp)
+    int touch_hud;            // [Touch] MoveHUD: the HUD moves out of the thumbs' way while they show (nvn/vulkan/exec.c)
+    float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)
+    float touch_opacity;      // [Touch] Opacity: of the controls, 0.2 .. 1
+    int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (25..100)
+    int touch_vibration;      // [Touch] Vibration: a short tick when a touch control is pressed (runtime/haptics.c)
+    int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
+    int show_stats;           // [Performance] ShowStats: the frame rate and the phone's temperature on screen (perfstats)
+    int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
+    int low_end;              // [Performance] LowEnd: 0 off, 1 a weak GPU's frame, 2 Toaster (LOW_END_TOASTER: all of it and more)
+    int lock_on;              // [Controls] LockOn: the camera stays on the monster, and with it a bow's or gun's shots (touch.cpp)
+    // (every field's default is in config.c's CONFIG_DEFAULT_VALUES, by position: a new field needs one there)
+    int shadows;              // [Performance] Shadows: 0 none drawn (nvn/vulkan/exec.c shadow_skipped)
+    int adreno_fix;           // [Performance] AdrenoFix: 0 Auto, 1 Off (nvn/vulkan/device.c msaa_floor)
+    int bloom;                // [Performance] Bloom: 0 the bloom and depth of field chain is left out (nvn/vulkan/exec.c lowend_skipped)
+    int reverb;               // [Audio] Reverb: 0 the game's reverb effects let the sound through dry (services/audio.c)
+    int touch_show[TB_COUNT]; // [Touch] Show*: which of the game's buttons are on the screen in a hunt (runtime/touch.cpp)
+    char touch_combo[TOUCH_COMBOS][32];  // [Touch] Combo1..: the game's buttons one screen button presses together
+                                         // ("A+X"; config_combo_mask); "" none
+    int touch_combo_pad[TOUCH_COMBOS];   // [Touch] Combo1Pad..: PADB_*, a controller's button that does the same
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
+    int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
+    char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
+                              // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
 } Config;
+uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
+void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
-// Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
-#define LDN_DEFAULT_SERVER "morerokk-mhgurecomp-ldnserver.duckdns.org"
+// Cloud VM). "" = no default: no internet hubs unless the player names a server.
+#define LDN_DEFAULT_SERVER "114.66.25.224:39510"
+#define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
+#define LOW_END_FPS 30
+#define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
+#define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
+#define TOASTER_HUD_LINES 540  // Toaster: the HUD's picture at most this tall (config.c, fsr.c's output)
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
-enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
+enum { FSR_UP_3, FSR_UP_4 };  // [Upscaler] Upscaler
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3
 
 extern Config g_config;
@@ -110,6 +152,7 @@ extern uint32_t g_ui_size[2];      // the game's 2D canvas size (tools/gen.py PA
 extern float g_ui_anchor_aspect;   // the HUD's width / height, 16:9 .. g_render_aspect (nvn/vulkan/exec.c)
 extern uint32_t g_fsr_output[2];   // FSR on: the size it upscales to (what g_render_size would be without it), else 0
 extern float g_fsr_lod_bias;       // FSR on: texture LOD bias for the lower render size, log2(render / output); else 0
+extern const char *g_fsr4_fallback;  // Upscaler = FSR4 but FSR 3.1 runs: why, for the settings panel (nvn/vulkan/fsr4.c); else NULL
 float camera_fovy(float fovy, float aspect);  // a 3D camera's vertical field of view for its aspect (gen.py PATCHES)
 
 void config_load(void);  // before the window and the guest start
@@ -169,15 +212,41 @@ int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: no
 int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);
+float config_live_fsr_sharpness(void);  // [Upscaler] Sharpness, read by each FSR dispatch (nvn/vulkan/fsr.c)
+float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR frame (nvn/vulkan/fsr.c)
+void config_live_hp(HpScale *out);      // [Monster HP] and [Village Quests] HubHP as saved now (hle/hpscale.c)
+float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
+int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
+int config_live_ldn_port(void);         // [Multiplayer] Port as saved now: counts from the next hub hosted or search
+void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
+int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
+int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit (hle/urgentcredit.c)
+int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
-int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit
+int config_live_touch_controls(void);  // [Touch] (runtime/touch.cpp)
+int config_live_touch_hud(void);
+int config_live_lock_on(void);
+int config_live_touch_show(int button);        // TB_*
+uint32_t config_live_touch_combo(int index);   // its buttons (config_combo_mask)
+int config_live_touch_combo_pad(int index);    // PADB_*
+float config_live_touch_camera(void);
+float config_live_touch_opacity(void);
+int config_live_touch_vibration(void);  // [Touch] Vibration
+int config_live_phone_rumble(void);     // [Controls] PhoneRumble
+int config_live_show_stats(void);       // [Performance] ShowStats
+int config_live_pause_background(void); // [Application] PauseInBackground
+int config_live_shadows(void);          // [Performance] Shadows
+int config_live_bloom(void);            // [Performance] Bloom
+int config_live_reverb(void);           // [Audio] Reverb
+void config_live_test(const Config *c);  // (config.c: a test run's overrides of Shadows, Bloom, FPS; not saved)
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
+bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 

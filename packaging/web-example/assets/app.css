@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+h1 { font-size: 1.4rem; }
+table { border-collapse: collapse; min-width: 22rem; }
+th, td { text-align: left; padding: .35rem .8rem; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+.stats { margin: .5rem 0 1rem; opacity: .8; }
+.hint { margin-top: 1.5rem; opacity: .6; font-size: .9rem; }

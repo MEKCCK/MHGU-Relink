@@ -1,6 +1,6 @@
 // Bonus content (free downloads: event / challenge quests, item packs, Palicos) carried into new saves.
 //
-// The game's Download menu fetched these from Capcom's server and stored them in the shared part of the save file
+// The game's Download menu fetched these from the Great C's server and stored them in the shared part of the save file
 // (`system`), so every character slot sees them. The quests' own files are in the RomFS; the server only said which
 // ones were out, and the item packs and Palicos came from it. That server can't be reached from the port, so the
 // downloads are taken from a save that has them instead: a "donor" `system` file in the bonus folder beside
@@ -18,6 +18,7 @@
 // When both are all zero in a save, the donor's are copied in; nothing else in the file is touched. A save that has
 // downloads of its own is left alone (claims, deleted quests and so on stay the game's business).
 // Only with BonusContent = On in mhgurecomp.ini (the default; Off: saves are never touched).
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@
 #include <unistd.h>
 
 #include "../config.h"
+#include "../platform.h"
 #include "../rt.h"
 
 #define HDR_SIZE    0x24u
@@ -47,7 +49,9 @@ static const char *bonus_path(void) {
     }
     snprintf(path, sizeof path, "bonus/system");
     if (!access(path, F_OK)) return path;
-    snprintf(path, sizeof path, "%s/../bonus/system", g_save_dir);
+    // (the player's folder, not g_save_dir/..: SaveLocation can put the save anywhere)
+    char user[1100];
+    if (plat_user_dir(user, sizeof user)) snprintf(path, sizeof path, "%s/bonus/system", user);
     return path;
 }
 
@@ -96,7 +100,7 @@ void bonus_fill(const char *host_path) {
     const char *base = strrchr(host_path, '/');
     base = base ? base + 1 : host_path;
     if (strcmp(base, "system") && strcmp(base, "system_backup")) return;
-    if (!g_config.bonus_content) {
+    if (!config_live_bonus_content()) {  // (as saved now: a Save in the settings menu counts from the next open)
         static bool said;
         if (!said) LOG("[bonus] bonus content off (mhgurecomp.ini BonusContent): saves left as they are\n");
         said = true;

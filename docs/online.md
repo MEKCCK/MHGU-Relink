@@ -1,0 +1,101 @@
+# MHGU：联网（Rust 模块）
+
+> 本文中的路径都相对于仓库根目录。 / Paths in this guide are relative to the repository root.
+
+
+**PC 版与 Android 版共用一份 C 运行时，联网由 Rust 模块（`crates/`）实现。**
+
+游戏代码翻译、guest 内存、内核 `svc`、HLE 服务、NVN→Vulkan 渲染、音频、媒体库全部沿用 C 基底
+（仓库根目录的 `runtime/`，MHGURecomp 的完整运行时）；我们只把自己实现的**联机模块**（Rust）替换进去，
+它负责 `nn::ldn`（局域网与互联网 hub）、`MHGL`/`MHGD`/`MHGR` 线协议、中继与发现。
+
+本仓库不包含任何游戏代码、ROM、密钥或存档。游戏代码由玩家用自己的 `exefs`/`romfs` 经
+`tools/` 的生成器（Python）翻译成 C，再由玩家用根目录的 `Makefile`（PC）或
+`native/build_native.sh` + Gradle（Android）编成 `libmhgugame.so`。
+
+## 目录
+
+| 路径 | 内容 |
+|---|---|
+| `runtime/`、`tools/`、`third_party/`、`Makefile` | C 运行时（原 `base/`）；`runtime/net/ldn.c` 调用我们的联机库 |
+| `crates/mhgu-protocol` | 线格式：`MHGS`/`MHGR`（hub）与 `MHGL`/`MHGD`（游戏内 link）、`VPacket`、`NetworkInfo` |
+| `crates/mhgu-link` | link 客户端：握手、hub `LIST`/`JOIN`/`HOST`/`ATTACH`、局域网 `Scan`、`MHGD` 数据报 |
+| `crates/mhgu-hub` | hub 中继服务器（Rust），与 C 版 Go 服务器逐字节兼容 |
+| `crates/mhgu-link-ffi` | 上面的 C 库：`libmhgu_link_ffi.a` + `include/mhgu_link.h`，C 运行时直接链接 |
+
+## 构建与运行（PC）
+
+```sh
+# 1. 联机库（C 运行时要链接它；Android 构建脚本会自动交叉编译）
+cargo build --release -p mhgu-link-ffi          # → target/release/libmhgu_link_ffi.a
+
+# 2. C 运行时（仓库根目录；GEN 指向你的翻译产物，GAME 指向 exefs/romfs 所在目录）
+make -j12 build/mhgurecomp GEN=<gen 目录> GAME=<dump 目录> FFMPEG=system
+
+# 3. 运行（游戏目录含 exefs/ 与 romfs/）
+cd build && ./mhgurecomp <游戏目录>
+```
+
+依赖：clang/clang++、SDL3、Vulkan、shaderc、FFmpeg（系统库即可，`FFMPEG=system`）。
+`obj/`、`build/` 是构建缓存，已忽略。
+
+## 联机
+
+| 模式 | 做法 |
+|---|---|
+| 局域网 | 主机建房（日志 `[ldn] hosting via mhgu-link on port N`），其他玩家“搜索房间”或 `[Multiplayer] Join = <IP>:<port>` |
+| 互联网（hub 服务器） | 跑 `./target/release/mhgu-hub -addr :39510`；所有玩家 `[Multiplayer] Server = <服务器>:39510`、相同 `Key`；主机建房会自动注册为 hub，其他人从列表进入，服务器只做中转 |
+
+### Matchmaking Key（房间）
+
+Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
+`SHA-256("MHGURecomp matchmaking key:" + Key)[0..16]`（空 Key = 全零的公共房间），放进每个请求的头部；
+服务器只比较这 16 字节，**永远看不到 Key 本身**，因此：
+
+- 客户端侧指定 Key：C 版/gu-native 在设置里填 `Key`（F1 覆盖层 / `[Multiplayer] Key`）；
+  Rust FFI 是 `mhgu_ldn_host_server(server, key)` 与 `mhgu_lobby_*(…, key)` 的 `key` 参数；
+- 服务器侧限定房间：`mhgu-hub -key <同一个 Key>`。此时只有该 Key 的房间被服务，
+  公共房间（空 Key）与其他 Key 的 HOST/JOIN 得到与「房间不存在」完全相同的 `T_ERROR(1)`，
+  LIST 返回 0 个 hub——线上行为与「Key 不同」这种情况逐字节一致，没有任何协议扩展；
+- 启动日志会打印该 Key 对应的房间前缀（`0x2a7198d5…`），后台页面显示「限定房间」；不设 `-key` 则是公共房间，
+  任何使用默认 Key 的玩家都能看到并加入（默认不安全的那个状态）。
+
+### 打包与分发
+
+- Linux 绿色包：`dist/mhgu-hub-0.1.0-linux-x86_64.tar.gz`（二进制 + systemd unit + 示例自定义 UI）；
+- Arch 包：`cd packaging/arch && makepkg -f` → `mhgu-hub-0.1.0-1-x86_64.pkg.tar.zst`；
+- Windows：`packaging/windows/build.sh`（需要 `mingw-w64-gcc` 与 `rustup target add x86_64-pc-windows-gnu`）；
+- WebUI 可替换：`-web-dir <目录>` 提供 `index.html` / `admin.html` / `log.html` 与静态资源，
+  `/api/hubs` 的 JSON 接口不变，页面自己用 JS 取数据。
+
+### 服务器 Web UI
+
+`mhgu-hub` 自带一个无依赖的 Web 界面（`-web :39511`，默认开；`off` 关闭）：
+
+- `GET /`：公开页，只列「房间 1、房间 2 …」和各自人数（不显示内部 id / key 哈希），另有总人数/连接数/运行时长，5 秒自动刷新；
+- `GET /api/hubs`：同样的 JSON；
+- `GET /admin?token=…`：管理员页：统计、每个 hub 的 `Close`（`POST /admin/close`，会通知主机并踢掉该房间）、
+  IP 封禁（`POST /admin/ban` / `unban`，被禁 IP 的连接立即被重置）、`/admin/log` 看最近 300 条事件；
+- 界面多语言：右上角 🌐 点开是语言列表（English / 中文 / Español），点击即切换；选择写进
+  `lang` cookie（`Path=/; Max-Age=1年`），之后翻页/进后台都保持，不会回到英文；
+- 列表带 `key` 列（房间哈希前 4 字节，便于按 Key 分组）与流量统计（`traffic`）；
+- 后台有 **Players** 表（每个已拼接连路的 pair、所属房间、玩家 IP、`↓/↑` 平均速率、`live`/`idle Ns`）与 `Kick`（`POST /admin/kick pair=…`，
+  关掉该玩家两侧的 socket，pipe 线程结束、`joins` 递减）；日志可按 `?only=hubs|admin` 过滤；
+- 令牌来自 `-web-token`，不填则启动时随机生成并打印。
+
+```sh
+./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <你的令牌> -key <房间 Key>
+```
+
+两条路径都由 `mhgu-link-ffi` 实现，与 C 版/gu-native 客户端双向兼容（LAN 直连、`MHGD` 数据报、
+经服务器的 `MHGR` 中继都已验证）。
+
+## 菜单汉化 / 字体
+
+`runtime/overlay.cpp` 在启动时合并系统 CJK 字体（优先 JetBrains Maple Mono，`MHGU_FONT` 可覆盖），
+字形范围 `GetGlyphRangesChineseSimplifiedCommon`，所以菜单切中文不会出现 `?`。
+
+## 说明
+
+早期版本的 Rust 运行时（`mhgu-runtime`/`mhgu-hle`/`mhgu-recomp` 等）已按决定移除；现在保留的 Rust
+只有联机模块与 hub 服务器。Android 版在同一个仓库的 `android/` + `native/`（C 运行时 + 同一套 Rust 联机库；见 `docs/android.md`）。

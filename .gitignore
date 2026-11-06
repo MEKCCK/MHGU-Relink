@@ -1,34 +1,51 @@
-# Nothing from the game may be committed: no game files, no generated code, no extracted data.
+# never commit: the game, keys, saves, the game code made from it, signing keys
+/exefs/
+/romfs/
+/game/
 /generated/
+*.keystore
+keystore.properties
+/keys/
+prod.keys
+title.keys
+libmhgugame.so
+libmhgugame.id
+/system/
+/system_backup/
+
+# built (Android)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/jniLibs/
+android/local.properties
+native/build/
+deps/src/
+deps/out/
+deps/tmp/
+__pycache__/
+*.apk
+*.log
+
+# built (PC) and Rust
 /build/
 /obj/
-/build-linux/
-/obj-linux/
-/run/
-/game/
-/save/
-/mods/
-/data/
-tools/venv/
-__pycache__/
-*.pyc
-*.o
-*.exe
-*.dll
-*.arc
-*.keys
-*.rar
-*.zip
-*.7z
-/run2/
-/run3/
-/third_party/ffmpeg/
-/third_party/sdl3/
-/third_party/shaderc/
+/target/
 /dist/
+packaging/arch-game/pkg/
+packaging/arch-game/src/
+packaging/*/*.pkg.tar.zst
 
-# the hub server built in place (server/README.md)
-server/mhgurecomp-hubserver
-server/mhgurecomp-hubserver.exe
-/build-android/
-/obj-android/
+# game data and caches written next to the executable (repository root)
+/mhgurecomp.ini
+/log.txt
+/log_prev.txt
+/cache/
+/mods/
+/cheats/
+/dlc/
+/save/
+/update/
+/engine_modules/
+/shots/
+/forge_imgui.ini

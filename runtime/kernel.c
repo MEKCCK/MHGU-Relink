@@ -76,6 +76,9 @@ void kernel_signal(KObject *o) {
 
 // ------------------------------------------------------------------ time
 uint64_t rt_ticks(void) {  // 19.2 MHz system tick
+    // (it runs on while the app is paused in the background: a clock held for the game's frame step left every other
+    // guest thread's timed waits against a stopped clock; the engine caps a frame's step, so the first frame after a
+    // pause moves at most a quarter second)
     return (uint64_t)((unsigned __int128)plat_now_ns() * 192 / 10000);
 }
 
@@ -186,6 +189,7 @@ static void *thread_main(void *arg) {
     t_cur = t;
     crash_handler_install();
     if (!setjmp(t->unwind)) guest_call(&t->cpu, t->entry);
+    dispatch_thread_done(&t->cpu);
     pthread_mutex_lock(&g_klock);
     t->finished = true;
     kernel_signal(&t->obj);
@@ -215,6 +219,7 @@ static KThread *thread_new(uint32_t entry, uint32_t arg, uint32_t stack_top, int
     memset(G2H(t->tls), 0, 0x200);
     t->cpu.tpidruro = t->tls;
     t->cpu.thread = t;
+    dispatch_thread_init(&t->cpu);
     return t;
 }
 

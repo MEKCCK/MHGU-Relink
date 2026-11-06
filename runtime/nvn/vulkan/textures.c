@@ -9,6 +9,7 @@
 
 #include "vk.h"
 #include "../astc.h"
+#include <unistd.h>
 #include "../bcn.h"
 
 // ================================================================== formats
@@ -155,35 +156,9 @@ static VkImageAspectFlags aspect_of(uint32_t f) {
 }
 
 static bool format_supports(VkFormat f, VkFormatFeatureFlags want) {
-    if (!g_vk.bc && f >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && f <= VK_FORMAT_BC7_SRGB_BLOCK) return false;  // (MHGU_NO_BC)
     VkFormatProperties p;
     vkGetPhysicalDeviceFormatProperties(g_vk.phys, f, &p);
     return (p.optimalTilingFeatures & want) == want;
-}
-
-// BC formats bcn.c decodes: its BCN_* kind and the format of the decoded image (0: none). BC6H / BC7 aren't decoded
-// (the game made none in a title -> town -> hunt run: only BC1, BC3, BC4 and BC5 UNORM).
-static int bcn_kind(VkFormat f, VkFormat *decoded) {
-    switch (f) {
-    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: *decoded = VK_FORMAT_R8G8B8A8_UNORM; return BCN_BC1;
-    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:  *decoded = VK_FORMAT_R8G8B8A8_SRGB; return BCN_BC1;
-    case VK_FORMAT_BC2_UNORM_BLOCK:      *decoded = VK_FORMAT_R8G8B8A8_UNORM; return BCN_BC2;
-    case VK_FORMAT_BC2_SRGB_BLOCK:       *decoded = VK_FORMAT_R8G8B8A8_SRGB; return BCN_BC2;
-    case VK_FORMAT_BC3_UNORM_BLOCK:      *decoded = VK_FORMAT_R8G8B8A8_UNORM; return BCN_BC3;
-    case VK_FORMAT_BC3_SRGB_BLOCK:       *decoded = VK_FORMAT_R8G8B8A8_SRGB; return BCN_BC3;
-    case VK_FORMAT_BC4_UNORM_BLOCK:      *decoded = VK_FORMAT_R8_UNORM; return BCN_BC4U;
-    case VK_FORMAT_BC4_SNORM_BLOCK:      *decoded = VK_FORMAT_R8_SNORM; return BCN_BC4S;
-    case VK_FORMAT_BC5_UNORM_BLOCK:      *decoded = VK_FORMAT_R8G8_UNORM; return BCN_BC5U;
-    case VK_FORMAT_BC5_SNORM_BLOCK:      *decoded = VK_FORMAT_R8G8_SNORM; return BCN_BC5S;
-    default: return BCN_NONE;
-    }
-}
-
-uint32_t vk_tex_texel_size(const TexBackend *b) { return b->bcn ? bcn_texel_size(b->bcn) : 4; }
-
-void vk_tex_decode(const TexBackend *b, const uint8_t *blocks, uint32_t w, uint32_t h, uint8_t *out) {
-    if (b->bcn) bcn_decode(b->bcn, blocks, w, h, out);
-    else astc_decode_ldr(blocks, w, h, b->astc_bw, b->astc_bh, b->astc_srgb, out);
 }
 
 // ---- wide render targets
@@ -247,6 +222,19 @@ void vk_defer_view(VkImageView v) { vk_framebuffers_forget_view(v); defer((Dead)
 void vk_defer_framebuffer(VkFramebuffer f) { defer((Dead){.fb = f}); }
 void vk_defer_buffer(VkBuffer b, VmaAllocation mem) { defer((Dead){.buf = b, .mem = mem}); }
 
+// A phone with little memory and no BC support: every decoded texture takes four to eight times what it does compressed.
+// There, 3D textures (those with mipmaps: menus and text have none, and stay sharp) lose their largest level, a quarter
+// of the memory for a picture no sharper on such a screen. (Levels line up: the view's first level is the next one.)
+static bool low_memory_textures(void) {
+    static int on = -1;
+    if (on < 0) {
+        uint64_t ram = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+        on = ram < 5ull << 30;
+        if (on) LOG("[vk] %llu MB of memory: 3D textures without their largest level\n", (unsigned long long)(ram >> 20));
+    }
+    return on;
+}
+
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
@@ -274,22 +262,52 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     b->astc_bw = b->astc_bh = 0;
     b->bcn = BCN_NONE;
+    b->mip_skip = 0;
     if (!format_supports(vf, need)) {
         bool astc = vf >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && vf <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
         const FormatInfo *fi = t->layout.fmt;
-        VkFormat decoded = VK_FORMAT_UNDEFINED;
-        int bcn = bcn_kind(vf, &decoded);
-        if (astc && fi && fi->bpb == 16) {  // decoded on the CPU into an RGBA8 image of the same colour space
+        int bcn = vf == VK_FORMAT_BC1_RGBA_UNORM_BLOCK || vf == VK_FORMAT_BC1_RGBA_SRGB_BLOCK ? BCN_BC1
+                : vf == VK_FORMAT_BC2_UNORM_BLOCK || vf == VK_FORMAT_BC2_SRGB_BLOCK           ? BCN_BC2
+                : vf == VK_FORMAT_BC3_UNORM_BLOCK || vf == VK_FORMAT_BC3_SRGB_BLOCK           ? BCN_BC3
+                : vf == VK_FORMAT_BC4_UNORM_BLOCK                                             ? BCN_BC4U
+                : vf == VK_FORMAT_BC4_SNORM_BLOCK                                             ? BCN_BC4S
+                : vf == VK_FORMAT_BC5_UNORM_BLOCK                                             ? BCN_BC5U
+                : vf == VK_FORMAT_BC5_SNORM_BLOCK                                             ? BCN_BC5S
+                : vf == VK_FORMAT_BC7_UNORM_BLOCK || vf == VK_FORMAT_BC7_SRGB_BLOCK           ? BCN_BC7
+                : vf == VK_FORMAT_BC6H_SFLOAT_BLOCK                                           ? BCN_BC6HS
+                : vf == VK_FORMAT_BC6H_UFLOAT_BLOCK                                           ? BCN_BC6HU
+                                                                                              : BCN_NONE;
+        if (bcn && fi && fi->bw == 4 && fi->bh == 4) {  // decoded on the CPU (bcn.c) into a plain format
+            bool srgb = vf == VK_FORMAT_BC1_RGBA_SRGB_BLOCK || vf == VK_FORMAT_BC2_SRGB_BLOCK ||
+                        vf == VK_FORMAT_BC3_SRGB_BLOCK || vf == VK_FORMAT_BC7_SRGB_BLOCK;
+            b->bcn = (uint8_t)bcn;
+            vf = bcn == BCN_BC6HS || bcn == BCN_BC6HU ? VK_FORMAT_R16G16B16A16_SFLOAT
+               : bcn == BCN_BC4S || bcn == BCN_BC5S   ? VK_FORMAT_R8G8B8A8_SNORM
+               : srgb                                 ? VK_FORMAT_R8G8B8A8_SRGB
+                                                      : VK_FORMAT_R8G8B8A8_UNORM;
+            b->bcn_tb = (uint8_t)bcn_texel_bytes(bcn);
+            // one and two channels in their own size (sampled the same: the missing ones read 0, alpha 1)
+            VkFormat narrow = bcn == BCN_BC4U ? VK_FORMAT_R8_UNORM : bcn == BCN_BC4S ? VK_FORMAT_R8_SNORM
+                            : bcn == BCN_BC5U ? VK_FORMAT_R8G8_UNORM : bcn == BCN_BC5S ? VK_FORMAT_R8G8_SNORM : VK_FORMAT_UNDEFINED;
+            if (narrow != VK_FORMAT_UNDEFINED && format_supports(narrow, need)) {
+                vf = narrow;
+                b->bcn_tb = bcn == BCN_BC4U || bcn == BCN_BC4S ? 1 : 2;
+            }
+            if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
+                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && (low_memory_textures() || g_config.low_end))
+                b->mip_skip = g_config.low_end && levels >= 5 && (tw >= 512 || th >= 512) ? 2
+                            : g_config.low_end == LOW_END_TOASTER && levels >= 5 ? 2  // (Toaster: the 256s too)
+                                                                                 : 1;
+            static int nlog;
+            if (nlog++ < 4) LOG("[vk] BC format %d not supported by the GPU: decoded on the CPU\n", mf.vf);
+        } else if (astc && fi && fi->bpb == 16) {  // decoded on the CPU into an RGBA8 image of the same colour space
             b->astc_bw = fi->bw;
             b->astc_bh = fi->bh;
             b->astc_srgb = t->format >= 0x87;
             vf = b->astc_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-        } else if (bcn && fi && fi->bw == 4 && fi->bh == 4) {  // likewise, into RGBA8 / R8 / RG8 (bcn_kind)
-            b->bcn = (uint8_t)bcn;
-            vf = decoded;
         } else {
-            static uint8_t logged[256];
-            if (!logged[t->format & 0xFF]++) LOG("[vk] format %d (nvn %#x) not supported: RGBA8 instead\n", vf, t->format);
+            static int nlog;
+            if (nlog++ < 20) LOG("[vk] format %d (nvn %#x) not supported: RGBA8 instead\n", vf, t->format);
             vf = VK_FORMAT_R8G8B8A8_UNORM;
         }
     }
@@ -302,7 +320,8 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     if (!depthfmt) flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;  // format views (NVN texture views, raw sRGB views)
     if (type == VK_IMAGE_TYPE_2D && layers >= 6 && tw == th && samples == 1) flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .flags = flags, .imageType = type, .format = vf,
-                            .extent = {tw, th, depth}, .mipLevels = levels, .arrayLayers = layers,
+                            .extent = {tw >> b->mip_skip, th >> b->mip_skip, depth}, .mipLevels = levels - b->mip_skip,
+                            .arrayLayers = layers,
                             .samples = (VkSampleCountFlagBits)samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
@@ -545,7 +564,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (b->uploaded && h != b->data_hash) b->dynamic = true;
     b->data_hash = h;
     b->uploaded = true;
-    if (b->format != mf.vf && !vk_tex_decoded(b)) return;  // unsupported format: nothing sensible to copy
+    if (b->format != mf.vf && !b->astc_bw && !b->bcn) return;  // unsupported format: nothing sensible to copy
     VkCommandBuffer cb = vk_upload_cmd();
     uint32_t layers = t->layout.layers ? t->layout.layers : 1;
     if (layers > b->layers && b->depth == 1) layers = b->layers;
@@ -553,16 +572,29 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     bool linear = (t->flags & 0x10) != 0;
     uint32_t levels = t->layout.levels < b->levels ? t->layout.levels : b->levels;
     for (uint32_t layer = 0; layer < layers; layer++) {
-        for (uint32_t lv = 0; lv < levels; lv++) {
+        for (uint32_t lv = b->mip_skip; lv < levels; lv++) {
             LevelLayout l = tegra_level(&t->layout, lv);
             const uint8_t *src = mem + layer * layer_size + l.offset;
-            if (vk_tex_decoded(b)) {  // blocks -> linear block rows -> decoded texels
-                uint32_t bpb = fi->bpb;
-                uint8_t *blocks = malloc((uint64_t)l.wb * l.hb * bpb);
-                if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * l.wb * bpb, src + (uint64_t)y * t->stride, l.wb * bpb);
-                else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, bpb, l.block_height_log2, l.block_depth_log2);
-                VkSpan s = vk_transient((uint64_t)l.w * l.h * vk_tex_texel_size(b), 16);
-                vk_tex_decode(b, blocks, l.w, l.h, s.ptr);
+            if (b->bcn) {  // blocks -> linear block rows -> texels (bcn.c)
+                uint32_t bb = bcn_block_bytes(b->bcn), tb = b->bcn_tb;
+                uint8_t *blocks = malloc((uint64_t)l.wb * l.hb * bb);
+                if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * l.wb * bb, src + (uint64_t)y * t->stride, l.wb * bb);
+                else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, bb, l.block_height_log2, l.block_depth_log2);
+                VkSpan s = vk_transient((uint64_t)l.w * l.h * tb, 16);
+                bcn_decode(b->bcn, blocks, l.w, l.h, s.ptr, tb);
+                free(blocks);
+                VkBufferImageCopy rg = {.bufferOffset = s.off, .bufferRowLength = l.w, .bufferImageHeight = l.h,
+                                        .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv - b->mip_skip, layer, 1},
+                                        .imageExtent = {l.w < level_w(b, lv) ? l.w : level_w(b, lv), l.h < level_h(b, lv) ? l.h : level_h(b, lv), 1}};
+                vkCmdCopyBufferToImage(cb, s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+                continue;
+            }
+            if (b->astc_bw) {  // blocks -> linear block rows -> RGBA8 texels
+                uint8_t *blocks = malloc((uint64_t)l.wb * l.hb * 16);
+                if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * l.wb * 16, src + (uint64_t)y * t->stride, l.wb * 16);
+                else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, 16, l.block_height_log2, l.block_depth_log2);
+                VkSpan s = vk_transient((uint64_t)l.w * l.h * 4, 16);
+                astc_decode_ldr(blocks, l.w, l.h, b->astc_bw, b->astc_bh, b->astc_srgb, s.ptr);
                 free(blocks);
                 VkBufferImageCopy rg = {.bufferOffset = s.off, .bufferRowLength = l.w, .bufferImageHeight = l.h,
                                         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, layer, 1},
@@ -737,6 +769,11 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
     if (lv0 + nlv > b->levels) nlv = b->levels - lv0;
     if (ly0 >= b->layers) ly0 = b->layers - 1;
     if (ly0 + nly > b->layers) nly = b->layers - ly0;
+    if (b->mip_skip) {  // (the image starts at the game's level mip_skip)
+        uint32_t end = lv0 + nlv > (uint32_t)b->mip_skip + 1 ? lv0 + nlv : (uint32_t)b->mip_skip + 1;
+        lv0 = lv0 > b->mip_skip ? lv0 - b->mip_skip : 0;
+        nlv = end - b->mip_skip - lv0;
+    }
     if (render) {
         if (b->base_type == VK_IMAGE_VIEW_TYPE_3D) return VK_NULL_HANDLE;  // (3D render targets: not supported)
         return vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, fmt, lv0, 1, ly0, 1, IDENTITY, b->aspect);
@@ -834,7 +871,9 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
         switch (d->wrap[i]) {
         case 0: case 7: modes[i] = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; break;
         case 1: modes[i] = VK_SAMPLER_ADDRESS_MODE_REPEAT; break;
-        case 2: case 3: modes[i] = g_vk.no_mirror_clamp ? VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT : VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE; break;
+        case 2: case 3:
+            modes[i] = g_vk.mirror_clamp ? VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            break;
         case 4: case 5: modes[i] = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER; border = true; break;
         case 6: modes[i] = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT; break;
         default: modes[i] = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -849,7 +888,10 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
     if (mf > 1) si.mipLodBias += g_fsr_lod_bias;  // (FSR: textures as sharp as at the output size; config.c)
     const char *force = getenv("MHGU_TEX_LOD");  // (debug) mipmapped samplers: only this level (shows mip contents)
     if (force && mf > 1) { si.minLod = si.maxLod = (float)atof(force); si.mipLodBias = 0; }
-    if (d->max_aniso > 1) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
+    if (d->max_aniso > 1 && !g_config.low_end) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
+    if (g_config.low_end && mf > 1) {  // (one texture fetch for each: a Mali's trilinear takes two)
+        si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    }
     if (d->compare_mode) { si.compareEnable = VK_TRUE; si.compareOp = compare_op(d->compare_func); }
     VkSamplerCustomBorderColorCreateInfoEXT cb = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
     if (border) {  // the standard colours; others need VK_EXT_custom_border_color (else the nearest standard one)

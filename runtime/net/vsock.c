@@ -149,11 +149,13 @@ void vsock_deliver(const VPacket *p, const void *data, uint32_t len) {
     uint32_t bcast = ldn_broadcast_ip();
     if (p->proto == VPROTO_UDP) {
         bool all = p->dst_ip == bcast || p->dst_ip == 0xFFFFFFFFu;
+        int matched = 0;
         for (int i = 0; i < MAX_SOCKS; i++) {
             VSock *s = &socks[i];
             if (!s->used || s->type != S_SOCK_DGRAM || s->port != p->dst_port) continue;
             if (s->ip && s->ip != p->dst_ip && !all) continue;
             if (s->rip && (s->rip != p->src_ip || s->rport != p->src_port)) continue;
+            matched++;
             if (s->nq >= MAX_QUEUED) { ONCE("[net] a socket's receive queue is full: dropping datagrams\n"); continue; }
             Dgram *d = malloc(sizeof *d + len);
             if (!d) break;
@@ -162,6 +164,22 @@ void vsock_deliver(const VPacket *p, const void *data, uint32_t len) {
             if (s->tail) s->tail->next = d; else s->head = d;
             s->tail = d, s->nq++;
             if (!all) break;
+        }
+        if (matched) {
+            static int got;
+            if (got++ < 3) LOG("[net] datagram to %u.%u.%u.%u:%u from %u.%u.%u.%u:%u -> %d socket(s)\n",
+                (p->dst_ip >> 24) & 255, (p->dst_ip >> 16) & 255, (p->dst_ip >> 8) & 255, p->dst_ip & 255, p->dst_port,
+                (p->src_ip >> 24) & 255, (p->src_ip >> 16) & 255, (p->src_ip >> 8) & 255, p->src_ip & 255, p->src_port,
+                matched);
+        }
+        if (!matched) {
+            static int dropped;
+            if (dropped++ < 3 || dropped % 64 == 0) {
+                LOG("[net] no socket for a datagram to %u.%u.%u.%u:%u from %u.%u.%u.%u:%u (%d dropped so far)\n",
+                    (p->dst_ip >> 24) & 255, (p->dst_ip >> 16) & 255, (p->dst_ip >> 8) & 255, p->dst_ip & 255, p->dst_port,
+                    (p->src_ip >> 24) & 255, (p->src_ip >> 16) & 255, (p->src_ip >> 8) & 255, p->src_ip & 255, p->src_port,
+                    dropped);
+            }
         }
     } else {
         VSock *conn = NULL;

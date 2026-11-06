@@ -1,0 +1,14 @@
+[package]
+name = "mhgu-link-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Rust Local Play link (mhgu-link/mhgu-hub) as a C library for the recompiled runtime."
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+mhgu-link = { path = "../mhgu-link" }
+mhgu-hub = { path = "../mhgu-hub" }
+mhgu-protocol = { path = "../mhgu-protocol" }

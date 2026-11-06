@@ -8,9 +8,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#ifdef __ANDROID__
-#define GUEST_BASE 0x1000000000ull   // 64 GB: most Android kernels give a process 512 GB (39-bit addresses), and map
-                                     // its libraries and heap near the top of that
+#if defined(__ANDROID__)
+// Android arm64 kernels mostly have a 39-bit address space (512 GB), with libraries and the Java heap's mappings
+// placed from the top down: 64 GB is in the empty part below them.
+#define GUEST_BASE 0x1000000000ull   // 64 GB: claimed when the library loads (runtime/main.c)
 #else
 #define GUEST_BASE 0x10000000000ull  // 1 TB: claimed at startup (runtime/main.c)
 #endif

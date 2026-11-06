@@ -17,6 +17,7 @@
 // finishes the old code.
 #include <ctype.h>
 #include <dirent.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -58,7 +59,8 @@ typedef struct {
 
 #define MAX_CHEATS 4096
 // Each cheat on its own, in a list that only grows: the settings (the game's thread) add cheats while the window loop
-// runs them, so a cheat never moves, and ncheats goes up only once the new one is in place.
+// runs them, so a cheat never moves, and ncheats goes up only once the new one is in place (cheats_rescan aside:
+// it rebuilds the list while cheats_frame waits).
 static Cheat *cheats[MAX_CHEATS];
 static int ncheats;
 static int count(void) { return __atomic_load_n(&ncheats, __ATOMIC_ACQUIRE); }
@@ -656,8 +658,9 @@ bool cheats_add(const char *text, char *err, size_t errsz) {
 }
 
 // ------------------------------------------------------------------ entry points
-void cheats_init(void) {
-    DIR *d = opendir(cheats_dir());
+// The files of one folder, in name order (those of a name already loaded from the other folder are left out)
+static void load_dir(const char *dir) {
+    DIR *d = opendir(dir);
     if (!d) return;
     char *names[256];
     int n = 0;
@@ -670,11 +673,30 @@ void cheats_init(void) {
     closedir(d);
     qsort(names, n, sizeof *names, cmp_name);
     for (int i = 0; i < n; i++) {
+        bool seen = false;
+        for (int k = 0; k < count() && !seen; k++) seen = !strcmp(cheats[k]->file, names[i]);
         char path[1024];
-        snprintf(path, sizeof path, "%s/%s", cheats_dir(), names[i]);
-        load_file(path, names[i]);
+        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        if (seen) LOG("[cheats] %s: one of that name was read already, from the other cheats folder: left out\n", path);
+        else load_file(path, names[i]);
         free(names[i]);
     }
+}
+
+// The app's folder first (the bundled ones, and the settings' list of those off), then the game folder's cheats/: where
+// a player can put them on a phone, whose app folder (Android/data) a file manager can't open.
+static void load_all(void) {
+    load_dir(cheats_dir());
+    extern const char *g_game_dir;  // (main.c)
+    if (!getenv("MHGU_CHEATS_DIR") && g_game_dir) {
+        char other[1024];
+        snprintf(other, sizeof other, "%s/cheats", g_game_dir);
+        load_dir(other);
+    }
+}
+
+void cheats_init(void) {
+    load_all();
     for (int i = 0; i < ncheats; i++) cheats[i]->on = 1;
     load_off();
     for (int i = 0; i < ncheats; i++)
@@ -682,9 +704,62 @@ void cheats_init(void) {
     if (ncheats) run_all();  // (before the game starts: changes to its code are in place from the start)
 }
 
+static bool same_codes(const Cheat *a, const Cheat *b) {
+    if (a->master != b->master || a->nops != b->nops) return false;
+    for (int i = 0; i < a->nops; i++)
+        if (a->ops[i].n != b->ops[i].n || memcmp(a->ops[i].w, b->ops[i].w, sizeof(uint32_t) * a->ops[i].n)) return false;
+    return true;
+}
+
+// The settings menu, as it opens (its thread): the cheats folder read again. A cheat still there with the same codes
+// keeps running as it was; one whose codes changed first gets what the old codes changed in the game's code put back
+// (as when it is turned off), then runs its new codes from the next frame; one gone from the folder is undone and
+// dropped; a new one is on unless _off.txt says otherwise. The one time the list does not only grow: cheats_frame
+// skips the frames this takes (cheats_mu), and the settings' other calls are on this same thread.
+static pthread_mutex_t cheats_mu = PTHREAD_MUTEX_INITIALIZER;
+void cheats_rescan(void) {
+    pthread_mutex_lock(&cheats_mu);
+    int nold = ncheats, added = 0, changed = 0, gone = 0;
+    Cheat **old = malloc(sizeof *old * (nold + 1));
+    memcpy(old, cheats, sizeof *old * nold);
+    __atomic_store_n(&ncheats, 0, __ATOMIC_RELEASE);
+    load_all();
+    bool *taken = calloc(nold + 1, 1);
+    for (int i = 0; i < ncheats; i++) {
+        Cheat *ch = cheats[i];
+        int j = 0;
+        while (j < nold && (taken[j] || strcmp(old[j]->file, ch->file) || strcmp(old[j]->name, ch->name))) j++;
+        if (j == nold) { ch->on = 1, added++; continue; }
+        taken[j] = true;
+        ch->on = old[j]->on;
+        if (same_codes(ch, old[j])) {  // (as it was: running state and the code words it changed)
+            ch->ran = old[j]->ran, ch->words = old[j]->words, ch->nwords = old[j]->nwords;
+            old[j]->ran = 0, old[j]->words = NULL, old[j]->nwords = 0;
+        } else {
+            changed++;
+        }
+    }
+    // Only now the undoing: it asks which cheats keep running, so every cheat that stays must be in the list by now
+    // (the code words one of them changed too stay changed).
+    for (int j = 0; j < nold; j++) {
+        if (!taken[j]) gone++;
+        if (old[j]->ran) undo(old[j]);
+        free(old[j]->ops);
+        free(old[j]->words);
+        free(old[j]);
+    }
+    free(taken);
+    free(old);
+    load_off();
+    if (added || changed || gone)
+        LOG("[cheats] folder read again: %d new, %d with new codes, %d gone; %d cheat(s) now\n", added, changed, gone, ncheats);
+    pthread_mutex_unlock(&cheats_mu);
+}
+
 void cheats_frame(void) {
     static uint64_t last;
     if (!count() || g_present_count == last) return;
+    if (pthread_mutex_trylock(&cheats_mu)) return;  // (cheats_rescan: next frame)
     last = g_present_count;
     uint64_t b;
     int32_t s[4];
@@ -701,4 +776,5 @@ void cheats_frame(void) {
     if (s[3] < -T) b |= 1u << 23;
     keys = b;
     run_all();
+    pthread_mutex_unlock(&cheats_mu);
 }

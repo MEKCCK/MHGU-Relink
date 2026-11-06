@@ -9,11 +9,11 @@
 // - Signal handlers are process-wide, so one SIGSEGV handler does both jobs: back a guest page, or report the fault.
 //   It is installed by plat_reserve_guest(), i.e. from main.c's constructor, before any guest code can run.
 // - No console to keep or free: with stderr not a terminal nobody is watching, so the log goes to log.txt.
-// Android (bionic) uses this file too, with runtime/platform/android.c for the app's folder and its message box.
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <execinfo.h>
 #include <limits.h>
 #include <signal.h>
 #include <spawn.h>
@@ -38,6 +38,7 @@ const char *android_home(void);  // runtime/platform/android.c
 void android_load_env(void);
 void android_unpack_assets(void);
 void android_error_box(const char *msg);
+void android_mark_crash(void);   // (the next start offers to share the log)
 // (bionic has execinfo's backtrace() only from Android 13 on: the unwinder's)
 #include <unwind.h>
 typedef struct { void **bt; int n, max; } Unwound;
@@ -184,12 +185,6 @@ void plat_init(void) {
     // send() on a dropped Local Play connection gives EPIPE here instead of killing the process: Windows reports
     // WSAEPIPE to the caller, which is what nn::socket expects.
     signal(SIGPIPE, SIG_IGN);
-#ifdef __ANDROID__
-    // Android starts apps with umask 077: folders made here (save, mods, cheats...) would be the app's alone, and
-    // nothing could put files in them over USB or adb (group ext_data_rw: the files folder's)
-    umask(007);
-    android_load_env();
-#endif
 }
 
 unsigned long plat_process_id(void) { return (unsigned long)getpid(); }
@@ -216,9 +211,6 @@ static bool g_own_log;
 void plat_standalone(void) {
     char exe[PATH_MAX];
     const char *home = getenv("MHGU_HOME");
-#ifdef __ANDROID__
-    if (!home || !*home) home = android_home();
-#endif
     if (home && *home) {
         mkdir(home, 0755);
         if (chdir(home) != 0) { /* the folder we are in will do */ }
@@ -226,9 +218,6 @@ void plat_standalone(void) {
         char *s = strrchr(exe, '/');
         if (s) { *s = 0; if (chdir(exe) != 0) { /* the folder we are in will do */ } }
     }
-#ifdef __ANDROID__
-    android_unpack_assets();  // (pipelines.list and bonus/system, which a PC release has beside the exe)
-#endif
     if (!isatty(STDERR_FILENO)) {
         if (freopen("log.txt", "w", stderr)) { setvbuf(stderr, NULL, _IONBF, 0); g_own_log = true; }
     }
@@ -248,10 +237,6 @@ static bool mkdir_p(const char *path) {
 }
 
 bool plat_user_dir(char *buf, size_t size) {
-#ifdef __ANDROID__
-    snprintf(buf, size, "%s", android_home());  // (one folder for everything: the app's own)
-    return true;
-#endif
     const char *base = getenv("XDG_DATA_HOME");
     char fallback[PATH_MAX];
     if (!base || !*base) {
@@ -267,6 +252,12 @@ bool plat_user_dir(char *buf, size_t size) {
     if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return false;
     snprintf(buf, size, "%s", dir);
     return true;
+}
+
+bool plat_use_folder(const char *utf8, char *buf, size_t size) {
+    if (!*utf8 || snprintf(buf, size, "%s", utf8) >= (int)size || !mkdir_p(buf)) return false;
+    struct stat st;
+    return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 static int count_files(const char *dir, int depth) {
@@ -293,10 +284,6 @@ int plat_count_files(const char *dir) { return count_files(dir, 0); }
 
 void plat_error_box(const char *msg) {
     fprintf(stderr, "\n*** %s\n", msg);
-#ifdef __ANDROID__
-    android_error_box(msg);
-    return;
-#endif
     // Best effort, and only when there is a display server to ask. Children are reaped by SIG_IGN, so this can't
     // leave a zombie or hold the game up when neither helper is installed.
     bool x11 = getenv("DISPLAY") != NULL;
@@ -326,6 +313,9 @@ void plat_error_box(const char *msg) {
 }
 
 void plat_fatal_notice(void) {
+#ifdef __ANDROID__
+    android_mark_crash();
+#endif
     if (g_own_log)
         plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgurecomp.");
 }
@@ -374,16 +364,12 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     ucontext_t *ctx = (ucontext_t *)uc;
     uint64_t fa = si && si->si_addr ? (uint64_t)(uintptr_t)si->si_addr : 0;
     if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) {  // (a guest page first touched: back it, resume)
-        if (plat_touch_hook) plat_touch_hook(fa - g_lo, ctx_write(ctx));
+        if (plat_touch_hook) plat_touch_hook(fa - g_lo, (ctx->uc_mcontext.gregs[REG_ERR] & 2) != 0);
         return;
     }
-    uint64_t pc = ctx_pc(ctx), sp = ctx_sp(ctx), lr = 0, end = 0;
-#ifdef __aarch64__
-    lr = ctx->uc_mcontext.regs[30];  // (the link register; x86-64: the return address a call left on the stack)
-    (void)sp, (void)end;
-#else
+    uint64_t pc = (uint64_t)ctx->uc_mcontext.gregs[REG_RIP];
+    uint64_t sp = (uint64_t)ctx->uc_mcontext.gregs[REG_RSP], lr = 0, end = 0;
     if (plat_committed(sp, &end) && end - sp >= 8) lr = *(const uint64_t *)(uintptr_t)sp;
-#endif
     char what[80];
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);

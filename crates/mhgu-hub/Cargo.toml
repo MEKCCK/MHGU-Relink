@@ -1,0 +1,13 @@
+[package]
+name = "mhgu-hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A from-scratch Rust hub server for MHGU Local Play over the internet, wire-compatible with gu-native and MHGURecomp."
+
+[dependencies]
+mhgu-protocol = { path = "../mhgu-protocol" }
+
+[[bin]]
+name = "mhgu-hub"
+path = "src/main.rs"

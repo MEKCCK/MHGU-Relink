@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>  // access
+
 #include "imgui.h"
 #ifndef MHGU_NULL_BACKEND
 #include "backends/imgui_impl_vulkan.h"
@@ -28,13 +30,13 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
 #include "config.h"
+#include "touch.h"
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
+#include "perfstats.h"
 #include "hle/chat.h"
 #include "settings_panel.h"
-
-extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
 
@@ -42,9 +44,10 @@ extern "C" {
 void vk_lock(void);
 void vk_unlock(void);
 SDL_Window *ui_window(void);
+void vi_pause_game(void);
 }
 
-static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
+static std::atomic<bool> g_enabled, g_ready, g_open;
 static std::atomic<bool> g_settings_open, g_forge_open;
 static int g_menu_key;
 static float g_font_size;
@@ -55,6 +58,7 @@ static float g_scale;
 struct Ev {
     enum { POS, BUTTON, WHEEL, KEY, TEXT, FOCUS, CLEAR } kind;
     bool down;
+    bool touch;  // (POS, BUTTON: a finger's - ImGui then knows there was no hover before it, and none after it lifts)
     int button;
     float x, y;
     ImGuiKey key;
@@ -93,6 +97,7 @@ static ImGuiKey key_of(SDL_Scancode sc, SDL_Keycode kc) {
     case SDL_SCANCODE_SPACE: return ImGuiKey_Space;
     case SDL_SCANCODE_RETURN: return ImGuiKey_Enter;
     case SDL_SCANCODE_ESCAPE: return ImGuiKey_Escape;
+    case SDL_SCANCODE_AC_BACK: return ImGuiKey_AppBack;  // (Android's Back: the settings menu's Back)
     case SDL_SCANCODE_APOSTROPHE: return ImGuiKey_Apostrophe;
     case SDL_SCANCODE_COMMA: return ImGuiKey_Comma;
     case SDL_SCANCODE_MINUS: return ImGuiKey_Minus;
@@ -160,6 +165,9 @@ void overlay_toggle_settings(void) {
     set_open(g_forge_open);
 }
 
+// A finger as the menus' mouse: SDL's own mouse events made from a touch, or runtime/touch.cpp's (to_menu), which it
+// makes by hand and gives no time
+static bool finger_mouse(SDL_MouseID which, Uint64 timestamp) { return which == SDL_TOUCH_MOUSEID || !timestamp; }
 bool overlay_event(const SDL_Event *e) {
     if (!g_enabled) return false;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && settings_panel_key((int)e->key.scancode)) return true;
@@ -182,12 +190,14 @@ bool overlay_event(const SDL_Event *e) {
     switch (e->type) {
     case SDL_EVENT_MOUSE_MOTION:
         v.kind = Ev::POS, v.x = e->motion.x * density, v.y = e->motion.y * density;
+        v.touch = finger_mouse(e->motion.which, e->motion.timestamp);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
         static const int map[] = {-1, ImGuiMouseButton_Left, ImGuiMouseButton_Middle, ImGuiMouseButton_Right, 3, 4};
         if (e->button.button >= 6 || map[e->button.button] < 0) return true;
         v.kind = Ev::BUTTON, v.button = map[e->button.button], v.down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
         v.x = e->button.x * density, v.y = e->button.y * density;
+        v.touch = finger_mouse(e->button.which, e->button.timestamp);
         break;
     }
     case SDL_EVENT_MOUSE_WHEEL:
@@ -225,7 +235,6 @@ void overlay_pad(const OverlayPad *p) {
 
 bool overlay_enabled(void) { return g_enabled; }
 bool overlay_menu_open(void) { return g_open; }
-bool overlay_wants_text(void) { return g_wants_text; }
 
 static void apply_input(ImGuiIO &io) {
     std::vector<Ev> evs;
@@ -237,10 +246,15 @@ static void apply_input(ImGuiIO &io) {
     }
     for (const Ev &e : evs) {
         switch (e.kind) {
-        case Ev::POS: io.AddMousePosEvent(e.x, e.y); break;
+        case Ev::POS:
+            io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
+            io.AddMousePosEvent(e.x, e.y);
+            break;
         case Ev::BUTTON:
+            io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
             io.AddMousePosEvent(e.x, e.y);
             io.AddMouseButtonEvent(e.button, e.down);
+            if (e.touch && !e.down) io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // (the finger is gone: nothing stays hovered)
             break;
         case Ev::WHEEL: io.AddMouseWheelEvent(e.x, e.y); break;
         case Ev::KEY:
@@ -372,6 +386,13 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
     c[ImGuiCol_NavWindowingDimBg] = c[ImGuiCol_ModalWindowDimBg] = dim;
 }
 
+// The UI font built into the library (native/CMakeLists.txt embeds native/fonts/JetBrainsMapleMono-Regular.ttf):
+// Latin, the Chinese glyphs and the controller icons, so the phone needs no font file beside the game data.
+extern "C" {
+extern const unsigned char _binary_font_ttf_start[];
+extern const unsigned char _binary_font_ttf_end[];
+}
+
 void overlay_init(const char *font_path, float font_size, int menu_key) {
 #ifdef MHGU_NULL_BACKEND
     return;
@@ -386,7 +407,72 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
     g_font_size = font_size > 0 ? font_size : 12.0f;
     ImFontConfig cfg;
     cfg.SizePixels = g_font_size;
-    ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
+#ifdef __ANDROID__
+    static const char *const sys_fonts[] = {"/system/fonts/Roboto-Medium.ttf", "/system/fonts/RobotoStatic-Regular.ttf",
+                                            "/system/fonts/Roboto-Regular.ttf"};  // (the system's; Forge's is Roboto Medium)
+    for (const char *p : sys_fonts)
+        if (!font_path && access(p, R_OK) == 0) font_path = p;
+#endif
+    // The menu's Chinese text needs CJK glyphs: Roboto (and ImGui's own font) have none, so the Chinese
+    // text drew as '?'. A CJK font is used (JetBrains Maple Mono, which has Latin and CJK in one file),
+    // with the glyph range of our Chinese strings, so switching the language at run time needs no restart.
+    static const char *const ui_fonts[] = {
+        // on the phone: next to the app's files (drop the .ttf there) or the system's
+        "/data/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
+        "/storage/emulated/0/Android/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
+        "/sdcard/Android/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
+        "/system/fonts/JetBrainsMapleMono-Regular.ttf",
+        // desktop
+        "/usr/share/fonts/TTF/JetBrains-Maple-Mono-NF-XX-XX/JetBrainsMapleMono-Regular.ttf",
+        "/usr/share/fonts/TTF/JetBrains-Maple-Mono-NF-XX-XX/JetBrainsMapleMono-Medium.ttf",
+        "/usr/share/fonts/jetbrains-maple-mono/JetBrainsMapleMono-Regular.ttf",
+        "C:/Windows/Fonts/JetBrainsMapleMono-Regular.ttf",
+        "/usr/local/share/fonts/JetBrainsMapleMono-Regular.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        // the system's CJK fonts, when JetBrains Maple Mono is not there
+        "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSansSC-Regular.otf",
+        "/system/fonts/DroidSansFallbackFull.ttf", "/system/fonts/DroidSansFallback.ttf",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+        "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf",
+        nullptr};
+    const char *cjk = getenv("MHGU_FONT");
+#ifdef __ANDROID__
+    // The font built into the library is always there and has the CJK glyphs: no dependence on the
+    // device's system fonts (their CJK faces differ, and a face index can make the load fail).
+    cjk = nullptr;
+#else
+    if (!cjk || !*cjk)
+        for (int i = 0; ui_fonts[i]; i++)
+            if (access(ui_fonts[i], R_OK) == 0) { cjk = ui_fonts[i]; break; }
+#endif
+    const ImWchar *ranges = cjk ? io.Fonts->GetGlyphRangesChineseSimplifiedCommon() : nullptr;
+    ImFont *font = nullptr;
+    if (cjk) {
+        // (the one font for everything: JetBrains Maple Mono has the Latin glyphs too)
+        cfg.OversampleH = cfg.OversampleV = 1;
+        if (strstr(cjk, ".ttc")) cfg.FontNo = 2;  // (Noto's collection: 2 is the Simplified Chinese face)
+        font = io.Fonts->AddFontFromFileTTF(cjk, g_font_size, &cfg, ranges);
+        if (font) font_path = cjk;
+    }
+    cfg.OversampleH = cfg.OversampleV = 1;
+#ifdef __ANDROID__
+    if (!font) {
+        // No font on the device: the one built in. Its bytes are static (the library's), so the atlas
+        // must not free them. (The Android build embeds native/fonts/JetBrainsMapleMono-Regular.ttf.)
+        const size_t n = (size_t)(_binary_font_ttf_end - _binary_font_ttf_start);
+        ImFontConfig mem = cfg;
+        mem.FontDataOwnedByAtlas = false;
+        font = io.Fonts->AddFontFromMemoryTTF((void *)_binary_font_ttf_start, (int)n, g_font_size, &mem,
+                                              io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+        if (font) font_path = "<built in>";
+    }
+#endif
+    if (!font && font_path) font = io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg);
     if (!font) io.Fonts->AddFontDefaultVector(&cfg);
     ImGui::StyleColorsDark();
     forge_style(ImGui::GetStyle());
@@ -485,64 +571,6 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
-// The battery's charge, "87%" ("87% +" while charging); false when there is no battery to tell of (a desktop PC). Asked
-// every few seconds: SDL goes through Java on Android.
-static bool battery_text(uint64_t now, char *out, size_t size) {
-    static uint64_t last;
-    static int percent = -1;
-    static bool charging;
-    if (!last || now - last >= 5000000000ull) {
-        last = now;
-        int secs;
-        SDL_PowerState st = SDL_GetPowerInfo(&secs, &percent);
-        charging = st == SDL_POWERSTATE_CHARGING || st == SDL_POWERSTATE_CHARGED;
-        if (st == SDL_POWERSTATE_NO_BATTERY || st == SDL_POWERSTATE_ERROR) percent = -1;
-    }
-    if (percent < 0) return false;
-    snprintf(out, size, "%d%%%s", percent, charging ? " +" : "");
-    return true;
-}
-
-// The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
-// its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
-// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
-static void draw_fps(uint64_t now) {
-    static uint64_t t0, f0;
-    static float fps, ms;
-    uint64_t frames = g_present_count;
-    if (!t0 || frames < f0) t0 = now, f0 = frames;
-    if (now - t0 >= 500000000ull) {
-        uint64_t n = frames - f0;
-        fps = n * 1e9f / (float)(now - t0);
-        ms = n ? (now - t0) / 1e6f / n : 0;
-        t0 = now, f0 = frames;
-    }
-#ifdef __ANDROID__  // (a phone's battery: the Android tab's setting)
-    int battery = config_show_battery();
-#else
-    int battery = BATTERY_OFF;
-#endif
-    char charge[32];
-    bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-    if (config_show_fps()) {
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowBgAlpha(0.6f);
-        if (ImGui::Begin("FPS##counter", nullptr, flags)) {
-            if (have_charge && battery == BATTERY_WITH_FPS) ImGui::Text("%.0f FPS  %.1f ms  %s", fps, ms, charge);
-            else ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
-        }
-        ImGui::End();
-    }
-    if (have_charge && battery == BATTERY_ALONE) {
-        ImGui::SetNextWindowPos(ImVec2(10, 50), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowBgAlpha(0.6f);
-        if (ImGui::Begin("Battery##counter", nullptr, flags)) ImGui::Text("%s", charge);
-        ImGui::End();
-    }
-}
-
 // ------------------------------------------------------------------ frames (game thread)
 static std::mutex g_snap_lock;  // the copy the render thread draws
 static ImDrawData g_snap;
@@ -557,7 +585,35 @@ static void snap_clear(void) {
     g_snap.Valid = false;
 }
 
+// A texture ImGui wants made whose descriptor set could not be had (VK_ERROR_OUT_OF_POOL_MEMORY: the backend's pool
+// full). The backend still made its image, gave it a null set and marked it ready, and the next draw naming it
+// asserts ("ImDrawCmd is referring to ImTextureData that wasn't uploaded"). Undo it and ask again next frame, by
+// when textures ImGui let go of (an outgrown font atlas: freed after ImageCount frames) have freed their sets.
+// VkOverlayTex: the backend's ImGui_ImplVulkan_Texture (imgui_impl_vulkan.cpp, internal to it), field for field.
+#ifndef MHGU_NULL_BACKEND
+struct VkOverlayTex { VkDeviceMemory memory; VkImage image; VkImageView view; VkDescriptorSet set; };
+static VkDevice g_dev;
+static bool tex_create_failed(ImTextureData *tex) {
+    VkOverlayTex *bt = (VkOverlayTex *)tex->BackendUserData;
+    if (!bt || bt->set != VK_NULL_HANDLE) return false;
+    static int logged;
+    if (logged++ < 8) LOG("[forge] ImGui texture %dx%d: no descriptor set free, again next frame\n", tex->Width, tex->Height);
+    vkDestroyImageView(g_dev, bt->view, nullptr);
+    vkDestroyImage(g_dev, bt->image, nullptr);
+    vkFreeMemory(g_dev, bt->memory, nullptr);
+    IM_FREE(bt);
+    tex->BackendUserData = nullptr;
+    tex->SetStatus(ImTextureStatus_WantCreate);
+    return true;
+}
+#else
+static bool tex_create_failed(ImTextureData *) { return false; }
+#endif
+
 void overlay_frame(void *cpu) {
+    // (once a frame on the game's update thread: with [Application] PauseInBackground the game stops here while the app
+    // is in the background, its clock held: runtime/hle/vi.c)
+    vi_pause_game();
     if (!g_ready) return;
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
     bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
@@ -566,13 +622,9 @@ void overlay_frame(void *cpu) {
     char line[256];
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
-    g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
-#ifdef __ANDROID__
-    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
-#else
-    bool fps = config_show_fps();
-#endif
-    if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
+    bool touch = touch_drawn();  // (hidden, the settings button still shows)
+    bool stats = perfstats_visible();  // ([Performance] ShowStats: runtime/perfstats.cpp)
+    if (!open && !free_render && !notice && !chat && !touch && !stats) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -637,19 +689,24 @@ void overlay_frame(void *cpu) {
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
-    if (fps) draw_fps(now);
+    if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
+    if (touch) touch_draw((float)w, (float)h);  // (the touch controls: runtime/touch.cpp)
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();
+    bool tex_failed = false;
     if (dd->Textures)  // (texture uploads: on this thread, between the render thread's submissions)
         for (ImTextureData *tex : *dd->Textures)
             if (tex->Status != ImTextureStatus_OK) {
+                bool create = tex->Status == ImTextureStatus_WantCreate;
                 vk_lock();
                 ImGui_ImplVulkan_UpdateTexture(tex);
+                if (create && tex->TexID == ImTextureID_Invalid) tex_failed |= tex_create_failed(tex);
                 vk_unlock();
             }
     std::lock_guard<std::mutex> l(g_snap_lock);
     snap_clear();
+    if (tex_failed) return;  // (nothing drawn this frame: a draw naming a texture with no descriptor set is an assert)
     for (ImDrawList *list : dd->CmdLists) g_snap.CmdLists.push_back(list->CloneOutput());
     g_snap.CmdListsCount = dd->CmdListsCount;
     g_snap.TotalIdxCount = dd->TotalIdxCount;
@@ -685,7 +742,9 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         info.QueueFamily = t->qfam;
         info.Queue = t->queue;
         info.PipelineCache = t->cache;
-        info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE * 2;
+        // One set per ImGui texture: the font atlases (a new texture each time one grows or is repacked, the old one freed
+        // ImageCount frames later; damage numbers at many sizes do that over and over) and the plugins' own. 16 ran out.
+        info.DescriptorPoolSize = 1024;
         info.MinImageCount = 2;
         info.ImageCount = 8;  // (vertex buffers in turn: more than the frames ever in flight)
         info.PipelineInfoMain.RenderPass = t->pass;
@@ -698,6 +757,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
             return;
         }
         g_pass = t->pass;
+        g_dev = t->dev;
         g_ready = true;
     }
     std::lock_guard<std::mutex> l(g_snap_lock);

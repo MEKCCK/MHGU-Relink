@@ -16,25 +16,34 @@ def literals(text):
 class SettingsLocaleTest(unittest.TestCase):
     def test_catalog_and_visible_labels(self):
         catalog = (ROOT / "runtime/settings_locale.h").read_text(encoding="utf-8")
-        pairs = [tuple(literals(value)) for value in re.findall(
-            r'\{\s*' + LITERAL + r'\s*,\s*' + LITERAL + r'\s*\}', catalog)]
-        keys = [en for en, _ in pairs]
-        self.assertTrue(pairs)
+        triples = [tuple(literals(value)) for value in re.findall(
+            r'\{\s*' + LITERAL + r'\s*,\s*' + LITERAL + r'\s*,\s*' + LITERAL + r'\s*\}', catalog)]
+        keys = [en for en, _, _ in triples]
+        self.assertTrue(triples)
         self.assertFalse([key for key, count in Counter(keys).items() if count > 1])
-        self.assertTrue(all(en.strip() and es.strip() for en, es in pairs))
+        self.assertTrue(all(en.strip() and es.strip() and zh.strip() for en, es, zh in triples))
         self.assertNotIn(chr(0xfffd), catalog)
-        translations = dict(pairs)
+        translations = {en: es for en, es, _ in triples}
         self.assertEqual(translations["Misc"], "Varios")
         self.assertEqual(translations["Hunter"], "Cazador")
         self.assertEqual(translations["Reset this tab"], "Restablecer esta pestaña")
 
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
+        # PHONE_HELP: the phone's help texts (key, English, Spanish) are a table of their own: shown in place
+        # of the serialized INI comments, not looked up in settings_locale.h.
+        source = re.sub(r'const PhoneHelp PHONE_HELP\[\] = \{.*?\n\};', '', source, flags=re.S)
         # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
-        source = re.sub(r'\b(?:ini|cold|lo|hi)\(' + LITERAL + r'\)', '', source)
-        unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
+        source = re.sub(r'\b(?:ini|cold|lo|hi|getenv)\(' + LITERAL + r'\)', '', source)
+        unchanged = {"English", "Español", "中文", "Xbox", "Switch", "PlayStation",
                      "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown",
-                     "A", "B", "X", "Y", "L", "R", "ZL", "ZR"}  # (the Switch buttons' keybinds)
+                     "A", "B", "X", "Y", "L", "R", "ZL", "ZR",  # (the Switch buttons' keybinds)
+                     "L3", "R3", "Guide", "Misc", "Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad",
+                     "FSR 3.1", "FSR 4",  # (product names)
+                     "ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
+                     "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
+                     "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
+                     "ShowMenuZR"}  # (row keys: settings_lookup / PHONE_HELP names, not labels)
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
         self.assertFalse(visible - set(keys) - unchanged,

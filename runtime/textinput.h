@@ -17,5 +17,6 @@ void textinput_peek(char *out, size_t size);               // the text now (to s
 bool textinput_active(void);
 bool textinput_event(const union SDL_Event *e);  // true: the event was typing (not for the controller mapping)
 void textinput_update(void);                     // each loop pass: the window's text input on / off to match
+void textinput_tap(void);                        // (Android) a finger lifted: the screen keyboard back if it was hidden
 void textinput_type(const char *utf8);           // as typed (MHGU_CONTROL "type", paste)
 void textinput_key(int what);                    // TI_ENTER, TI_CANCEL, or TI_NONE for Backspace

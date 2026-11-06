@@ -286,6 +286,22 @@ static void hot_pull(void) {
 }
 
 #define IG_ENTER(c) (t_cpu = (c), hot_push())
+// A method called on a null object (the thunks, tools/imgui_thunks.py): ImGui would read through the null pointer and
+// the game would close (c0000005 / SIGSEGV, as with a plugin's draw list that was never set). Skipped instead, its
+// result zero (size: a struct returned through r0's pointer, zeroed there); logged once per function, with the
+// plugin's code that called it (lr), so the plugin's author can find it.
+static void ig_null_self(Cpu *c, const char *fn, uint32_t size) {
+    static const char *told[64];
+    static int ntold;
+    bool seen = false;
+    for (int i = 0; i < ntold; i++) seen |= told[i] == fn;
+    if (!seen) {
+        if (ntold < 64) told[ntold++] = fn;
+        LOG("[forge] a plugin called %s on a null object (code at %08x): skipped\n", fn, c->r[14]);
+    }
+    if (size) memset(G2H(c->r[0]), 0, size);
+    else c->r[0] = c->r[1] = 0;
+}
 #define IG_LEAVE(c) hot_pull()
 
 // an object handed to the plugin / a new one it asked for (constructors)
@@ -451,7 +467,10 @@ HLE_FUNC("igImFileGetSize", ig_igImFileGetSize) {
 }
 HLE_FUNC("igImFileRead", ig_igImFileRead) {
     ImFileHandle f = ig_file(STK(2));
-    uint64_t size = ARG64(2), count = (uint64_t)STK(1) << 32 | STK(0);
+    uint64_t size = ARG64(2), count = (uint64_t)STK(1) << 32 | STK(0), room = 0x100000000ull - ARG(0);
+    // (fread may read() straight into the plugin's buffer: the kernel's write, which can't take a fault - backed and
+    // writable first, runtime/platform.h plat_commit; up to the end of guest memory)
+    if (f && ARG(0)) plat_commit((uint64_t)(uintptr_t)G2H(ARG(0)), count && size > room / count ? room : size * count);
     ret64(c, f && ARG(0) ? igImFileRead(G2H(ARG(0)), size, count, f) : 0);
 }
 HLE_FUNC("igImFileWrite", ig_igImFileWrite) {
@@ -476,42 +495,6 @@ static uint32_t guest_alloc(Cpu *c, uint32_t n) {
 static void guest_free(Cpu *c, uint32_t p) {
     c->r[0] = p;
     guest_call(c, guest_sym("free"));
-}
-
-// Point lists (ImDrawList_AddPolyline, AddConvexPolyFilled, AddConcavePolyFilled): the plugin's array of num_points
-// ImVec2, two floats each as on the host, read where it is. The generator mirrors one ImVec2, so ImGui read the rest
-// past it: lines to points all over the screen, or a crash (the DPS meter's graph: MHGURecomp issue 151).
-static const ImVec2_c *points(uint32_t a, int n) {
-    return a && n > 0 && n <= (1 << 20) && kernel_mapped(a, (uint32_t)n * sizeof(ImVec2_c)) ? (const ImVec2_c *)G2H(a) : NULL;
-}
-HLE_FUNC("ImDrawList_AddPolyline", ig_ImDrawList_AddPolyline) {
-    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
-    float a4 = ig_f(STK(0));
-    uint32_t a5 = STK(1);
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, T_ImDrawList);
-    const ImVec2_c *p = points(a1, (int)a2);
-    if (ha0 && p) ImDrawList_AddPolyline(ha0, p, (int)a2, a3, a4, a5);
-    m_after(a0);
-    IG_LEAVE(c);
-}
-HLE_FUNC("ImDrawList_AddConvexPolyFilled", ig_ImDrawList_AddConvexPolyFilled) {
-    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, T_ImDrawList);
-    const ImVec2_c *p = points(a1, (int)a2);
-    if (ha0 && p) ImDrawList_AddConvexPolyFilled(ha0, p, (int)a2, a3);
-    m_after(a0);
-    IG_LEAVE(c);
-}
-HLE_FUNC("ImDrawList_AddConcavePolyFilled", ig_ImDrawList_AddConcavePolyFilled) {
-    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, T_ImDrawList);
-    const ImVec2_c *p = points(a1, (int)a2);
-    if (ha0 && p) ImDrawList_AddConcavePolyFilled(ha0, p, (int)a2, a3);
-    m_after(a0);
-    IG_LEAVE(c);
 }
 
 // Glyph ranges: ImGui's own list is host memory, so a plugin gets a copy of it in guest memory (the guest's malloc),
