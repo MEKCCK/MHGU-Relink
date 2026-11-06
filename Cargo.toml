@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mhgu-protocol", "crates/mhgu-hub", "crates/mhgu-link", "crates/mhgu-link-ffi"]
+members = ["crates/mhgu-protocol", "crates/mhgu-hub", "crates/mhgu-link", "crates/mhgu-link-ffi", "crates/mhgu-crossplay"]
 
 [workspace.package]
 version = "0.1.0"
