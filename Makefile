@@ -470,14 +470,14 @@ $(B)/data/.complete:
 	fi
 
 gen:
-	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
-	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	cd tools && $(PY) gen.py sdk $(abspath $(GAME))/exefs/sdk 0x02400000 $(abspath $(GEN))/sdk --hle $(abspath runtime/hle/hle_symbols.txt)
+	cd tools && $(PY) gen.py main $(abspath $(GAME))/exefs/main 0x00200000 $(abspath $(GEN))/main
 	echo '$(GEN_ID)' > $(GEN)/gen.id
 
 # differential test of the recompiler against Unicorn (tools/test_lift.py)
 test-lift:
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/main 0x00200000 --tests 6000
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/sdk 0x02400000 --tests 6000
+	cd tools && $(PY) test_lift.py $(abspath $(GAME))/exefs/main 0x00200000 --tests 6000
+	cd tools && $(PY) test_lift.py $(abspath $(GAME))/exefs/sdk 0x02400000 --tests 6000
 
 runtime-objs: $(RT_OBJ)
 
