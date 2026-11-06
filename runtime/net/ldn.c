@@ -695,8 +695,10 @@ static bool host_start(void) {
     link_poll_start();
     LOG("[ldn] hosting via mhgu-link on port %u\n", bound);
     char server[LOBBY_NAME], key[LOBBY_NAME];
-    config_live_ldn(server, sizeof server, key, sizeof key);
-    if (server[0] && mhgu_ldn_host_server(server, key)) LOG("[ldn] hub listed on %s\n", server);
+    config_live_ldn(NULL, 0, key, sizeof key);  // [Multiplayer] Key as saved now
+    // [Multiplayer] Server: empty = the default server, Off = none (lobby_server_of, as the settings menu shows)
+    if (lobby_server(server) && mhgu_ldn_host_server(server, key)) LOG("[ldn] hub listed on %s\n", server);
+    else if (server[0]) LOG("[ldn] hub server %s: the hub could not be listed (see [link] above)\n", server);
     return true;
 }
 
