@@ -718,6 +718,8 @@ const ConfigSetting g_settings[] = {
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
+    ON_OFF("Performance", "ShowFPS", show_fps, false),
+    {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
     {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
