@@ -76,7 +76,7 @@ Dos dispositivos en el mismo Wi-Fi pueden jugar en la misma sala. En el pueblo, 
 
 ### Por internet
 
-Cualquiera puede alojar un servidor de salas: el programa chico de la carpeta `server` (Go, un puerto para TCP y UDP, el 39510 por defecto; ver `server/README.md`). Todos los que quieran jugar juntos escriben el mismo servidor en el engranaje, **Red**, **Servidor de salas** (un nombre o una IP, y `:puerto` si no es el 39510); sus salas aparecen al buscar salas en el juego. Con una **Clave de emparejamiento**, solo los que tengan la misma clave ven sus salas. **Comprobar servidor de salas** dice si responde. Este proyecto no tiene un servidor propio, y el juego por internet todavía no se probó en Android.
+Cualquiera puede alojar un servidor de salas: el `mhgu-hub` de Rust (`cargo build --release -p mhgu-hub`; un puerto para TCP y UDP, el 39510 por defecto, con UI web opcional; ver `docs/online.md`). Todos los que quieran jugar juntos escriben el mismo servidor en el engranaje, **Red**, **Servidor de salas** (un nombre o una IP, y `:puerto` si no es el 39510); sus salas aparecen al buscar salas en el juego. Con una **Clave de emparejamiento**, solo los que tengan la misma clave ven sus salas. **Comprobar servidor de salas** dice si responde. Este proyecto no tiene un servidor propio, y el juego por internet todavía no se probó en Android.
 
 Sin servidor: pon todos los dispositivos en la misma VPN (por ejemplo Tailscale o ZeroTier) y escribe la IP del anfitrión en esa VPN en **Buscar servidores**.
 

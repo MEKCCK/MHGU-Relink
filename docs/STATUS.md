@@ -195,7 +195,7 @@ APIs are HLE'd at the function level, so no Switch service (ldn:u, bsd:u) is inv
 ## Internet hubs through a hub server (2026-10-29, branch feat/ldn-server)
 
 Local Play over the internet without port forwarding, for friends (matchmaking key) and strangers (public), through
-our own lobby / relay server (server/, Go, stdlib only; server/README.md: build, run, self-host, Docker, systemd).
+our own lobby / relay server (crates/mhgu-hub, Rust; docs/online.md: build, run, self-host, Web UI, systemd).
 Plan and security notes: docs/research/internet-hubs.md.
 - ini [Multiplayer] Server (empty: LDN_DEFAULT_SERVER in config.h, the public server below;
   Off: none; host[:port], default port 39510) and Key (matchmaking key; empty: public). Both in the settings menu

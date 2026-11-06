@@ -290,7 +290,7 @@ The game also comes with my own LDN server preloaded (server software for hostin
 
 If you only want to play with friends or premade groups, set a matchmaking key in the F1 menu. Everyone who has a matchmaking key set, can only see each other.
 
-See [server/README.md](server/README.md) if you want to host your own LDN server. If the hub server can't be reached, a notice at the top of the screen will tell you. I try to keep the LDN server up 24/7.
+See [docs/online.md](online.md) if you want to host your own hub server with `mhgu-hub`. If the hub server can't be reached, a notice at the top of the screen will tell you. I try to keep the LDN server up 24/7.
 
 You can also play multiplayer without an LDN server if you want to play with your friends. The host needs to forward the right port (39500 TCP/UDP by default), and all clients need to configure the host's IP address in their .ini file. (`Join = xxx.xxx.xxx.xxx`)
 

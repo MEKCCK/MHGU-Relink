@@ -76,7 +76,7 @@ Two devices on the same Wi-Fi can play in the same hub. In town, tap ZL and choo
 
 ### Over the internet
 
-Anyone can run a hub server: the small program in the `server` folder (Go, one port for TCP and UDP, 39510 by default; see `server/README.md`). Everyone who wants to play together enters the same server under the gear, **Network**, **Hub server** (a name or IP, and `:port` if it isn't 39510); their hubs then show when they search for hubs in the game. With a **Matchmaking key**, only players with the same key see each other's hubs. **Check hub server** tells whether it answers. This project runs no server of its own, and play over the internet hasn't been tested on Android yet.
+Anyone can run a hub server: the Rust `mhgu-hub` (`cargo build --release -p mhgu-hub`; one port for TCP and UDP, 39510 by default, with an optional web UI; see `docs/online.md`). Everyone who wants to play together enters the same server under the gear, **Network**, **Hub server** (a name or IP, and `:port` if it isn't 39510); their hubs then show when they search for hubs in the game. With a **Matchmaking key**, only players with the same key see each other's hubs. **Check hub server** tells whether it answers. This project runs no server of its own, and play over the internet hasn't been tested on Android yet.
 
 Without a server: put every device on the same VPN (for example Tailscale or ZeroTier) and enter the host's VPN IP under **Search hosts**.
 

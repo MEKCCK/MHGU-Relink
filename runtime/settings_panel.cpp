@@ -1399,7 +1399,7 @@ std::vector<Row> main_rows() {
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
         text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), ini("Join"));
-        // (internet hubs through a hub server of the player's choice, server/: none is built in, LDN_DEFAULT_SERVER)
+        // (internet hubs through a hub server of the player's choice, crates/mhgu-hub: none is built in, LDN_DEFAULT_SERVER)
         text(r, "server", "Hub server", c.ldn_server, sizeof c.ldn_server,
              *c.ldn_server ? std::string(c.ldn_server)
              : *LDN_DEFAULT_SERVER ? std::string(tr("Default")) + " (" LDN_DEFAULT_SERVER ")" : std::string(tr("None")),

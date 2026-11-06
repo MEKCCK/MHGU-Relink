@@ -130,7 +130,7 @@ typedef struct {
 } Config;
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
-// The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
+// The hub server used when ini Server is empty (runtime/net/ldn.c, crates/mhgu-hub): the project's public one (an Oracle
 // Cloud VM). "" = no default: no internet hubs unless the player names a server.
 #define LDN_DEFAULT_SERVER "114.66.25.224:39510"
 #define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS

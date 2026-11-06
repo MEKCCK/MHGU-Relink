@@ -24,7 +24,6 @@ NVN 图形 API 由运行时重新实现。
 | `native/` | Android 的 CMake 与 `build_native.sh`（含 Rust 交叉编译） |
 | `android/` | Android 应用（Gradle；`GameActivity`、`GameFolderActivity`、导入界面等） |
 | `deps/` | Android 依赖构建脚本（SDL3、shaderc、FFmpeg） |
-| `server/` | Go 版 hub 服务器（与 Rust `mhgu-hub` 线格式兼容） |
 | `updater/` | PC 自动更新程序 |
 | `packaging/` | hub 的 Arch/Windows 打包、systemd unit、示例 Web UI |
 | `docs/`、`tests/` | 文档与不依赖游戏文件的测试 |
@@ -61,7 +60,7 @@ cd build && ./mhgurecomp <游戏目录>
 ## 联机
 
 - **局域网**：主机建房（`runtime/net/ldn.c` 调用 Rust `mhgu-link`），其他玩家“搜索房间”或填 `Join = <IP>:<port>`。
-- **互联网**：运行 hub 服务器（`mhgu-hub` 或 Go 版 `server/`），所有玩家填同一个 `Server` 和 `Matchmaking key`。
+- **互联网**：运行 Rust hub 服务器（`cargo build --release -p mhgu-hub && ./target/release/mhgu-hub -addr :39510`），所有玩家填同一个 `Server` 和 `Matchmaking key`。
 - Rust 版 hub 带无依赖 Web UI：`./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <token>`。
 
 Android 运行时同样链接 `mhgu-link-ffi`（`build_native.sh` 自动交叉编译），协议与 PC 版一致。详见

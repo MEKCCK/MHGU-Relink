@@ -5,7 +5,7 @@
 // (players joining or leaving, the hub's advertise data), and relays the game's packets between the players
 // (net.h, vsock.c). Only the host needs a reachable port.
 //
-// Internet hubs (ini [Multiplayer] Server, server/ in the repository): with a hub server, a created hub is also listed
+// Internet hubs (ini [Multiplayer] Server, crates/mhgu-hub in the repository): with a hub server, a created hub is also listed
 // there, for players with the same matchmaking key (ini Key, empty: public) and port version, and Scan adds the
 // server's hubs to the LAN's. Joining one goes through the server, which splices the player's connection to one the
 // host opens for it: the same link as a direct connection, so nobody forwards a port. Game packets go by UDP through
@@ -120,7 +120,7 @@ typedef struct { char magic[4]; uint32_t token; uint8_t kind, pad[3]; } UHdr;
 #define UDP_MAX_PAYLOAD 8192
 #define UDP_SILENCE_NS 15000000000ull
 
-// The hub server (server/server.go has the protocol): control frames like the link's; requests start with a header
+// The hub server (crates/mhgu-hub/src/server.rs has the protocol): control frames like the link's; requests start with a header
 // "MHGS", u16 LOBBY_PROTO, u16 PROTO_VERSION, room[16] (the matchmaking key's hash).
 #define LOBBY_PROTO 1
 #define LOBBY_PORT 39510

@@ -1,6 +1,6 @@
 # Internet hubs without port forwarding (planned 2026-10-25; steps 2-3 done 2026-10-29)
 
-Status: the relay / lobby server (server/) and its client in runtime/net/ldn.c work (docs/STATUS.md "Internet hubs
+Status: the relay / lobby server (crates/mhgu-hub) and its client in runtime/net/ldn.c work (docs/STATUS.md "Internet hubs
 through a hub server"). Friends are grouped by a matchmaking key ([Multiplayer] Key) rather than a room code: same
 key, same hub list; no key, the public list. Still open: step 1 (traffic), step 4 (hole punching), the players'
 side of the audit below. The public server runs (docs/STATUS.md).
@@ -42,7 +42,7 @@ The relay server:
   handshake token.
 - Room codes long enough not to be guessed, guessing rate-limited; private hubs never in the public list.
 - Hub names / advertise data length-capped and checked before they're listed.
-- A memory-safe language for the server (Go or Rust); no admin interface on the public port; keep IPs no longer
+- A memory-safe language for the server (Rust); no admin interface on the public port; keep IPs no longer
   than needed.
 
 Players (the port): today only friends connect (the host's address is typed in), so this matters more once strangers

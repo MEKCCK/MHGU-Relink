@@ -34,7 +34,10 @@ git 历史：以 MHGURecomp 的历史为根，`git merge -s ours` 方式并入 g
      `SyncSmallMonsters` 默认 1、手机帮助表不计入 locale 覆盖率、补 PC 新增文案翻译）。
    - 删除 `tests/test_settings_panel.cpp`：它校验的是旧 PC 菜单的逐行导航顺序，而本仓库采用 gu-native 的
      触摸优先菜单（行为契约已不存在，按“不重钉旧实现”的原则删除）。
-7. **文档**：三份 README 分别移入 `docs/pc.md`、`docs/android.md`（+ `android.es.md`）、`docs/online.md`；
+7. **移除 Go 版 hub（`server/`）**：`crates/mhgu-hub`（Rust）已与其线格式逐字节兼容，并带无依赖 Web UI
+   （`/api/hubs`、管理页、封禁、日志）；保留两份实现只会产生第二个协议源。运行时、文档、打包现在只指向
+   `mhgu-hub`，仓库不再包含 Go 代码。
+8. **文档**：三份 README 分别移入 `docs/pc.md`、`docs/android.md`（+ `android.es.md`）、`docs/online.md`；
    根 `README.md` 重写为统一索引；`CLAUDE.md` 增补合并后的目录与构建说明。
 
 ## 验证记录（合并时）

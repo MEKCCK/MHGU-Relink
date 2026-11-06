@@ -20,7 +20,7 @@
 | `runtime/`、`tools/`、`third_party/`、`Makefile` | C 运行时（原 `base/`）；`runtime/net/ldn.c` 调用我们的联机库 |
 | `crates/mhgu-protocol` | 线格式：`MHGS`/`MHGR`（hub）与 `MHGL`/`MHGD`（游戏内 link）、`VPacket`、`NetworkInfo` |
 | `crates/mhgu-link` | link 客户端：握手、hub `LIST`/`JOIN`/`HOST`/`ATTACH`、局域网 `Scan`、`MHGD` 数据报 |
-| `crates/mhgu-hub` | hub 中继服务器（Rust），与 C 版 Go 服务器逐字节兼容 |
+| `crates/mhgu-hub` | hub 中继服务器（Rust），协议与 PC/Android 客户端逐字节兼容；旧 Go 实现已移除 |
 | `crates/mhgu-link-ffi` | 上面的 C 库：`libmhgu_link_ffi.a` + `include/mhgu_link.h`，C 运行时直接链接 |
 
 ## 构建与运行（PC）

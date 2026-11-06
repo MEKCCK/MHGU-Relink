@@ -42,7 +42,7 @@ To diagnose a device: `adb logcat -s MHGU`, or `Android/data/com.mhgu.recomp/fil
   shaderc and FFmpeg.
 - `crates/`: the Rust Local Play module (`mhgu-link`, `mhgu-link-ffi`, `mhgu-protocol`) and the hub server
   (`mhgu-hub`). `runtime/net/ldn.c` links `libmhgu_link_ffi.a` on both platforms.
-- `Makefile`: the PC build (Windows via MSYS2, Linux); `server/` the Go hub, `updater/` the PC updater,
+- `Makefile`: the PC build (Windows via MSYS2, Linux); `updater/` the PC updater,
   `packaging/` the Arch/Windows hub packages; `docs/` the platform guides.
 
 ## Building
@@ -191,7 +191,7 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
 - Test runs can override the device's settings without touching its ini: `MHGU_LOWEND=0|1|2`, `MHGU_SCALE`, `MHGU_SHADOWS`, `MHGU_BLOOM`,
   `MHGU_FPS_LIMIT`, `MHGU_NO_REVERB=1`. A phone on its charger reads charging current: unplug it to measure watts. At 30 FPS the GPU runs at
   lower clocks, so `gpuprof` times are longer: compare frame rates or watts, not milliseconds, across FPS limits.
-- Internet hubs (`net/ldn.c`, the `server/` hub server): the Network page shows Hub server, Matchmaking key and Check hub server on
+- Internet hubs (`net/ldn.c`, the `crates/mhgu-hub` server): the Network page shows Hub server, Matchmaking key and Check hub server on
   Android too; empty Server is None (`LDN_DEFAULT_SERVER` is empty: the project runs no server). Players type any server they want.
 - The touch menu layout can show ZL and ZR tabs beside L and R (`C_MZL`, `C_MZR`), each with `[Touch] ShowMenuZL` / `ShowMenuZR`, off by
   default (Buttons on the screen).
