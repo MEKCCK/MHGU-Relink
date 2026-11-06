@@ -1434,9 +1434,9 @@ std::vector<Row> main_rows() {
              ini("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
-        add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room")},
+        add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
                    [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
-        r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn) or suyu rooms.");
+        r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn), suyu rooms, or both (a mixed hub).");
         text(r, "ryu.servers", tr("RyuLdn servers"), c.ryu_servers, sizeof c.ryu_servers,
              *c.ryu_servers ? c.ryu_servers : std::string(tr("None")), ini("RyuServers"));
         add_bool(r, "ryu.host", tr("Run a RyuLdn server"), &c.ryu_host, ini("RyuHost"));

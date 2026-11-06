@@ -29,7 +29,6 @@ fn room_player_joins_the_ryu_hub_and_its_packets_reach_the_host() {
     let srv = Server::start("127.0.0.1", 0).unwrap();
     let rport = srv.status().port;
     ryu::set_config(&format!("127.0.0.1:{rport}"), "", "");
-    ryu::set_self(Some(&format!("127.0.0.1:{rport}")));
     ryu::set_hooks(ryu::RyuHooks { lobby: None, data: Some(on_data) });
     let mut cfg = [0u8; 0x20];
     cfg[0x12] = 4;
@@ -57,5 +56,4 @@ fn room_player_joins_the_ryu_hub_and_its_packets_reach_the_host() {
     room::leave();
     roomsrv::stop();
     ryu::leave();
-    ryu::set_self(None);
 }

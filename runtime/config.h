@@ -141,7 +141,7 @@ typedef struct {
 } Config;
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
-enum { XP_OFF, XP_RYU, XP_ROOM };
+enum { XP_OFF, XP_RYU, XP_ROOM, XP_MIXED };
 
 // The hub server used when ini Server is empty (runtime/net/ldn.c, crates/mhgu-hub): the project's public one (an Oracle
 // Cloud VM). "" = no default: no internet hubs unless the player names a server.

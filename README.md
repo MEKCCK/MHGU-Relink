@@ -63,7 +63,7 @@ cd build && ./mhgurecomp <游戏目录>
 - **互联网**：运行 Rust hub 服务器（`cargo build --release -p mhgu-hub && ./target/release/mhgu-hub -addr :39510`），所有玩家填同一个 `Server` 和 `Matchmaking key`。
 - Rust 版 hub 带无依赖 Web UI：`./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <token>`。
 - **与模拟器联机（Crossplay）**：`crates/mhgu-crossplay` 实现 Ryujinx 的 RyuLdn 协议与 suyu 房间协议（客户端、房间服务器、
-  RyuLdn 服务器和混合 hub），设置菜单 Network 页选择 `Crossplay = Ryujinx` 或 `Room`。可以直接连公共/自建服务器，
+  RyuLdn 服务器和混合 hub），设置菜单 Network 页选择 `Crossplay = Ryujinx`、`Room` 或 `Mixed`。可以直接连公共/自建服务器，
   也可以勾选 `RyuHost` / `RoomHost` 在本机内嵌服务器；`RyuServers`、`RoomServer`、`RyuPassword`、`RoomName` 等
   键与菜单项同名。详见 [docs/online.md](docs/online.md#crossplayryujinx--suyu)。
 

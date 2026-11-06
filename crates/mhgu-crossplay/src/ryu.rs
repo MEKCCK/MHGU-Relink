@@ -958,8 +958,13 @@ pub fn peer_join(
     hooks: RyuPeerHooks,
     ud: *mut core::ffi::c_void,
 ) -> Result<(RyuPeer, u32, u32, [u8; RYU_NETINFO]), u32> {
+    // The host's own server when it runs one, else the first configured server (the one create() used).
     let h = host_addr();
-    let sv = parse_server(&h).ok_or(R_CONNECT_FAILURE)?;
+    let sv = if h.is_empty() {
+        with_cfg(|c| c.servers.first().cloned()).ok_or(R_CONNECT_FAILURE)?
+    } else {
+        parse_server(&h).ok_or(R_CONNECT_FAILURE)?
+    };
     let c = conn_open(&sv, -1, false, true, false, true).ok_or(R_CONNECT_TIMEOUT)?;
     {
         let mut f = c.flags.lock().unwrap();

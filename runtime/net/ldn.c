@@ -687,10 +687,12 @@ static void room_lost(void) {
 }
 
 static bool ryu_configured(void) {
-    return g_config.crossplay == XP_RYU && (g_config.ryu_servers[0] || g_config.ryu_host);
+    return (g_config.crossplay == XP_RYU || g_config.crossplay == XP_MIXED) &&
+           (g_config.ryu_servers[0] || g_config.ryu_host);
 }
 static bool room_configured(void) {
-    return g_config.crossplay == XP_ROOM && (g_config.room_server[0] || g_config.room_host);
+    return (g_config.crossplay == XP_ROOM || g_config.crossplay == XP_MIXED) &&
+           (g_config.room_server[0] || g_config.room_host);
 }
 static char roomsrv_self[32];
 static const char *room_server(void) { return roomsrv_self[0] ? roomsrv_self : g_config.room_server; }
@@ -1360,7 +1362,7 @@ static uint32_t create_ryu(const uint8_t *cfg, const uint8_t *sec, const uint8_t
     L.state = ST_AP_CREATED, L.reason = DR_NONE;
     pthread_mutex_unlock(&L.mu);
     LOG("[ldn] hub created on the RyuLdn server: %s, up to %d players\n", ipstr(L.own_ip), L.info[NI_NODE_MAX]);
-    if (g_config.ryu_host && room_configured() && mhgu_room_connected()) mhgu_xb_begin(info, ip, mask);
+    if (room_configured() && mhgu_room_connected()) mhgu_xb_begin(info, ip, mask);
     signal_change();
     return 0;
 }
@@ -1575,7 +1577,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
             ryu_of[n++] = rsrv[j] + 1;
         }
     }
-    if (room_enabled() && mhgu_room_connected() && n < MAX_FOUND) {
+    if (g_config.crossplay == XP_ROOM && room_enabled() && mhgu_room_connected() && n < MAX_FOUND) {
         uint8_t own[4], all[4] = {0xFF, 0xFF, 0xFF, 0xFF};
         mhgu_room_own_ip(own);
         pthread_mutex_lock(&room_scan_mu);
