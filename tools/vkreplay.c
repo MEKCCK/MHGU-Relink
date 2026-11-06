@@ -1,5 +1,5 @@
 // Standalone Vulkan replay of a post-processing chain on the host GPU (found the AMD GCN1 barrier bug, see
-// docs/STATUS.md): input S (raw RGBA8) is copied by a copy shader into X, then a blur shader runs X->Y, Y->Z, Z->Y with
+// docs/DEVELOPMENT.md): input S (raw RGBA8) is copied by a copy shader into X, then a blur shader runs X->Y, Y->Z, Z->Y with
 // uniform buffers 4 / 5 (cb5 offsets x1, x2, x4), as the game's light-shaft passes 023-026. Shaders: run/build/glsl.
 //   vkreplay <vs> <fs> <in.rgba> <iw> <ih> <ow> <oh> <cb4.f32> <cb5.f32> <out> [mode]   (outputs <out>.p0..p3)
 //   env: COPY_VS / COPY_FS copy shaders, FRAMES=n, LOCKSTEP=1, EXPLICIT=1 (explicit barrier flags), CLR / NO_CLEAR,

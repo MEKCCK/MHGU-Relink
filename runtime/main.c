@@ -1,4 +1,4 @@
-// MHGU Recomp entry: claim the guest window, load the modules, set up the kernel, run nn::init::Start on the
+// MHGU Relink entry: claim the guest window, load the modules, set up the kernel, run nn::init::Start on the
 // main thread.
 #include <stdbool.h>
 #include <stdlib.h>
@@ -394,7 +394,7 @@ int main(int argc, char **argv) {
         }
 #endif
     }
-    LOG("MHGU Recomp %s\n", MHGU_VERSION);
+    LOG("MHGU Relink %s\n", MHGU_VERSION);
 #ifdef __ANDROID__
     void plat_log_device(void);
     plat_log_device();

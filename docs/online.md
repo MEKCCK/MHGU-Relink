@@ -1,4 +1,4 @@
-# MHGU：联网（Rust 模块）
+# MHGU Relink：联机与 Crossplay
 
 > 本文中的路径都相对于仓库根目录。 / Paths in this guide are relative to the repository root.
 
@@ -6,7 +6,7 @@
 **PC 版与 Android 版共用一份 C 运行时，联网由 Rust 模块（`crates/`）实现。**
 
 游戏代码翻译、guest 内存、内核 `svc`、HLE 服务、NVN→Vulkan 渲染、音频、媒体库全部沿用 C 基底
-（仓库根目录的 `runtime/`，MHGURecomp 的完整运行时）；我们只把自己实现的**联机模块**（Rust）替换进去，
+（仓库根目录的 `runtime/`，MHGU Relink 的完整运行时）；我们只把自己实现的**联机模块**（Rust）替换进去，
 它负责 `nn::ldn`（局域网与互联网 hub）、`MHGL`/`MHGD`/`MHGR` 线协议、中继与发现。
 
 本仓库不包含任何游戏代码、ROM、密钥或存档。游戏代码由玩家用自己的 `exefs`/`romfs` 经
@@ -17,7 +17,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `runtime/`、`tools/`、`third_party/`、`Makefile` | C 运行时（原 `base/`）；`runtime/net/ldn.c` 调用我们的联机库 |
+| `runtime/`、`tools/`、`third_party/`、`Makefile` | C 运行时；`runtime/net/ldn.c` 调用我们的联机库 |
 | `crates/mhgu-protocol` | 线格式：`MHGS`/`MHGR`（hub）与 `MHGL`/`MHGD`（游戏内 link）、`VPacket`、`NetworkInfo` |
 | `crates/mhgu-link` | link 客户端：握手、hub `LIST`/`JOIN`/`HOST`/`ATTACH`、局域网 `Scan`、`MHGD` 数据报 |
 | `crates/mhgu-hub` | hub 中继服务器（Rust），协议与 PC/Android 客户端逐字节兼容；旧 Go 实现已移除 |

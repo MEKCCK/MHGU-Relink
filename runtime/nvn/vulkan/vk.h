@@ -1,5 +1,5 @@
 // Vulkan 1.2 backend for the NVN layer. Baseline: what an AMD GCN card with a 2020 driver offers (see
-// docs/STATUS.md): no dynamic rendering, no synchronization2, no extended dynamic state, no push descriptors.
+// docs/DEVELOPMENT.md): no dynamic rendering, no synchronization2, no extended dynamic state, no push descriptors.
 // Files: device.c (instance, device, swapchain, presentation), textures.c (images, change-detected uploads from
 // guest memory, views, samplers), shaders.c (GLSL -> SPIR-V, reflection, built-in shaders), exec.c (command lists:
 // render passes, draws, clears, copies, compute). Structure and behaviour follow LAS Recomp's Vulkan backend.

@@ -1,4 +1,4 @@
-MHGU Recomp includes or is derived from the following third-party software. Each keeps its own license, reproduced
+MHGU Relink includes or is derived from the following third-party software. Each keeps its own license, reproduced
 below.
 
 - LAS Recomp: the runtime's kernel, IPC, loader, dispatch and NVN object code and the Maxwell shader translator

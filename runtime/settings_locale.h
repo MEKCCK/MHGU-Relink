@@ -79,7 +79,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"D-pad: Move   A: Select / edit   L / R: Section", "Cruceta: Mover   A: Elegir / editar   L / R: Sección", "方向键：移动   A：选择 / 编辑   L / R：切换分类"},
         {"Keep playing", "Seguir jugando", "继续游戏"},
         {"Exit game", "Salir del juego", "退出游戏"},
-        {"Close MHGU Recomp?", "¿Cerrar MHGU Recomp?", "关闭 MHGU Recomp？"},
+        {"Close MHGU Relink?", "¿Cerrar MHGU Relink?", "关闭 MHGU Relink？"},
         {"Exit the game? Unsaved progress will be lost. Save in MHGU before closing.", "¿Salir del juego? Perderás el progreso sin guardar. Guarda en MHGU antes de cerrar.", "退出游戏？未保存的进度将丢失。请在关闭前在 MHGU 中保存。"},
         {"Resolution must be Desktop/Auto or 320x180 to 16384x16384.", "La resolución debe ser automática o entre 320x180 y 16384x16384.", "分辨率必须为桌面/自动，或介于 320x180 到 16384x16384 之间。"},
         {"Aspect ratio must be Auto or between 0.5 and 10.", "La relación de aspecto debe ser automática o entre 0.5 y 10.", "宽高比必须为自动，或介于 0.5 到 10 之间。"},

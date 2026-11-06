@@ -2,7 +2,7 @@
 pkgname=mhgu-hub
 pkgver=0.1.6
 pkgrel=1
-pkgdesc="MHGU Local Play hub server (Rust, wire-compatible with MHGURecomp and gu-native)"
+pkgdesc="MHGU Relink hub server (Rust, wire-compatible with the game and gu-native)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/elite/mhgu"
 license=('MIT')

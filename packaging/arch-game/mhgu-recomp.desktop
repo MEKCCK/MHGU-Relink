@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Monster Hunter Generations Ultimate
+Name=MHGU Relink
 Comment=Recompiled runtime (needs your own game folder)
 Exec=mhgu-recomp %f
 Terminal=false

@@ -57,7 +57,7 @@ bool plat_wait_process(unsigned long pid); // Restart child waits for old host t
 void plat_standalone(void);
 // The player's own folder for this game, created if missing (save data lives there, away from the game folder so a
 // rebuilt or deleted build folder can't take it along): Windows %APPDATA%\MHGURecomp.
-// TODO(Linux): $XDG_DATA_HOME/MHGURecomp, else ~/.local/share/MHGURecomp (see docs/STATUS.md "Save data").
+// TODO(Linux): $XDG_DATA_HOME/MHGURecomp, else ~/.local/share/MHGURecomp (see docs/DEVELOPMENT.md).
 bool plat_user_dir(char *buf, size_t size);
 // The files in a folder and its subfolders, 0 if it can't be read (main.c: whether the player's romfs is complete;
 // the system's own listing, not a stat per file: ~80 ms for the game's 35531 on Windows).

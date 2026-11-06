@@ -150,7 +150,7 @@ float g_fsr_lod_bias;
 const char *g_fsr4_fallback;
 
 static const char DEFAULT_INI[] =
-    "; MHGU Recomp settings. Delete this file to reset to default settings, the file is regenerated.\n"
+    "; MHGU Relink settings. Delete this file to reset to default settings, the file is regenerated.\n"
     "\n"
     "[Display]\n"
     "; Fullscreen, Windowed, Borderless\n"
