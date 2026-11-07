@@ -24,6 +24,7 @@ fn host_leave_host_again() {
     assert!(mhgu_ldn_host(0, &mut port, c"one".as_ptr() as *const _, info.as_ptr(), info.len() as u32));
     let first = port;
     mhgu_ldn_leave();
+    drop(std::net::UdpSocket::bind(("0.0.0.0", first)).expect("leave must release the UDP scan port"));
     let mut port2 = 0u16;
     assert!(
         mhgu_ldn_host(first, &mut port2, c"two".as_ptr() as *const _, info.as_ptr(), info.len() as u32),

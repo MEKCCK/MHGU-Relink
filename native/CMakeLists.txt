@@ -102,6 +102,9 @@ set_target_properties(mhguffmpeg PROPERTIES LINK_DEPENDS  # (they are link optio
 # player's own through libadrenotools)
 set(ADRENOTOOLS_GEN OFF)
 add_subdirectory(${S}/third_party/libadrenotools adrenotools)
+foreach(HOOK_TARGET hook_impl main_hook file_redirect_hook gsl_alloc_hook)
+  target_link_options(${HOOK_TARGET} PRIVATE -Wl,-z,max-page-size=16384)
+endforeach()
 target_compile_definitions(main PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR VMA_STATIC_VULKAN_FUNCTIONS=1
                            VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 target_include_directories(main PRIVATE ${S}/third_party/volk)

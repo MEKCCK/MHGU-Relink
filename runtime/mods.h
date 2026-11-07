@@ -3,12 +3,12 @@
 // layered over the game's own files at start, nothing is changed on disk. A mod folder may hold:
 //   romfs/   loose files layered over the game's RomFS (same paths as in the game's romfs/ folder; a bare nativeNX/
 //            folder counts as romfs/nativeNX/)
-//   exefs/   IPSwitch patches (*.pchtxt) and IPS / IPS32 patches (<build id>.ips) for the game's code modules, and
+//   exefs/   IPSwitch patches (*.pchtxt) and IPS / IPS32 patches (<build id>.ips or .ips32) for the game's code modules, and
 //            code modules of the mod's own (subsdk0..subsdk9 NSOs, as Atmosphere and the emulators load them). The
 //            port runs the game's code compiled ahead of time (tools/gen.py), which never reads its instructions:
 //            every function a patch changes runs in the interpreter instead (from the patched code in memory, as a
 //            cheat's), and so does a subsdk's code (runtime/loader.c places it; mods_patch_code).
-// These folders are found up to three levels down, so a mod unpacked as Mod/Mod/romfs or with an emulator or
+// These folders are found up to eight levels down, so a mod unpacked as Mod/Mod/romfs or with an emulator or
 // Atmosphere layout (atmosphere/contents/0100770008DD8000/romfs) works as it is.
 // Mods load in name order; a file in a later mod wins. mods/load_order.txt (one folder name per line, '#'
 // comments) picks and orders them instead; a folder whose name starts with '_' is skipped. A list the Mods tab of the

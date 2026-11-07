@@ -28,7 +28,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 
 /**
  * Compartir el registro: con el juego cerrado por un error (GameActivity.crashReport), o desde Ajustes.
@@ -43,7 +42,7 @@ public class LogShareActivity extends Activity {
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
     private static final int MAX_LOG = 2 << 20;  // (the end of each log: a debug session's can be large)
 
-    private boolean es;
+    private boolean es, zh;
 
     private int dp(int v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
@@ -81,19 +80,23 @@ public class LogShareActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        es = "es".equals(Locale.getDefault().getLanguage());
+        int language = RecompLanguage.from(this);
+        es = language == 1;
+        zh = language == 2;
         boolean crash = getIntent().getBooleanExtra(EXTRA_CRASH, false);
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(24), dp(16), dp(24), dp(18));
         box.setBackground(plate(WINE));
-        box.addView(text(crash ? (es ? "El juego se cerró por un error" : "The game stopped because of an error")
-                               : (es ? "Compartir registro" : "Share log"), 19, GOLD, true));
+        box.addView(text(crash ? (zh ? "游戏因错误而停止" : es ? "El juego se cerró por un error" : "The game stopped because of an error")
+                               : (zh ? "分享日志" : es ? "Compartir registro" : "Share log"), 19, GOLD, true));
         LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                                                                       LinearLayout.LayoutParams.WRAP_CONTENT);
         gap.setMargins(0, dp(12), 0, 0);
-        box.addView(text(es ? "El registro explica qué pasó y en qué teléfono. Puedes enviarlo a quien te esté ayudando: "
+        box.addView(text(zh ? "日志包含错误情况和手机信息。点击分享后会打开应用列表，由你选择发送给谁。"
+                              + "日志不包含游戏存档；如果使用过局域网联机，可能包含你的局域网地址。"
+                            : es ? "El registro explica qué pasó y en qué teléfono. Puedes enviarlo a quien te esté ayudando: "
                               + "se abre la lista de apps y tú eliges a dónde va. No lleva tu partida, pero puede "
                               + "incluir la dirección de tu red local si jugaste en LAN."
                             : "The log says what happened and on which phone. You can send it to whoever is helping "
@@ -103,12 +106,12 @@ public class LogShareActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(18), 0, 0);
-        Button share = button(es ? "Compartir registro" : "Share log", true);
+        Button share = button(zh ? "分享日志" : es ? "Compartir registro" : "Share log", true);
         share.setOnClickListener(v -> share());
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(share, size);
-        Button close = button(es ? "Cerrar" : "Close", false);
+        Button close = button(zh ? "关闭" : es ? "Cerrar" : "Close", false);
         close.setOnClickListener(v -> finish());
         row.addView(close, new LinearLayout.LayoutParams(size));
         box.addView(row);
@@ -131,23 +134,24 @@ public class LogShareActivity extends Activity {
             out.write(device().getBytes(StandardCharsets.UTF_8));
             File home = getExternalFilesDir(null);
             if (home == null) home = getFilesDir();
-            append(out, new File(home, "log.txt"), "this session");
-            append(out, new File(home, "log_prev.txt"), "the session before");
+            append(out, new File(home, "log.txt"), zh ? "本次运行" : "this session");
+            append(out, new File(home, "log_prev.txt"), zh ? "上次运行" : "the session before");
         } catch (IOException e) {
             Log.e(TAG, "share log: " + e);
         }
         Uri uri = LogProvider.uri();
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "MHGU log");
+        String title = zh ? "MHGU 日志" : "MHGU log";
+        send.putExtra(Intent.EXTRA_SUBJECT, title);
         send.putExtra(Intent.EXTRA_STREAM, uri);
-        send.setClipData(ClipData.newRawUri("MHGU log", uri));
+        send.setClipData(ClipData.newRawUri(title, uri));
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivity(Intent.createChooser(send, es ? "Compartir registro" : "Share log"));
+        startActivity(Intent.createChooser(send, zh ? "分享日志" : es ? "Compartir registro" : "Share log"));
     }
 
-    private static void append(OutputStream out, File log, String title) throws IOException {
-        out.write(("\n===== " + title + " (" + log.getName() + ", " + log.length() + " bytes) =====\n").getBytes(StandardCharsets.UTF_8));
+    private void append(OutputStream out, File log, String title) throws IOException {
+        out.write(("\n===== " + title + " (" + log.getName() + ", " + log.length() + (zh ? " 字节) =====\n" : " bytes) =====\n")).getBytes(StandardCharsets.UTF_8));
         if (!log.exists()) return;
         try (FileInputStream in = new FileInputStream(log)) {
             if (log.length() > MAX_LOG) in.skip(log.length() - MAX_LOG);
@@ -159,21 +163,21 @@ public class LogShareActivity extends Activity {
 
     /** The phone, for whoever reads the log: nothing that names its owner. */
     private String device() {
-        StringBuilder s = new StringBuilder("MHGU log\n");
-        s.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(" (").append(Build.DEVICE).append(")\n");
+        StringBuilder s = new StringBuilder(zh ? "MHGU 日志\n" : "MHGU log\n");
+        s.append(zh ? "设备：" : "device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(" (").append(Build.DEVICE).append(")\n");
         s.append("Android ").append(Build.VERSION.RELEASE).append(", API ").append(Build.VERSION.SDK_INT).append('\n');
-        if (Build.VERSION.SDK_INT >= 31) s.append("chip: ").append(Build.SOC_MANUFACTURER).append(' ').append(Build.SOC_MODEL).append('\n');
-        s.append("hardware: ").append(Build.HARDWARE).append(", ").append(Build.BOARD).append('\n');
+        if (Build.VERSION.SDK_INT >= 31) s.append(zh ? "芯片：" : "chip: ").append(Build.SOC_MANUFACTURER).append(' ').append(Build.SOC_MODEL).append('\n');
+        s.append(zh ? "硬件：" : "hardware: ").append(Build.HARDWARE).append(", ").append(Build.BOARD).append('\n');
         ActivityManager.MemoryInfo mem = new ActivityManager.MemoryInfo();
         ((ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(mem);
-        s.append("memory: ").append(mem.totalMem >> 20).append(" MB\n");
+        s.append(zh ? "内存：" : "memory: ").append(mem.totalMem >> 20).append(" MB\n");
         try (BufferedReader r = new BufferedReader(new FileReader("/proc/cpuinfo"))) {  // (one of each: the core types)
             java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
             for (String line; (line = r.readLine()) != null; )
                 if (line.startsWith("Features") || line.startsWith("CPU part") || line.startsWith("CPU implementer")) seen.add(line.replaceAll("\\s+", " "));
             for (String line : seen) s.append(line).append('\n');
         } catch (IOException e) {
-            s.append("no /proc/cpuinfo\n");
+            s.append(zh ? "无法读取 /proc/cpuinfo\n" : "no /proc/cpuinfo\n");
         }
         return s.toString();
     }

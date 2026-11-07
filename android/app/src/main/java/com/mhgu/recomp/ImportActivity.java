@@ -1,6 +1,7 @@
 package com.mhgu.recomp;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Intent;
 import android.graphics.Color;
@@ -33,8 +34,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Ajustes -> Trucos / Mods: lo que el juego lee de las carpetas cheats/, mods/ y dlc/ de la app (Android/data, que en
@@ -56,7 +55,7 @@ public class ImportActivity extends Activity {
     private static final Pattern TITLE_ID = Pattern.compile("(?i)\\b(0100770008dd[9a-f][0-9a-f]{3})\\b");
 
     private int kind;
-    private boolean es, changed, busy;
+    private boolean es, zh, changed, busy;
     private TextView status;
     private LinearLayout list;
     private Button add, closeButton;
@@ -130,30 +129,41 @@ public class ImportActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        es = "es".equals(Locale.getDefault().getLanguage());
+        int language = RecompLanguage.from(this);
+        es = language == 1;
+        zh = language == 2;
         kind = getIntent().getIntExtra(KIND, CHEATS);
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(24), dp(14), dp(24), dp(16));
         box.setBackground(plate(WINE));
-        String[] titles = es ? new String[] {"TRUCOS", "MODS", "DLC"} : new String[] {"CHEATS", "MODS", "DLC"};
+        String[] titles = zh ? new String[] {"金手指", "模组", "DLC"}
+                : es ? new String[] {"TRUCOS", "MODS", "DLC"} : new String[] {"CHEATS", "MODS", "DLC"};
         TextView title = text(titles[kind], 20, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
-        String[] bodies = es ? new String[] {
+        String[] bodies = zh ? new String[] {
+            "Atmosphere 格式的作弊 .txt 文件，适用于 1.4.0 版本（构建 ID 为 FB08F1D20FD1204F）。添加后，可在“金手指”页面逐项启用。修改游戏代码的作弊也能使用，但对应部分运行速度会变慢。",
+            "支持含 romfs、exefs 或 nativeNX 的文件夹、ZIP、RAR，也可直接导入 .nro 插件、.ips、.ips32、.pchtxt 补丁。压缩包含多个版本时请选择一个。RAR 暂不支持加密或分卷包。导入后在“模组”页面排序和启用，重启后加载。模组和补丁须符合各自格式并匹配游戏版本；导入成功不代表内容一定兼容。",
+            "导入你自己的游戏 DLC：每个 DLC 文件夹中都应有一个 DLC.dlcp 文件。选择一个文件夹后，其中找到的 DLC 都会被复制。进入游戏主菜单并选择“下载内容”即可使用。此功能仍在实验阶段。"}
+            : es ? new String[] {
             "Archivos .txt de trucos en el formato de Atmosphere, para la versión 1.4.0 (su id de compilación es "
                 + "FB08F1D20FD1204F). Después se activan uno por uno en la página Trucos. Los que cambian el código del juego "
                 + "funcionan, pero esa parte del juego corre más lenta.",
-            "Una carpeta de mod con romfs o exefs adentro, o un .zip de esa carpeta. Después se ordenan y se activan en la "
-                + "página Mods. Los parches del código (exefs) funcionan, pero esa parte del juego corre más lenta.",
+            "Carpetas, ZIP o RAR con romfs, exefs o nativeNX; también plugins .nro y parches .ips, .ips32 o .pchtxt. "
+                + "Si hay varias versiones, elige una. Ordénalos y actívalos en Mods; se cargan al reiniciar. Cada mod y parche "
+                + "debe respetar su formato y ser compatible con la versión del juego; importarlo no garantiza que funcione. "
+                + "Por ahora no se admiten RAR cifrados ni divididos en volúmenes.",
             "Tus propios DLC del juego: la carpeta de cada uno tiene un archivo DLC.dlcp. Elige una carpeta y se copian "
                 + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental."}
             : new String[] {
             "Cheat .txt files in Atmosphere's format, for version 1.4.0 (its build id is FB08F1D20FD1204F). Then turn them on "
                 + "one by one on the Cheats page. Those that change the game's code work, but that part of the game runs slower.",
-            "A mod's folder with romfs or exefs in it, or a .zip of that folder. Then order and turn them on on the Mods page. "
-                + "Code patches (exefs) work, but that part of the game runs slower.",
+            "Folders, ZIPs or RARs containing romfs, exefs or nativeNX, plus .nro plugins and .ips, .ips32 or .pchtxt patches. "
+                + "Choose one variant if a package contains several. Order and enable them on the Mods page; they load on restart. "
+                + "Each mod and patch must follow its format and match the game version; importing it does not guarantee compatibility. "
+                + "Encrypted and multi-volume RARs are not supported yet.",
             "Your own DLC of the game: each one's folder holds a DLC.dlcp file. Choose a folder and every one in it is copied. "
                 + "Then, in the game: main menu, Download. It is experimental."};
         TextView body = text(bodies[kind], 14, CREAM, false);
@@ -161,7 +171,8 @@ public class ImportActivity extends Activity {
         body.setLineSpacing(dp(1), 1);
         box.addView(body);
         // (where they go, which is also where they can be put by hand)
-        TextView where = text((es ? "También puedes copiarlos tú a esta carpeta del teléfono: "
+        TextView where = text((zh ? "也可以手动将文件复制到手机的此文件夹： "
+                                  : es ? "También puedes copiarlos tú a esta carpeta del teléfono: "
                                   : "You can also copy them yourself into this folder on the phone: ") + target().getAbsolutePath(),
                 13, GOLD, false);
         where.setPadding(0, 0, 0, dp(10));
@@ -177,14 +188,15 @@ public class ImportActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(12), 0, 0);
-        String[] adds = es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
+        String[] adds = zh ? new String[] {"添加金手指", "添加模组", "添加 DLC"}
+                           : es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
                            : new String[] {"Add cheats", "Add a mod", "Add DLC"};
         add = button(adds[kind], true, BRONZE);
         add.setOnClickListener(v -> openBrowser(null));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(add, size);
-        closeButton = button(es ? "Cerrar" : "Close", false, BRONZE);
+        closeButton = button(zh ? "关闭" : es ? "Cerrar" : "Close", false, BRONZE);
         closeButton.setOnClickListener(v -> {
             if (busy) return;
             if (changed) restart();
@@ -217,7 +229,7 @@ public class ImportActivity extends Activity {
         File[] all = target().listFiles(f -> !f.getName().startsWith("_") && !f.getName().startsWith(".")
                 && (kind == CHEATS ? f.isFile() && f.getName().toLowerCase(Locale.ROOT).endsWith(".txt") : f.isDirectory()));
         if (all == null || all.length == 0) {
-            TextView none = text(es ? "(nada instalado todavía)" : "(nothing installed yet)", 13, CREAM, false);
+            TextView none = text(zh ? "（尚未安装）" : es ? "(nada instalado todavía)" : "(nothing installed yet)", 13, CREAM, false);
             none.setGravity(Gravity.CENTER);
             list.addView(none);
             return;
@@ -229,7 +241,7 @@ public class ImportActivity extends Activity {
             TextView name = text("◆  " + f.getName(), 14, CREAM, false);
             name.setSingleLine(true);
             row.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-            Button remove = button(es ? "Quitar" : "Remove", false, BRONZE);
+            Button remove = button(zh ? "移除" : es ? "Quitar" : "Remove", false, BRONZE);
             remove.setOnClickListener(v -> {
                 if (busy) return;
                 delete(f);
@@ -245,7 +257,7 @@ public class ImportActivity extends Activity {
 
     private void changed() {
         changed = true;
-        closeButton.setText(es ? "Reiniciar el juego" : "Restart the game");
+        closeButton.setText(zh ? "重启游戏" : es ? "Reiniciar el juego" : "Restart the game");
     }
 
     /** Back to the game through PhoenixActivity: these are read at the start. */
@@ -282,7 +294,7 @@ public class ImportActivity extends Activity {
 
     private boolean takes(File f) {
         String n = f.getName().toLowerCase(Locale.ROOT);
-        return kind == CHEATS ? n.endsWith(".txt") : kind == MOD ? n.endsWith(".zip") : n.equals("dlc.dlcp");
+        return kind == CHEATS ? n.endsWith(".txt") : kind == MOD ? ModFiles.accepts(n) : n.equals("dlc.dlcp");
     }
 
     private LinearLayout.LayoutParams rowParams() {
@@ -299,8 +311,9 @@ public class ImportActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(plate(PANEL));
         box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        String[] heads = es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE LA CARPETA DEL MOD O SU .ZIP", "ELIGE LA CARPETA DE TUS DLC"}
-                            : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE THE MOD'S FOLDER OR ITS .ZIP", "CHOOSE YOUR DLC'S FOLDER"};
+        String[] heads = zh ? new String[] {"选择金手指文件", "选择模组文件夹、ZIP、RAR、插件或补丁", "选择 DLC 文件夹"}
+                            : es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE CARPETA, ZIP, RAR, PLUGIN O PARCHE", "ELIGE LA CARPETA DE TUS DLC"}
+                            : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE A MOD FOLDER, ZIP, RAR, PLUGIN OR PATCH", "CHOOSE YOUR DLC'S FOLDER"};
         TextView title = text(heads[kind], 16, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
@@ -311,7 +324,8 @@ public class ImportActivity extends Activity {
         for (File r : roots) if (dir.getAbsolutePath().startsWith(r.getAbsolutePath())) root = r;
         for (int i = 0; i < roots.size(); i++) {
             File r = roots.get(i);
-            Button t = button(i == 0 ? (es ? "Memoria interna" : "Phone storage") : (es ? "Tarjeta SD" : "SD card"), r.equals(root), r.equals(root) ? LIT : BRONZE);
+            Button t = button(i == 0 ? (zh ? "手机存储" : es ? "Memoria interna" : "Phone storage")
+                    : (zh ? "SD 卡" : es ? "Tarjeta SD" : "SD card"), r.equals(root), r.equals(root) ? LIT : BRONZE);
             t.setOnClickListener(v -> openBrowser(r));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
             lp.setMargins(dp(4), dp(6), dp(4), dp(4));
@@ -326,7 +340,7 @@ public class ImportActivity extends Activity {
         items.setOrientation(LinearLayout.VERTICAL);
         final File here = dir;
         if (!dir.equals(root)) {
-            Button up = button("⬑  " + (es ? "Subir" : "Up"), false, BRONZE);
+            Button up = button("⬑  " + (zh ? "上级" : es ? "Subir" : "Up"), false, BRONZE);
             up.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             up.setOnClickListener(v -> openBrowser(here.getParentFile()));
             items.addView(up, rowParams());
@@ -348,7 +362,7 @@ public class ImportActivity extends Activity {
             }
         }
         if (kids == null || kids.length == 0) {
-            TextView none = text(es ? "(vacío)" : "(empty)", 13, CREAM, false);
+            TextView none = text(zh ? "（空）" : es ? "(vacío)" : "(empty)", 13, CREAM, false);
             none.setPadding(dp(6), dp(8), dp(6), dp(8));
             items.addView(none);
         }
@@ -359,13 +373,13 @@ public class ImportActivity extends Activity {
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(8), 0, 0);
         if (kind != CHEATS) {  // (a folder: the mod itself, or where the DLC are)
-            Button use = button(es ? "Usar esta carpeta" : "Use this folder", true, BRONZE);
+            Button use = button(zh ? "使用此文件夹" : es ? "Usar esta carpeta" : "Use this folder", true, BRONZE);
             use.setOnClickListener(v -> { browser.dismiss(); start(here); });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
             lp.setMargins(dp(5), 0, dp(5), 0);
             row.addView(use, lp);
         }
-        Button cancel = button(es ? "Cancelar" : "Cancel", false, BRONZE);
+        Button cancel = button(zh ? "取消" : es ? "Cancelar" : "Cancel", false, BRONZE);
         cancel.setOnClickListener(v -> browser.dismiss());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
         lp.setMargins(dp(5), 0, dp(5), 0);
@@ -389,34 +403,97 @@ public class ImportActivity extends Activity {
     private void start(File from) {
         busy = true;
         add.setEnabled(false);
-        say(es ? "Copiando…" : "Copying…", false);
+        copied = total = lastTick = 0;
+        say(zh ? "正在复制…" : es ? "Copiando…" : "Copying…", false);
+        if (kind == MOD) {
+            say(zh ? "正在检查模组…" : es ? "Revisando el mod…" : "Checking mod…", false);
+            new Thread(() -> {
+                try {
+                    List<String> roots = ModFiles.roots(from);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (roots.size() == 1) copy(from, roots.get(0));
+                        else {
+                            String[] names = roots.toArray(new String[0]);
+                            new AlertDialog.Builder(this)
+                                    .setTitle(zh ? "选择要导入的模组版本" : es ? "Elige una versión del mod" : "Choose one mod variant")
+                                    .setItems(names, (dialog, which) -> copy(from, roots.get(which)))
+                                    .setNegativeButton(zh ? "取消" : es ? "Cancelar" : "Cancel", (dialog, which) -> cancelImport())
+                                    .setOnCancelListener(dialog -> cancelImport())
+                                    .show();
+                        }
+                    });
+                } catch (Exception e) { runOnUiThread(() -> finished(null, e)); }
+            }).start();
+        } else copy(from, null);
+    }
+
+    private void cancelImport() {
+        busy = false;
+        add.setEnabled(true);
+        say(zh ? "已取消" : es ? "Cancelado" : "Cancelled", false);
+    }
+
+    private void copy(File from, String variant) {
         new Thread(() -> {
-            String done, error = null;
+            String done;
+            Exception error = null;
             try {
-                done = kind == CHEATS ? importCheats(from) : kind == MOD ? importMod(from) : importDlc(from);
+                done = kind == CHEATS ? importCheats(from) : kind == MOD
+                        ? ModFiles.install(from, variant, target(), this::copyStream) : importDlc(from);
             } catch (Exception e) {
                 Log.e(TAG, "import: " + e);
                 done = null;
-                error = e.getMessage();
+                error = e;
             }
-            final String ok = done, why = error;
-            runOnUiThread(() -> {
-                busy = false;
-                add.setEnabled(true);
-                if (ok != null) {
-                    changed();
-                    say((es ? "Listo: " : "Done: ") + ok + (es ? ". Se aplica al reiniciar el juego." : ". It applies when the game restarts."), false);
-                } else {
-                    say((es ? "No se pudo: " : "It couldn't be done: ") + why, true);
-                }
-                refresh();
-            });
+            final String ok = done;
+            final Exception why = error;
+            runOnUiThread(() -> finished(ok, why));
         }).start();
+    }
+
+    private void finished(String ok, Exception why) {
+        if (isFinishing() || isDestroyed()) return;
+        busy = false;
+        add.setEnabled(true);
+        if (ok != null) {
+            changed();
+            say((zh ? "已导入：" : es ? "Importado: " : "Imported: ") + ok
+                    + (zh ? "。重启游戏后加载。" : es ? ". Se carga al reiniciar el juego." : ". Loads when the game restarts."), false);
+        } else {
+            say((zh ? "操作失败：" : es ? "No se pudo: " : "Import failed: ") + importError(why), true);
+        }
+        refresh();
+    }
+
+    private String importError(Exception error) {
+        if (!(error instanceof ModFiles.Problem)) return error == null ? "" : error.getMessage();
+        switch (((ModFiles.Problem) error).reason) {
+            case NO_PAYLOAD: return zh ? "未找到 romfs、exefs 或 nativeNX 文件夹（最多 8 层）"
+                    : es ? "No se encontró romfs, exefs ni nativeNX (máximo 8 niveles)"
+                    : "No romfs, exefs or nativeNX folder found (up to 8 levels)";
+            case SEARCH_LIMIT: return zh ? "模组目录项目过多，请选择更具体的文件夹"
+                    : es ? "Demasiadas entradas; elige una carpeta más específica"
+                    : "Too many entries; choose a more specific folder";
+            case UNSAFE_PATH: return zh ? "模组包含越界路径或目录链接"
+                    : es ? "El mod contiene rutas fuera de la carpeta o enlaces"
+                    : "The mod contains paths outside its folder or folder links";
+            case SOURCE_TARGET: return zh ? "源文件夹与安装位置重叠，请从模组目录外导入"
+                    : es ? "Origen y destino se solapan; importa desde fuera de mods"
+                    : "Source and destination overlap; import from outside the mods folder";
+            case UNSUPPORTED_RAR: return zh ? "RAR 暂不支持加密、分卷、链接或特殊文件"
+                    : es ? "RAR cifrado, dividido, con enlaces o archivos especiales no admitido"
+                    : "Encrypted, multi-volume, linked or special-file RARs are not supported";
+            default: return zh ? "请选择模组文件夹、ZIP、RAR、NRO、IPS、IPS32 或 PCHTXT"
+                    : es ? "Elige carpeta, ZIP, RAR, NRO, IPS, IPS32 o PCHTXT"
+                    : "Choose a folder, ZIP, RAR, NRO, IPS, IPS32 or PCHTXT";
+        }
     }
 
     private void progress() {
         long c = copied, t = total;
-        runOnUiThread(() -> say((es ? "Copiando… " : "Copying… ") + (t > 0 ? (c * 100 / t) + " %" : (c >> 20) + " MB"), false));
+        runOnUiThread(() -> say((zh ? "正在复制… " : es ? "Copiando… " : "Copying… ")
+                + (t > 0 ? (c * 100 / t) + " %" : (c >> 20) + " MB"), false));
     }
 
     private void copyFile(File from, File to) throws IOException {
@@ -426,7 +503,8 @@ public class ImportActivity extends Activity {
             copyStream(in, out);
         }
         to.delete();
-        if (!tmp.renameTo(to)) throw new IOException("can't write " + to.getName());
+        if (!tmp.renameTo(to)) throw new IOException(zh ? "无法写入 " + to.getName()
+                : es ? "No se pudo escribir " + to.getName() : "can't write " + to.getName());
     }
 
     private long lastTick;
@@ -450,7 +528,8 @@ public class ImportActivity extends Activity {
 
     private void copyTree(File from, File to) throws IOException {
         if (from.isFile()) { copyFile(from, to); return; }
-        if (!to.isDirectory() && !to.mkdirs()) throw new IOException("can't make " + to.getName());
+        if (!to.isDirectory() && !to.mkdirs()) throw new IOException(zh ? "无法创建文件夹 " + to.getName()
+                : es ? "No se pudo crear " + to.getName() : "can't make " + to.getName());
         File[] kids = from.listFiles();
         if (kids != null) for (File k : kids) copyTree(k, new File(to, k.getName()));
     }
@@ -482,51 +561,6 @@ public class ImportActivity extends Activity {
         return name;
     }
 
-    private static boolean hasModParts(File d, int depth) {
-        if (depth > 3 || !d.isDirectory()) return false;
-        File[] kids = d.listFiles(File::isDirectory);
-        if (kids == null) return false;
-        for (File k : kids) {
-            String n = k.getName().toLowerCase(Locale.ROOT);
-            if (n.equals("romfs") || n.equals("exefs") || n.equals("nativenx") || hasModParts(k, depth + 1)) return true;
-        }
-        return false;
-    }
-
-    private String importMod(File from) throws IOException {
-        String base = from.getName();
-        if (from.isFile()) {  // a .zip: unpacked into mods/<its name>/
-            String name = safeName(base.replaceAll("(?i)\\.zip$", ""));
-            File to = new File(target(), name), tmp = new File(target(), ".new");
-            delete(tmp);
-            total = from.length();
-            String canon = tmp.getCanonicalPath() + File.separator;
-            try (ZipInputStream z = new ZipInputStream(new FileInputStream(from))) {
-                for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
-                    File out = new File(tmp, e.getName());
-                    if (!out.getCanonicalPath().startsWith(canon)) continue;  // (nothing outside the folder)
-                    if (e.isDirectory()) { out.mkdirs(); continue; }
-                    out.getParentFile().mkdirs();
-                    try (OutputStream o = new FileOutputStream(out)) { copyStream(z, o); }
-                }
-            }
-            if (!hasModParts(tmp, 0)) { delete(tmp); throw new IOException(es ? "el .zip no trae romfs ni exefs" : "the .zip has no romfs or exefs"); }
-            delete(to);
-            if (!tmp.renameTo(to)) throw new IOException("can't write " + name);
-            return name;
-        }
-        if (!hasModParts(from, 0))
-            throw new IOException(es ? "esa carpeta no tiene romfs ni exefs adentro" : "that folder has no romfs or exefs in it");
-        String name = safeName(base);
-        File to = new File(target(), name), tmp = new File(target(), ".new");
-        delete(tmp);
-        total = sizeOf(from);
-        copyTree(from, tmp);
-        delete(to);
-        if (!tmp.renameTo(to)) throw new IOException("can't write " + name);
-        return name;
-    }
-
     private static void findDlc(File d, int depth, List<File> out) {
         if (depth > 6 || out.size() >= 256) return;
         File[] kids = d.listFiles();
@@ -541,7 +575,8 @@ public class ImportActivity extends Activity {
         File start = from.isFile() ? from.getParentFile() : from;
         List<File> found = new ArrayList<>();
         findDlc(start, 0, found);
-        if (found.isEmpty()) throw new IOException(es ? "no hay ningún DLC.dlcp en esa carpeta" : "there is no DLC.dlcp in that folder");
+        if (found.isEmpty()) throw new IOException(zh ? "该文件夹中没有 DLC.dlcp 文件"
+                : es ? "no hay ningún DLC.dlcp en esa carpeta" : "there is no DLC.dlcp in that folder");
         total = 0;
         for (File d : found) total += sizeOf(d);
         int n = 0, next = 1;
@@ -562,6 +597,6 @@ public class ImportActivity extends Activity {
             copyTree(d, to);
             n++;
         }
-        return n + (es ? (n == 1 ? " DLC copiado" : " DLC copiados") : " DLC copied");
+        return zh ? n + " 个 DLC 已复制" : n + (es ? (n == 1 ? " DLC copiado" : " DLC copiados") : " DLC copied");
     }
 }

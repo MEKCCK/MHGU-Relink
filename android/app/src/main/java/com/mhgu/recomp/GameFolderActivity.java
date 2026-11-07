@@ -33,7 +33,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * La entrada de la app: si los archivos del juego están a mano arranca el juego; si no, muestra qué hace falta y deja
@@ -50,9 +49,14 @@ public class GameFolderActivity extends Activity {
     private static final int MIN_FILES = 35000;  // (1.4.0 has 35531; the margin as in runtime/main.c)
     private static final byte[] BUILD_ID = {(byte) 0xfb, 0x08, (byte) 0xf1, (byte) 0xd2, 0x0f, (byte) 0xd1, 0x20, 0x4f};
 
-    private boolean es, change, waitingAccess;
+    private int language;
+    private boolean change, waitingAccess;
     private TextView status;
     private Button pick;
+
+    private String tr(String en, String es, String zh) {
+        return language == 2 ? zh : language == 1 ? es : en;
+    }
 
     private File home() {
         File f = getExternalFilesDir(null);
@@ -97,7 +101,7 @@ public class GameFolderActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         declareGame();
-        es = "es".equals(Locale.getDefault().getLanguage());
+        language = RecompLanguage.from(this);
         change = getIntent().getBooleanExtra(EXTRA_CHANGE, false);
         boolean rejected = rejectedFile().exists();
         File chosen = saved(), own = new File(home(), "data");
@@ -112,8 +116,12 @@ public class GameFolderActivity extends Activity {
         } else if (chosen != null && !change) {
             status.setTextColor(ALERT);
             status.setText(hasAccess()
-                    ? (es ? "Ya no se encuentra la carpeta " + chosen + ". Elige dónde está ahora." : "The folder " + chosen + " is gone. Choose where it is now.")
-                    : (es ? "El juego perdió el permiso para leer la carpeta. Vuelve a darlo." : "The game lost its permission to read the folder. Please give it again."));
+                    ? tr("The folder " + chosen + " is gone. Choose where it is now.",
+                         "Ya no se encuentra la carpeta " + chosen + ". Elige dónde está ahora.",
+                         "找不到文件夹 " + chosen + "。请选择它现在的位置。")
+                    : tr("The game lost its permission to read the folder. Please give it again.",
+                         "El juego perdió el permiso para leer la carpeta. Vuelve a darlo.",
+                         "游戏已失去读取文件夹的权限，请重新授权。"));
         }
     }
 
@@ -170,22 +178,20 @@ public class GameFolderActivity extends Activity {
     /** The folder as it must look: folders in gold, what goes in them in cream. */
     private CharSequence tree() {
         String[] lines = {
-            es ? "Tu carpeta" : "Your folder",
+            tr("Your folder", "Tu carpeta", "游戏文件夹"),
             "├─ exefs",
             "│    main",
             "│    main.npdm",
             "│    rtld, sdk, subsdk0",
-            "├─ romfs",
-            "│    nativeNX",
-            es ? "│    ... 35.500 archivos" : "│    ... 35,500 files",
-            "├─ libmhgugame.so",
-            "└─ libmhgugame.id",
+            "└─ romfs",
+            "     nativeNX",
+            tr("     ... 35,500 files", "     ... 35.500 archivos", "     ... 约 35,500 个文件"),
         };
         SpannableStringBuilder b = new SpannableStringBuilder();
         for (int i = 0; i < lines.length; i++) {
             int at = b.length();
             b.append(lines[i]).append(i + 1 < lines.length ? "\n" : "");
-            boolean folder = i == 0 || i == 1 || i == 5 || i == 8;
+            boolean folder = i == 0 || i == 1 || i == 5;
             b.setSpan(new ForegroundColorSpan(folder ? GOLD : CREAM), at, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         return b;
@@ -198,11 +204,12 @@ public class GameFolderActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(pad * 2, pad, pad * 2, pad);
 
-        TextView title = text(es ? "ARCHIVOS DEL JUEGO" : "GAME FILES", 20, GOLD, true);
+        TextView title = text(tr("GAME FILES", "ARCHIVOS DEL JUEGO", "游戏文件"), 20, GOLD, true);
         title.setGravity(Gravity.CENTER);
         page.addView(title);
-        TextView intro = text(es ? "Elige la carpeta donde tienes tu copia del juego. Se lee desde ahí: no se copia nada."
-                                 : "Choose the folder that holds your copy of the game. It is read from there: nothing is copied.",
+        TextView intro = text(tr("Choose the folder that holds your copy of the game. It is read from there: nothing is copied.",
+                                 "Elige la carpeta donde tienes tu copia del juego. Se lee desde ahí: no se copia nada.",
+                                 "请选择存放游戏副本的文件夹，游戏将直接读取其中的文件，无需复制。"),
                 14, CREAM, false);
         intro.setGravity(Gravity.CENTER);
         intro.setPadding(0, dp(4), 0, dp(10));
@@ -215,7 +222,7 @@ public class GameFolderActivity extends Activity {
         left.setOrientation(LinearLayout.VERTICAL);
         left.setBackground(plate(PANEL, 6));
         left.setPadding(pad, dp(10), pad, dp(10));
-        left.addView(text(es ? "LA CARPETA DEBE TENER ESTO" : "THE FOLDER MUST LOOK LIKE THIS", 13, GOLD, true));
+        left.addView(text(tr("THE FOLDER MUST LOOK LIKE THIS", "LA CARPETA DEBE TENER ESTO", "文件夹应包含以下内容"), 13, GOLD, true));
         TextView tree = new TextView(this);
         tree.setText(tree());
         tree.setTypeface(Typeface.MONOSPACE);
@@ -227,16 +234,20 @@ public class GameFolderActivity extends Activity {
         LinearLayout right = new LinearLayout(this);
         right.setOrientation(LinearLayout.VERTICAL);
         right.setPadding(dp(18), 0, 0, 0);
-        right.addView(text(es ? "QUÉ TIENE QUE SER CADA UNA" : "WHAT EACH ONE MUST BE", 13, GOLD, true));
-        TextView notes = text(es
-                ? "• exefs: el de la actualización 1.4.0.\n"
-                  + "• romfs: el del juego base, con la actualización 1.4.0 ya aplicada encima.\n"
-                  + "• libmhgugame.so: se crea una sola vez en una PC con la herramienta de la guía.\n"
-                  + "• Todo junto en la misma carpeta, unos 12 GB. Elige esa carpeta."
-                : "• exefs: the one from the 1.4.0 update.\n"
+        right.addView(text(tr("WHAT EACH ONE MUST BE", "QUÉ TIENE QUE SER CADA UNA", "文件要求"), 13, GOLD, true));
+        TextView notes = text(tr(
+                  "• exefs: the one from the 1.4.0 update.\n"
                   + "• romfs: the base game's, with the 1.4.0 update already applied over it.\n"
-                  + "• libmhgugame.so: made once on a PC with the guide's tool.\n"
-                  + "• All in the same folder, about 12 GB. Choose that folder.", 14, CREAM, false);
+                  + "• If this app does not include game code, also provide matching libmhgugame.so and libmhgugame.id files.\n"
+                  + "• Keep exefs and romfs in the same folder, about 12 GB. Choose that folder.",
+                  "• exefs: el de la actualización 1.4.0.\n"
+                  + "• romfs: el del juego base, con la actualización 1.4.0 ya aplicada encima.\n"
+                  + "• Si la app no incluye el código del juego, proporciona también libmhgugame.so y libmhgugame.id compatibles.\n"
+                  + "• exefs y romfs juntos en la misma carpeta, unos 12 GB. Elige esa carpeta.",
+                  "• exefs：使用 1.4.0 更新中的文件。\n"
+                  + "• romfs：使用已合并 1.4.0 更新的游戏本体文件。\n"
+                  + "• 若应用未内置游戏代码，还需提供匹配的 libmhgugame.so 和 libmhgugame.id 文件。\n"
+                  + "• 将 exefs 和 romfs 放在同一文件夹内，约 12 GB，然后选择该文件夹。"), 14, CREAM, false);
         notes.setPadding(0, dp(6), 0, 0);
         notes.setLineSpacing(dp(2), 1);
         right.addView(notes);
@@ -263,7 +274,7 @@ public class GameFolderActivity extends Activity {
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(pick, size);
-        Button leave = button(change ? (es ? "Cancelar" : "Cancel") : (es ? "Salir" : "Exit"), false);
+        Button leave = button(change ? tr("Cancel", "Cancelar", "取消") : tr("Exit", "Salir", "退出"), false);
         leave.setOnClickListener(v -> finish());
         LinearLayout.LayoutParams size2 = new LinearLayout.LayoutParams(dp(120), dp(46));
         size2.setMargins(dp(8), 0, dp(8), 0);
@@ -281,8 +292,8 @@ public class GameFolderActivity extends Activity {
     }
 
     private void refreshButton() {
-        if (pick != null) pick.setText(hasAccess() ? (es ? "Elegir carpeta" : "Choose folder")
-                                                   : (es ? "Dar permiso y elegir carpeta" : "Give permission and choose folder"));
+        if (pick != null) pick.setText(hasAccess() ? tr("Choose folder", "Elegir carpeta", "选择文件夹")
+                                                   : tr("Give permission and choose folder", "Dar permiso y elegir carpeta", "授权并选择文件夹"));
     }
 
     // ---- reading any folder: the plain file paths the game uses need this permission
@@ -299,8 +310,9 @@ public class GameFolderActivity extends Activity {
         }
         waitingAccess = true;
         status.setTextColor(GOLD);
-        status.setText(es ? "Activa el acceso a todos los archivos y vuelve. El juego solo lee esa carpeta: no cambia nada."
-                          : "Turn on access to all files and come back. The game only reads that folder: it changes nothing.");
+        status.setText(tr("Turn on access to all files and come back. The game only reads that folder: it changes nothing.",
+                          "Activa el acceso a todos los archivos y vuelve. El juego solo lee esa carpeta: no cambia nada.",
+                          "请开启“所有文件访问权限”后返回。游戏只读取该文件夹，不会修改其中的内容。"));
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getPackageName())));
         } catch (ActivityNotFoundException e) {
@@ -335,7 +347,7 @@ public class GameFolderActivity extends Activity {
             startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK);
         } catch (ActivityNotFoundException e) {
             status.setTextColor(ALERT);
-            status.setText(es ? "Este dispositivo no tiene selector de carpetas." : "This device has no folder picker.");
+            status.setText(tr("This device has no folder picker.", "Este dispositivo no tiene selector de carpetas.", "此设备没有文件夹选择器。"));
         }
     }
 
@@ -372,7 +384,7 @@ public class GameFolderActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(plate(PANEL, 8));
         box.setPadding(pad, pad, pad, pad);
-        TextView title = text(es ? "ELIGE LA CARPETA DEL JUEGO" : "CHOOSE THE GAME'S FOLDER", 17, GOLD, true);
+        TextView title = text(tr("CHOOSE THE GAME'S FOLDER", "ELIGE LA CARPETA DEL JUEGO", "选择游戏文件夹"), 17, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
         // the roots, as tabs
@@ -381,8 +393,8 @@ public class GameFolderActivity extends Activity {
         for (int i = 0; i < roots.size(); i++) {
             File r = roots.get(i);
             boolean on = at != null ? at.getAbsolutePath().startsWith(r.getAbsolutePath()) : i == 0;
-            Button t = button(i == 0 ? (es ? "Memoria interna" : "Phone storage")
-                                     : (es ? "Tarjeta SD" : "SD card") + (roots.size() > 2 ? " " + i : ""), on);
+            Button t = button(i == 0 ? tr("Phone storage", "Memoria interna", "内部存储")
+                                     : tr("SD card", "Tarjeta SD", "SD 卡") + (roots.size() > 2 ? " " + i : ""), on);
             t.setOnClickListener(v -> openBrowser(r));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
             lp.setMargins(dp(4), dp(6), dp(4), dp(4));
@@ -397,8 +409,8 @@ public class GameFolderActivity extends Activity {
         where.setPadding(dp(4), dp(2), dp(4), dp(4));
         box.addView(where);
         boolean game = holdsGame(dir);
-        TextView hint = text(game ? (es ? "✓ Aquí está el juego: exefs y romfs." : "✓ The game is here: exefs and romfs.")
-                                  : (es ? "Entra a la carpeta que tiene exefs y romfs." : "Go into the folder that holds exefs and romfs."),
+        TextView hint = text(game ? tr("✓ The game is here: exefs and romfs.", "✓ Aquí está el juego: exefs y romfs.", "✓ 已找到游戏文件：exefs 和 romfs。")
+                                  : tr("Go into the folder that holds exefs and romfs.", "Entra a la carpeta que tiene exefs y romfs.", "请进入包含 exefs 和 romfs 的文件夹。"),
                 13, game ? GOLD : CREAM, game);
         hint.setPadding(dp(4), 0, dp(4), dp(6));
         box.addView(hint);
@@ -407,7 +419,7 @@ public class GameFolderActivity extends Activity {
         list.setOrientation(LinearLayout.VERTICAL);
         final File here = dir, top = root;
         if (!dir.equals(root)) {
-            Button up = button("⬑  " + (es ? "Subir" : "Up"), false);
+            Button up = button("⬑  " + tr("Up", "Subir", "上一级"), false);
             up.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             up.setOnClickListener(v -> openBrowser(here.getParentFile()));
             list.addView(up, rowParams());
@@ -424,7 +436,7 @@ public class GameFolderActivity extends Activity {
             }
         }
         if (kids == null || kids.length == 0) {
-            TextView none = text(es ? "(no hay carpetas)" : "(no folders)", 13, CREAM, false);
+            TextView none = text(tr("(no folders)", "(no hay carpetas)", "（没有文件夹）"), 13, CREAM, false);
             none.setPadding(dp(6), dp(8), dp(6), dp(8));
             list.addView(none);
         }
@@ -435,11 +447,11 @@ public class GameFolderActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(8), 0, 0);
-        Button use = button(es ? "Usar esta carpeta" : "Use this folder", true);
+        Button use = button(tr("Use this folder", "Usar esta carpeta", "使用此文件夹"), true);
         use.setOnClickListener(v -> { browser.dismiss(); verify(here); });
-        Button other = button(es ? "Selector de Android" : "Android's picker", false);
+        Button other = button(tr("Android's picker", "Selector de Android", "系统选择器"), false);
         other.setOnClickListener(v -> { browser.dismiss(); systemPicker(); });
-        Button cancel = button(es ? "Cancelar" : "Cancel", false);
+        Button cancel = button(tr("Cancel", "Cancelar", "取消"), false);
         cancel.setOnClickListener(v -> browser.dismiss());
         for (Button b : new Button[] {use, other, cancel}) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
@@ -473,8 +485,9 @@ public class GameFolderActivity extends Activity {
         File dir = pathOf(data.getData());
         if (dir == null) {
             status.setTextColor(ALERT);
-            status.setText(es ? "No se puede usar esa ubicación. Busca la carpeta en la memoria del teléfono o en la tarjeta SD."
-                              : "That location can't be used. Find the folder in the phone's storage or on the SD card.");
+            status.setText(tr("That location can't be used. Find the folder in the phone's storage or on the SD card.",
+                              "No se puede usar esa ubicación. Busca la carpeta en la memoria del teléfono o en la tarjeta SD.",
+                              "无法使用此位置。请从内部存储或 SD 卡中选择文件夹。"));
             return;
         }
         verify(dir);
@@ -502,7 +515,7 @@ public class GameFolderActivity extends Activity {
     private void verify(File picked) {
         pick.setEnabled(false);
         status.setTextColor(GOLD);
-        status.setText(es ? "Comprobando los archivos..." : "Checking the files...");
+        status.setText(tr("Checking the files...", "Comprobando los archivos...", "正在检查游戏文件……"));
         new Thread(() -> {
             File[] ways = {picked, new File(picked, "data"), picked.getParentFile()};  // (or one level off)
             // (the game code changed folders or versions: what is kept goes with the new choice)
@@ -515,7 +528,7 @@ public class GameFolderActivity extends Activity {
                 try {
                     keepLib(found);
                 } catch (Exception e) {
-                    wrong = String.valueOf(e);
+                    wrong = tr("Could not prepare the game code.", "No se pudo preparar el código del juego.", "无法准备游戏代码。") + "\n" + e;
                 }
             }
             final String problem = wrong;
@@ -534,36 +547,42 @@ public class GameFolderActivity extends Activity {
     private String problem(File dir) {
         File exefs = new File(dir, "exefs"), romfs = new File(dir, "romfs"), main = new File(exefs, "main");
         if (!exefs.isDirectory() && !romfs.isDirectory())
-            return es ? "En " + dir.getName() + " no están exefs ni romfs. Elige la carpeta que las contiene."
-                      : "exefs and romfs are not in " + dir.getName() + ". Choose the folder that holds them.";
-        if (!exefs.isDirectory()) return es ? "Falta la carpeta exefs, al lado de romfs." : "The exefs folder is missing, beside romfs.";
-        if (!romfs.isDirectory()) return es ? "Falta la carpeta romfs, al lado de exefs." : "The romfs folder is missing, beside exefs.";
-        if (!main.canRead()) return es ? "En exefs falta el archivo main." : "The file main is missing from exefs.";
+            return tr("exefs and romfs are not in " + dir.getName() + ". Choose the folder that holds them.",
+                      "En " + dir.getName() + " no están exefs ni romfs. Elige la carpeta que las contiene.",
+                      dir.getName() + " 中没有 exefs 和 romfs，请选择包含这两个目录的文件夹。");
+        if (!exefs.isDirectory()) return tr("The exefs folder is missing, beside romfs.", "Falta la carpeta exefs, al lado de romfs.", "缺少 exefs 文件夹，请将其与 romfs 放在同一目录。");
+        if (!romfs.isDirectory()) return tr("The romfs folder is missing, beside exefs.", "Falta la carpeta romfs, al lado de exefs.", "缺少 romfs 文件夹，请将其与 exefs 放在同一目录。");
+        if (!main.canRead()) return tr("The file main is missing from exefs.", "En exefs falta el archivo main.", "exefs 中缺少 main 文件，或无法读取该文件。");
         byte[] head = new byte[0x48];
         try (FileInputStream in = new FileInputStream(main)) {
             if (in.read(head) != head.length) head = new byte[0x48];
         } catch (Exception e) {
-            return es ? "No se pudo leer exefs/main." : "exefs/main could not be read.";
+            return tr("exefs/main could not be read.", "No se pudo leer exefs/main.", "无法读取 exefs/main。");
         }
         boolean nso = head[0] == 'N' && head[1] == 'S' && head[2] == 'O' && head[3] == '0';
         if (!nso || !Arrays.equals(Arrays.copyOfRange(head, 0x40, 0x48), BUILD_ID))
-            return es ? "Este exefs no es de la versión 1.4.0. Usa el de la actualización 1.4.0."
-                      : "This exefs is not version 1.4.0. Use the one from the 1.4.0 update.";
+            return tr("This exefs is not version 1.4.0. Use the one from the 1.4.0 update.",
+                      "Este exefs no es de la versión 1.4.0. Usa el de la actualización 1.4.0.",
+                      "此 exefs 不是 1.4.0 版本，请使用 1.4.0 更新中的文件。");
         int files = countFiles(romfs);
         if (files < MIN_FILES)
-            return es ? "romfs está incompleto: tiene " + files + " archivos y deberían ser 35.531. Usa el juego base con la actualización 1.4.0 ya aplicada."
-                      : "romfs is incomplete: it has " + files + " files where there should be 35,531. Use the base game with the 1.4.0 update applied.";
+            return tr("romfs is incomplete: it has " + files + " files where there should be 35,531. Use the base game with the 1.4.0 update applied.",
+                      "romfs está incompleto: tiene " + files + " archivos y deberían ser 35.531. Usa el juego base con la actualización 1.4.0 ya aplicada.",
+                      "romfs 不完整：当前有 " + files + " 个文件，完整版本应有 35,531 个。请使用已合并 1.4.0 更新的游戏本体文件。");
         boolean bundled = new File(getApplicationInfo().nativeLibraryDir, "libmhgugame.so").exists();
         File lib = new File(dir, "libmhgugame.so");
         if (!lib.canRead() && !bundled)
-            return es ? "Falta libmhgugame.so en esa carpeta. Créalo en una PC con la herramienta de la guía."
-                      : "libmhgugame.so is missing from that folder. Make it on a PC with the guide's tool.";
+            return tr("Game code is missing from this installation. Reinstall the complete app package.",
+                      "Falta el código del juego en esta instalación. Reinstala el paquete completo de la app.",
+                      "当前安装缺少游戏代码，请重新安装完整安装包。");
         if (!bundled && !wantedId().equals(idBeside(dir)))
-            return es ? "Este libmhgugame.so es de otra versión. Créalo de nuevo con la herramienta de esta versión."
-                      : "This libmhgugame.so is from another version. Make it again with this version's tool.";
+            return tr("The game code does not match this app version. Reinstall the complete app package.",
+                      "El código del juego no corresponde a esta versión de la app. Reinstala el paquete completo.",
+                      "游戏代码与当前版本不匹配，请重新安装完整安装包。");
         if (!new File(romfs, "nativeNX/system/app_shader/AppShaderPackage.mfx").exists())
-            return es ? "En romfs falta nativeNX/system/app_shader/AppShaderPackage.mfx. Usa el juego base con la actualización 1.4.0 ya aplicada."
-                      : "nativeNX/system/app_shader/AppShaderPackage.mfx is missing from romfs. Use the base game with the 1.4.0 update applied.";
+            return tr("nativeNX/system/app_shader/AppShaderPackage.mfx is missing from romfs. Use the base game with the 1.4.0 update applied.",
+                      "En romfs falta nativeNX/system/app_shader/AppShaderPackage.mfx. Usa el juego base con la actualización 1.4.0 ya aplicada.",
+                      "romfs 中缺少 nativeNX/system/app_shader/AppShaderPackage.mfx。请使用已合并 1.4.0 更新的游戏本体文件。");
         return null;
     }
 
@@ -579,6 +598,7 @@ public class GameFolderActivity extends Activity {
 
     /** The game code into the app's private folder, read-only: Android runs nothing from shared storage. */
     private void keepLib(File dir) throws java.io.IOException {
+        if (new File(getApplicationInfo().nativeLibraryDir, "libmhgugame.so").exists()) return;
         File from = new File(dir, "libmhgugame.so");
         if (!from.canRead()) return;  // (a build with it in the APK)
         File to = ownLib(), tmp = new File(to.getParentFile(), "libmhgugame.tmp");
@@ -614,13 +634,13 @@ public class GameFolderActivity extends Activity {
             out.write(dir.getAbsolutePath().getBytes("UTF-8"));
         } catch (Exception e) {
             status.setTextColor(ALERT);
-            status.setText(String.valueOf(e));
+            status.setText(tr("Could not save the selected folder.", "No se pudo guardar la carpeta elegida.", "无法保存所选文件夹。") + "\n" + e);
             return;
         }
         rejectedFile().delete();
         if (change) {
             status.setTextColor(GOLD);
-            status.setText(es ? "Listo: se usará la próxima vez que abras el juego." : "Done: it will be used the next time you open the game.");
+            status.setText(tr("Done: it will be used the next time you open the game.", "Listo: se usará la próxima vez que abras el juego.", "已保存，下次启动游戏时生效。"));
             pick.setEnabled(false);
             return;
         }

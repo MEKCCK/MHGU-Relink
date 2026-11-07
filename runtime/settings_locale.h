@@ -1,6 +1,7 @@
 // Host UI only; INI keys and game content remain language-independent.
 #pragma once
 #include <string.h>
+#include "settings_locale_zh.h"
 
 static inline const char *settings_text(int language, const char *english) {
     if (language != 1 && language != 2) return english;
@@ -452,6 +453,47 @@ static inline const char *settings_text(int language, const char *english) {
         {"Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; cheat files added or edited in the folder show up the next time this menu opens.", "Los trucos se activan y desactivan al pulsar Guardar, sin reiniciar. Desactivar uno deshace sus cambios en el código del juego; los valores que ya cambió (dinero, objetos) se quedan. Los trucos añadidos con Añadir un truco funcionan al momento; los archivos de trucos añadidos o editados en la carpeta aparecen la próxima vez que abras este menú.", "按“保存”即启用/停用金手指，无需重启。停用会撤销它对游戏代码的修改；已经改过的数值（金钱、道具）保留。用“添加金手指”加入的立即生效；在文件夹中新增或修改的金手指文件会在下次打开此菜单时出现。"},
         {"Invalid save folder (one line, no ';' or '#').", "Carpeta de guardado no válida (una línea, sin ';' ni '#').", "存档文件夹无效（只能一行，不能包含 ';' 或 '#'）。"},
         {"Invalid game files folder (one line, no ';' or '#').", "Carpeta de archivos del juego no válida (una línea, sin ';' ni '#').", "游戏文件文件夹无效（只能一行，不能包含 ';' 或 '#'）。"},
+        {"Bow", "Bow", "弓"},
+        {"Bow and bowgun controls", "Bow and bowgun controls", "弓与弩操作"},
+        {"Charge Blade", "Charge Blade", "盾斧"},
+        {"Choose among 15 weapon-specific touch layouts with the on-screen switch. Outside a quest, it cycles the four original layouts.", "Choose among 15 weapon-specific touch layouts with the on-screen switch. Outside a quest, it cycles the four original layouts.", "任务中可用屏幕按键切换 15 种武器触控布局；任务外切换原有四种布局。"},
+        {"Close MHGU Recomp?", "¿Cerrar MHGU Recomp?", "关闭 MHGU Recomp？"},
+        {"Dual Blades", "Dual Blades", "双剑"},
+        {"English", "English", "英语"},
+        {"Floating movement stick", "Floating movement stick", "浮动左摇杆"},
+        {"For weak phones: turns off bloom and depth of field, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change both.", "For weak phones: turns off bloom and depth of field, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change both.", "适用于性能较弱的手机：关闭泛光和景深效果，使用较轻量的纹理，并在较小的 3D 画面上保持 HUD 清晰。此模式还会调整 3D 分辨率和帧率，之后仍可自行更改。"},
+        {"Great Sword", "Great Sword", "大剑"},
+        {"Gunlance", "Gunlance", "铳枪"},
+        {"Hammer", "Hammer", "大锤"},
+        {"Heavy Bowgun", "Heavy Bowgun", "重弩"},
+        {"Hunting Horn", "Hunting Horn", "狩猎笛"},
+        {"Insect Glaive", "Insect Glaive", "操虫棍"},
+        {"Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#').", "Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#').", "跨平台联机模式、端口、服务器、房间名或密码无效（不能包含换行、; 或 #）。"},
+        {"Lance", "Lance", "长枪"},
+        {"Light Bowgun", "Light Bowgun", "轻弩"},
+        {"Long Sword", "Long Sword", "太刀"},
+        {"Melee layout 1", "Melee layout 1", "近战布局 1"},
+        {"Melee layout 2", "Melee layout 2", "近战布局 2"},
+        {"Melee layout 3", "Melee layout 3", "近战布局 3"},
+        {"Next layout", "Next layout", "下一种布局"},
+        {"Next weapon", "Next weapon", "下一种武器"},
+        {"On: the movement stick appears under a touch on the left side. Off: it stays at its saved place.", "On: the movement stick appears under a touch on the left side. Off: it stays at its saved place.", "开启后，左侧触摸处会出现摇杆；关闭时，摇杆保持在保存的位置。"},
+        {"Prowler", "Prowler", "猎猫"},
+        {"Ranged layout", "Ranged layout", "远程布局"},
+        {"RoomHost", "RoomHost", "在本机运行 suyu 兼容房间，支持保留多人联机功能的 suyu、yuzu、Eden、Citron 客户端。其他玩家连接本机地址和多人房间端口。互联网连接需端口转发或同一 VPN 网络。默认：关"},
+        {"RoomName", "RoomName", "本机建立的房间名称，以及加入房间时使用的名称。默认：MHGU"},
+        {"RoomPassword", "RoomPassword", "多人房间密码。留空允许无密码加入。所有玩家使用相同密码。"},
+        {"RoomPort", "RoomPort", "本机多人房间服务器使用的端口。范围：1 到 65535。默认：24872"},
+        {"RoomServer", "RoomServer", "suyu 兼容的多人房间地址，格式为 主机[:端口]，默认端口 24872。留空表示不连接远程房间；也可开启「运行多人房间服务器」在本机建立房间。"},
+        {"RyuHost", "RyuHost", "在本机运行 RyuLdn 服务器，供 Ryujinx 玩家连接。其他玩家将 LDN 服务器设为本机地址和 RyuLdn 端口。互联网连接需端口转发或同一 VPN 网络。默认：关"},
+        {"RyuPassword", "RyuPassword", "RyuLdn 集会所配对口令。留空为公开。私密组使用 Ryujinx- 加 8 位十六进制数字，每个客户端填写相同口令。"},
+        {"RyuPort", "RyuPort", "本机 RyuLdn 服务器使用的 TCP 端口。范围：1 到 65535。默认：30456"},
+        {"RyuServers", "RyuServers", "RyuLdn 服务器地址，格式为 主机[:端口]，多个地址用逗号分隔，默认端口 30456。仅运行本机服务器时可留空。请使用允许当前客户端连接的服务器。"},
+        {"Simplified Chinese", "Simplified Chinese", "简体中文"},
+        {"Switch Axe", "Switch Axe", "斩斧"},
+        {"Sword & Shield", "Sword & Shield", "片手剑"},
+        {"Weapon layout", "Weapon layout", "武器布局"},
+        {"Touch layout", "Diseño táctil", "触控布局"},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) {

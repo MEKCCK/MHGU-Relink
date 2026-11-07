@@ -755,6 +755,8 @@ fn accept_loop(listener: TcpListener, running: Arc<AtomicBool>, state: Arc<Mutex
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, addr)) => {
+                // Windows accepted sockets inherit the listener's nonblocking mode.
+                let _ = stream.set_nonblocking(false);
                 let _ = stream.set_nodelay(true);
                 let serial = NEXT_SERIAL.fetch_add(1, Ordering::SeqCst);
                 let id = {
@@ -788,16 +790,19 @@ fn reader_loop(mut stream: TcpStream, serial: u64, state: Arc<Mutex<State>>) {
     stream.set_nodelay(true).ok();
     let mut header = [0u8; 12];
     loop {
-        if stream.read_exact(&mut header).is_err() {
+        if let Err(e) = stream.read_exact(&mut header) {
+            netlog!("[ryusrv] client #{} read header: {}", serial, e);
             break;
         }
         if u32::from_le_bytes(header[..4].try_into().unwrap()) != MAGIC
             || header[5] != PROTOCOL_VERSION
         {
+            netlog!("[ryusrv] client #{} invalid header {:?}", serial, header);
             break;
         }
         let size = i32::from_le_bytes(header[8..12].try_into().unwrap());
         if size < 0 || size as usize + 12 > MAX_PACKET {
+            netlog!("[ryusrv] client #{} invalid size {}", serial, size);
             break;
         }
         let mut data = vec![0u8; size as usize];

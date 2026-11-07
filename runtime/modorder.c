@@ -34,43 +34,63 @@ const char *mods_dir(void) {
 
 // The folder named `want` (any case) in dir or up to `depth` levels below it (shallowest first), into out.
 bool mods_find_dir(const char *dir, const char *want, int depth, char *out, size_t n) {
-    for (int level = 0; level <= depth; level++) {
-        // breadth first: walk the tree to `level` and look there
-        struct { char path[1024]; int lv; } stack[64];
-        int sp = 0;
-        snprintf(stack[sp].path, sizeof stack[sp].path, "%s", dir), stack[sp++].lv = 0;
-        while (sp) {
-            sp--;
-            char cur[1024];
-            int lv = stack[sp].lv;
-            snprintf(cur, sizeof cur, "%s", stack[sp].path);
-            DIR *d = opendir(cur);
-            if (!d) continue;
-            struct dirent *e;
-            while ((e = readdir(d))) {
-                if (e->d_name[0] == '.') continue;
-                char p[1100];
-                snprintf(p, sizeof p, "%s/%s", cur, e->d_name);
-                if (!is_dir(p)) continue;
-                if (lv == level && !strcasecmp(e->d_name, want)) {
-                    closedir(d);
-                    snprintf(out, n, "%s", p);
-                    return true;
-                }
-                if (lv < level && sp < 64) snprintf(stack[sp].path, sizeof stack[sp].path, "%s", p), stack[sp++].lv = lv + 1;
-            }
-            closedir(d);
-        }
+    enum { MAX_DIRS = 8192, PATH_SIZE = 1024 };
+    struct SearchDir { char path[PATH_SIZE]; int level; };
+    if (depth <= 0 || !n) return false;
+    size_t head = 0, tail = 1, cap = 64;
+    struct SearchDir *queue = malloc(sizeof *queue * cap);
+    if (!queue) return false;
+    queue[0].level = 0;
+    int len = snprintf(queue[0].path, sizeof queue[0].path, "%s", dir);
+    if (len < 0 || len >= (int)sizeof queue[0].path) {
+        free(queue);
+        return false;
     }
-    return false;
+    bool found = false;
+    while (head < tail && !found) {
+        struct SearchDir cur = queue[head++];
+        if (cur.level >= depth) continue;
+        DIR *d = opendir(cur.path);
+        if (!d) continue;
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.' || !strcasecmp(e->d_name, "__MACOSX")) continue;
+            char path[PATH_SIZE];
+            int len = snprintf(path, sizeof path, "%s/%s", cur.path, e->d_name);
+            if (len < 0 || len >= (int)sizeof path || !is_dir(path)) continue;
+            if (!strcasecmp(e->d_name, want)) {
+                if ((size_t)len < n) {
+                    memcpy(out, path, (size_t)len + 1);
+                    found = true;
+                    break;
+                }
+                continue;
+            }
+            if (cur.level + 1 >= depth || !strcasecmp(e->d_name, "romfs") ||
+                !strcasecmp(e->d_name, "exefs") || !strcasecmp(e->d_name, "nativeNX") || tail == MAX_DIRS)
+                continue;
+            if (tail == cap) {
+                size_t next = cap * 2;
+                if (next > MAX_DIRS) next = MAX_DIRS;
+                void *grown = realloc(queue, sizeof *queue * next);
+                if (!grown) { closedir(d); free(queue); return false; }
+                queue = grown, cap = next;
+            }
+            queue[tail].level = cur.level + 1;
+            memcpy(queue[tail++].path, path, (size_t)len + 1);
+        }
+        closedir(d);
+    }
+    free(queue);
+    return found;
 }
 
 
 bool mods_romfs_of(const char *name, char *out, size_t n) {
     char mod[1100];
     snprintf(mod, sizeof mod, "%s/%s", mods_dir(), name);
-    if (mods_find_dir(mod, "romfs", 3, out, n)) return true;
-    if (!mods_find_dir(mod, "nativeNX", 3, out, n)) return false;  // the files without their romfs/ folder
+    if (mods_find_dir(mod, "romfs", MODS_SEARCH_DEPTH, out, n)) return true;
+    if (!mods_find_dir(mod, "nativeNX", MODS_SEARCH_DEPTH, out, n)) return false;  // the files without their romfs/ folder
     *strrchr(out, '/') = 0;
     return true;
 }

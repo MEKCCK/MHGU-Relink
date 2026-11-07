@@ -56,13 +56,13 @@ void ui_request_share_log(void) { SDL_SetAtomicInt(&requested_action, 6); }
 void ui_request_save_export(void) { SDL_SetAtomicInt(&requested_action, 7); }
 void ui_request_gpu_driver(void) { SDL_SetAtomicInt(&requested_action, 8); }
 void ui_request_import(int kind) { SDL_SetAtomicInt(&requested_action, 9 + kind); }  // (0 cheats, 1 a mod, 2 DLC)
-static void activity_call(const char *method) {  // (a static void method of GameActivity: as restart_application)
+static void activity_call_language(const char *method) {
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
     if (!act) return;
     jclass cls = (*env)->GetObjectClass(env, act);
-    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, method, "()V") : NULL;
-    if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, method, "(I)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jint)config_language());
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
     if (cls) (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, act);
@@ -183,6 +183,7 @@ static void set_fullscreen(bool on) {
 // [Application] PauseInBackground the game stops meanwhile too (runtime/hle/vi.c).
 extern volatile int g_android_window_state;
 void vi_set_paused(bool on);
+extern bool ldn_net_up(void);
 static bool android_lifecycle(void *ud, SDL_Event *e) {
     (void)ud;
     switch (e->type) {
@@ -194,7 +195,7 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
         input_set(0, 0, 0, 0, 0);
         touch_reset();
         haptics_stop();  // (a rumble playing would run out its last pulse)
-        if (config_live_pause_background()) vi_set_paused(true);
+        if (config_live_pause_background() && !ldn_net_up()) vi_set_paused(true);
         break;
     case SDL_EVENT_DID_ENTER_FOREGROUND:
         __atomic_store_n(&g_android_window_state, 2, __ATOMIC_RELEASE);
@@ -409,15 +410,15 @@ int ui_run(void) {
         int action = SDL_SetAtomicInt(&requested_action, 0);
         if (action == 1) exit(0);
 #ifdef __ANDROID__
-        if (action == 3) activity_call("showLicenses");
-        if (action == 4) activity_call("showGameFolder");
-        if (action == 5) activity_call("showSaveImport");
-        if (action == 6) activity_call("showShareLog");
-        if (action == 7) activity_call("showSaveExport");
-        if (action == 8) activity_call("showDrivers");
-        if (action == 9) activity_call("importCheats");
-        if (action == 10) activity_call("importMod");
-        if (action == 11) activity_call("importDlc");
+        if (action == 3) activity_call_language("showLicenses");
+        if (action == 4) activity_call_language("showGameFolder");
+        if (action == 5) activity_call_language("showSaveImport");
+        if (action == 6) activity_call_language("showShareLog");
+        if (action == 7) activity_call_language("showSaveExport");
+        if (action == 8) activity_call_language("showDrivers");
+        if (action == 9) activity_call_language("importCheats");
+        if (action == 10) activity_call_language("importMod");
+        if (action == 11) activity_call_language("importDlc");
         static float screen_for = -1;  // (the screen's refresh rate follows the FPS limit: GameActivity.setFrameCap)
         float fps_now = config_live_fps();
         if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);

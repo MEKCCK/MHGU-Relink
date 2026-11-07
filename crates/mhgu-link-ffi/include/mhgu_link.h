@@ -54,6 +54,7 @@ bool mhgu_ldn_join_server(const char *server, const char *key, uint64_t hub, con
 bool mhgu_ldn_join(const char *addr, const char *name, const uint8_t *info, uint32_t info_len);
 void mhgu_ldn_leave(void);
 
+uint32_t mhgu_ldn_disconnect_reason(void);
 bool mhgu_ldn_net_up(void);   /* a network exists */
 bool mhgu_ldn_hosting(void);  /* we host it */
 /* Players and the maximum, and an id for the network; false when there is no network. */

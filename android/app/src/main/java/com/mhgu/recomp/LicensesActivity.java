@@ -17,18 +17,20 @@ import android.widget.TextView;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.Arrays;
-import java.util.Locale;
 
 /** Ajustes -> Licencias: los textos de assets/licenses, con los colores de las ventanas del juego. */
 public class LicensesActivity extends Activity {
     private static final int WINE = Color.rgb(38, 18, 14), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
+    private boolean es, zh;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        boolean es = "es".equals(Locale.getDefault().getLanguage());
+        int language = RecompLanguage.from(this);
+        es = language == 1;
+        zh = language == 2;
         int pad = dp(16);
 
         LinearLayout page = new LinearLayout(this);
@@ -39,13 +41,13 @@ public class LicensesActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText(es ? "LICENCIAS" : "LICENSES");
+        title.setText(zh ? "许可证" : es ? "LICENCIAS" : "LICENSES");
         title.setTextColor(GOLD);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         top.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         Button close = new Button(this);
-        close.setText(es ? "Cerrar" : "Close");
+        close.setText(zh ? "关闭" : es ? "Cerrar" : "Close");
         close.setAllCaps(false);
         close.setTextColor(CREAM);
         GradientDrawable face = new GradientDrawable();
@@ -74,7 +76,7 @@ public class LicensesActivity extends Activity {
     }
 
     private String allTexts() {
-        StringBuilder all = new StringBuilder();
+        StringBuilder all = new StringBuilder(zh ? "以下为本应用所用组件的许可证原文，保留原始语言以确保法律条款完整。\n\n" : "");
         try {
             String[] names = getAssets().list("licenses");
             Arrays.sort(names);
@@ -89,7 +91,7 @@ public class LicensesActivity extends Activity {
                 }
             }
         } catch (Exception e) {
-            all.append(e);
+            all.append(zh ? "无法读取许可证：" : es ? "No se pudieron leer las licencias: " : "Could not read licenses: ").append(e);
         }
         return all.toString();
     }

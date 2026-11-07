@@ -20,8 +20,7 @@ void mods_make_dir(void) {
     if (!is_dir(mods_dir())) mkdir(mods_dir(), 0755);
 }
 
-#define MAX_MODS 256
-static char *g_names[MAX_MODS];
+static char *g_names[MODS_MAX];
 static int g_nmods = -1;
 
 static void list_mods(void) {
@@ -59,7 +58,7 @@ const char *mods_exefs_file(const char *name, char *path, size_t n, bool (*skip)
         char mod[1100], ex[1100], p[1300];
         struct stat st;
         snprintf(mod, sizeof mod, "%s/%s", mods_dir(), g_names[i]);
-        if (!mods_find_dir(mod, "exefs", 3, ex, sizeof ex)) continue;
+        if (!mods_find_dir(mod, "exefs", MODS_SEARCH_DEPTH, ex, sizeof ex)) continue;
         snprintf(p, sizeof p, "%s/%s", ex, name);
         if (stat(p, &st) || !S_ISREG(st.st_mode) || (skip && skip(p, g_names[i]))) continue;
         if (found) LOG("[mods] %s and %s both have exefs/%s: %s's is used\n", found, g_names[i], name, g_names[i]);
@@ -182,7 +181,7 @@ void mods_patch_code(void) {
     pending = NULL, npending = pending_cap = 0;
 }
 
-static int hexval(int c) { return isdigit(c) ? c - '0' : isxdigit(c) ? (tolower(c) - 'a' + 10) : -1; }
+static int hexval(int c) { c = (unsigned char)c; return isdigit(c) ? c - '0' : isxdigit(c) ? (tolower(c) - 'a' + 10) : -1; }
 
 // Leading hex digits of `s` as a build id prefix: does it match `id`? (Patches name or tag a shortened id.)
 static bool id_matches(const char *s, const uint8_t id[32]) {
@@ -254,39 +253,48 @@ static void pchtxt(Apply *a, const char *path, const uint8_t id[32]) {
 static void ips(Apply *a, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return;
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END)) { fclose(f); a->bad++; return; }
     long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t *b = malloc(len > 0 ? len : 1);
-    long got = (long)fread(b, 1, len, f);
-    fclose(f);
-    bool i32 = got >= 5 && !memcmp(b, "IPS32", 5);
-    if (!i32 && (got < 5 || memcmp(b, "PATCH", 5))) { a->bad++; free(b); return; }
-    int ow = i32 ? 4 : 3;
-    long p = 5;
-    while (p + ow <= got) {
-        if (!memcmp(b + p, i32 ? "EEOF" : "EOF", ow)) break;
-        uint32_t off = 0;
-        for (int i = 0; i < ow; i++) off = off << 8 | b[p + i];
-        p += ow;
-        if (p + 2 > got) break;
-        uint32_t size = (uint32_t)b[p] << 8 | b[p + 1];
-        p += 2;
-        uint8_t *data = b + p, run[0x10000];
-        if (!size) {
-            if (p + 3 > got) break;
-            size = (uint32_t)b[p] << 8 | b[p + 1];
-            memset(run, b[p + 2], size);
-            data = run;
-            p += 3;
-        } else {
-            if (p + size > got) break;
-            p += size;
-        }
-        if (off < 0x100) { a->bad++; continue; }
-        apply(a, off - 0x100, data, size);
+    if (len < 5) { fclose(f); a->bad++; return; }
+    uint8_t magic[5];
+    if (fseek(f, 0, SEEK_SET) || fread(magic, 1, sizeof magic, f) != sizeof magic) {
+        fclose(f); a->bad++; return;
     }
-    free(b);
+    bool i32 = !memcmp(magic, "IPS32", 5);
+    if (!i32 && memcmp(magic, "PATCH", 5)) { fclose(f); a->bad++; return; }
+    size_t ow = i32 ? 4 : 3;
+    for (int pass = 0; pass < 2; pass++) {
+        if (fseek(f, 5, SEEK_SET)) { a->bad++; break; }
+        bool ended = false;
+        while (true) {
+            uint8_t off_bytes[4];
+            if (fread(off_bytes, 1, ow, f) != ow) break;
+            if (!memcmp(off_bytes, i32 ? "EEOF" : "EOF", ow)) { ended = true; break; }
+            uint32_t off = 0;
+            for (size_t i = 0; i < ow; i++) off = off << 8 | off_bytes[i];
+            uint8_t size_bytes[2], data[0x10000];
+            if (fread(size_bytes, 1, sizeof size_bytes, f) != sizeof size_bytes) break;
+            uint32_t size = (uint32_t)size_bytes[0] << 8 | size_bytes[1];
+            if (!size) {
+                uint8_t rle[3];
+                if (fread(rle, 1, sizeof rle, f) != sizeof rle) break;
+                size = (uint32_t)rle[0] << 8 | rle[1];
+                if (pass) memset(data, rle[2], size);
+            } else {
+                long pos = ftell(f);
+                if (pos < 0 || pos > len || size > (uint64_t)(len - pos)) break;
+                if (pass) {
+                    if (fread(data, 1, size, f) != size) break;
+                } else if (fseek(f, (long)size, SEEK_CUR)) break;
+            }
+            if (pass) {
+                if (off < 0x100) a->bad++;
+                else if (size) apply(a, off - 0x100, data, size);
+            }
+        }
+        if (!ended) { a->bad++; break; }
+    }
+    fclose(f);
 }
 
 void mods_patch_module(Module *m, const uint8_t build_id[32]) {
@@ -294,7 +302,7 @@ void mods_patch_module(Module *m, const uint8_t build_id[32]) {
     for (int i = 0; i < g_nmods; i++) {
         char mod[1100], ex[1100];
         snprintf(mod, sizeof mod, "%s/%s", mods_dir(), g_names[i]);
-        if (!mods_find_dir(mod, "exefs", 3, ex, sizeof ex)) continue;
+        if (!mods_find_dir(mod, "exefs", MODS_SEARCH_DEPTH, ex, sizeof ex)) continue;
         DIR *d = opendir(ex);
         if (!d) continue;
         struct dirent *e;
@@ -305,14 +313,14 @@ void mods_patch_module(Module *m, const uint8_t build_id[32]) {
             snprintf(path, sizeof path, "%s/%s", ex, e->d_name);
             Apply a = {m, g_names[i], strdup(e->d_name), 0, 0, 0};  // (the name stays: mods_patch_code logs it)
             if (!strcasecmp(dot, ".pchtxt")) pchtxt(&a, path, build_id);
-            else if (!strcasecmp(dot, ".ips") && id_matches(e->d_name, build_id)) ips(&a, path);
+            else if ((!strcasecmp(dot, ".ips") || !strcasecmp(dot, ".ips32")) && id_matches(e->d_name, build_id)) ips(&a, path);
             if (!a.data && !a.code && !a.bad) {  // (for another module or version)
                 free((char *)a.file);
                 continue;
             }
             LOG("[mods] %s: %s for %s: %d data patch(es) applied", a.mod, a.file, m->name, a.data);
             if (a.code) LOG(", %d code patch(es) (applied once the game's code is set up)", a.code);
-            if (a.bad) LOG(", %d outside the module (ignored)", a.bad);
+            if (a.bad) LOG(", %d invalid or outside the module (ignored)", a.bad);
             LOG("\n");
         }
         closedir(d);

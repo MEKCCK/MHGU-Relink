@@ -38,6 +38,7 @@ import java.io.OutputStream;
  */
 public class GameActivity extends SDLActivity {
     private static final String TAG = "MHGU";
+    public static final String EXTRA_LANGUAGE = "com.mhgu.recomp.LANGUAGE";
 
     @Override
     protected String[] getLibraries() {
@@ -55,8 +56,29 @@ public class GameActivity extends SDLActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        stopService(new Intent(this, OnlineSessionService.class));
         pickRefreshRate();
     }
+
+    @Override
+    protected void onPause() {
+        if (isMultiplayerActive()) {
+            Intent service = new Intent(this, OnlineSessionService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
+            else startService(service);
+        }
+        super.onPause();
+    }
+
+    static boolean isMultiplayerActive() {
+        try {
+            return nativeIsMultiplayerActive();
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
+    private static native boolean nativeIsMultiplayerActive();
 
     /**
      * "Guardar y reiniciar" del menú de opciones (runtime/ui.c restart_application, por JNI desde el hilo de SDL):
@@ -164,51 +186,53 @@ public class GameActivity extends SDLActivity {
     }
 
     /** Ajustes -> Licencias (runtime/ui.c show_licenses, por JNI desde el hilo de SDL). */
-    public static void showLicenses() {
+    public static void showLicenses(int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, LicensesActivity.class));
+        if (activity != null) activity.startActivity(new Intent(activity, LicensesActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
     /** Ajustes -> Importar partida. */
-    public static void showSaveImport() {
+    public static void showSaveImport(int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, SaveImportActivity.class));
+        if (activity != null) activity.startActivity(new Intent(activity, SaveImportActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
     /** Ajustes -> Exportar partida. */
     /** Ajustes -> Gráficos -> Driver de GPU. */
-    public static void showDrivers() {
+    public static void showDrivers(int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, DriverActivity.class));
+        if (activity != null) activity.startActivity(new Intent(activity, DriverActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
     /** Ajustes -> Trucos / Mods: el importador (ImportActivity). */
-    public static void importCheats() { startImport(ImportActivity.CHEATS); }
-    public static void importMod() { startImport(ImportActivity.MOD); }
-    public static void importDlc() { startImport(ImportActivity.DLC); }
-    private static void startImport(int kind) {
+    public static void importCheats(int language) { startImport(ImportActivity.CHEATS, language); }
+    public static void importMod(int language) { startImport(ImportActivity.MOD, language); }
+    public static void importDlc(int language) { startImport(ImportActivity.DLC, language); }
+    private static void startImport(int kind, int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, ImportActivity.class).putExtra(ImportActivity.KIND, kind));
+        if (activity != null) activity.startActivity(new Intent(activity, ImportActivity.class)
+                .putExtra(ImportActivity.KIND, kind).putExtra(EXTRA_LANGUAGE, language));
     }
 
-    public static void showSaveExport() {
+    public static void showSaveExport(int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, SaveExportActivity.class));
+        if (activity != null) activity.startActivity(new Intent(activity, SaveExportActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
     /** Ajustes -> Compartir registro. */
-    public static void showShareLog() {
+    public static void showShareLog(int language) {
         SDLActivity activity = mSingleton;
-        if (activity != null) activity.startActivity(new Intent(activity, LogShareActivity.class));
+        if (activity != null) activity.startActivity(new Intent(activity, LogShareActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
     /** El juego se cierra por un error (runtime/platform/android.c): la pantalla para compartir el registro, en su proceso. */
-    public static void crashReport() {
+    public static void crashReport(int language) {
         SDLActivity activity = mSingleton;
         if (activity == null) throw new IllegalStateException("crashReport: no activity");
         Intent intent = new Intent(activity, LogShareActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(LogShareActivity.EXTRA_CRASH, true);
+        intent.putExtra(EXTRA_LANGUAGE, language);
         activity.startActivity(intent);
     }
 
@@ -235,11 +259,12 @@ public class GameActivity extends SDLActivity {
     private static android.net.wifi.WifiManager.MulticastLock lanLock;
 
     /** Ajustes -> Carpeta del juego. */
-    public static void showGameFolder() {
+    public static void showGameFolder(int language) {
         SDLActivity activity = mSingleton;
         if (activity != null) {
             Intent intent = new Intent(activity, GameFolderActivity.class);
             intent.putExtra(GameFolderActivity.EXTRA_CHANGE, true);
+            intent.putExtra(EXTRA_LANGUAGE, language);
             activity.startActivity(intent);
         }
     }
@@ -288,6 +313,7 @@ public class GameActivity extends SDLActivity {
         new File(home, "mods").mkdirs();
         new File(home, "cheats").mkdirs();
         copyAsset("pipelines.list", new File(home, "pipelines.list"));
+        copyAsset("cjk.ttf", new File(home, "cjk.ttf"));
         // los trucos opcionales del port (comer / beber más rápido): la primera vez, apagados (cheats/_off.txt: el
         // runtime enciende todo truco que encuentra salvo los listados ahí; la pestaña Trucos lo reescribe)
         // (una sola vez: si el jugador lo borra o lo renombra con '_', no vuelve)
