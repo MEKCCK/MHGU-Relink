@@ -1,48 +1,20 @@
-name: Build
+name: Build Windows exe
 
-# Manual runs, and a tag builds the three targets for a release page. The workflows only compile; signing
-# (Android keystore) stays out of the repository: add the secrets only when a signed APK is wanted.
+# Windows only: Linux and Android are built locally. Manual runs, and a tag builds the Windows archive
+# for a release page. The workflow only compiles; it never signs or uploads a keystore.
 on:
   workflow_dispatch:
   push:
     tags: ['v*']
+
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  linux:
-    name: Linux runtime
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: System build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang lld cmake ninja-build pkg-config python3 curl xz-utils nasm \
-            libvulkan-dev libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev libxfixes-dev \
-            libxss-dev libwayland-dev libdecor-0-dev libpipewire-0.3-dev libpulse-dev libasound2-dev \
-            libudev-dev libdbus-1-dev libusb-1.0-0-dev libxkbcommon-dev wayland-protocols
-      - name: Rust link and crossplay libraries
-        run: cargo build --release --locked -p mhgu-link-ffi -p mhgu-crossplay
-      - name: Runtime
-        run: make -j"$(nproc)" FFMPEG=bundled SDL3=bundled SHADERC=bundled
-      - name: Package
-        run: |
-          mkdir -p dist
-          tar -czf dist/mhgurecomp-linux-x86_64.tar.gz \
-            build/mhgurecomp build/mhgurecomp-updater build/licenses
-          sha256sum dist/mhgurecomp-linux-x86_64.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mhgurecomp-linux-x86_64
-          path: dist/mhgurecomp-linux-x86_64.tar.gz
-
   windows:
     name: Windows exe
     runs-on: windows-2022
@@ -53,16 +25,15 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            make git diffutils python curl xz tar zip
+            make git diffutils python curl xz tar zip nasm
             mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-shaderc
             mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-vulkan-memory-allocator
-      - name: Rust libraries
+      - name: Rust link and crossplay libraries
         shell: msys2 {0}
-        run: |
-          cargo build --release --locked -p mhgu-link-ffi -p mhgu-crossplay
+        run: cargo build --release --locked -p mhgu-link-ffi -p mhgu-crossplay
       - name: Runtime and DLL bundle
         shell: msys2 {0}
         run: make -j4 FFMPEG=bundled
@@ -77,64 +48,3 @@ jobs:
         with:
           name: mhgurecomp-windows-x86_64
           path: dist/mhgurecomp-windows-x86_64.zip
-
-  android:
-    name: Android APK (debug-signed)
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Android SDK and NDK
-        shell: pwsh
-        run: |
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.0.12077973"
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            make git diffutils python curl xz tar zip nasm
-            mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc
-      - name: Dependency sources
-        shell: msys2 {0}
-        run: |
-          mkdir -p deps/src
-          curl -L --fail -o /tmp/SDL3.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
-          tar -C deps/src -xzf /tmp/SDL3.tar.gz
-          git clone --depth 1 --branch v2026.4 --recurse-submodules \
-            https://github.com/google/shaderc.git deps/src/shaderc
-          curl -L --fail -o /tmp/ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
-          tar -C deps/src -xJf /tmp/ffmpeg.tar.xz
-          mv deps/src/ffmpeg-9.0.2 deps/src/ffmpeg
-      - name: Android dependencies
-        shell: msys2 {0}
-        run: |
-          mkdir -p "$(cygpath -u "$LOCALAPPDATA")/Android"
-          ln -sfn "$(cygpath -u "$ANDROID_HOME")" "$(cygpath -u "$LOCALAPPDATA")/Android/Sdk" 2>/dev/null || true
-          bash deps/build_deps.sh arm64-v8a
-          bash deps/build_ffmpeg.sh arm64-v8a
-      - name: Native runtime and Rust crossplay
-        shell: msys2 {0}
-        run: |
-          rustup target add aarch64-linux-android 2>/dev/null || true
-          bash native/build_native.sh arm64-v8a Release
-      - name: APK
-        shell: pwsh
-        run: |
-          Push-Location android
-          ./gradlew.bat --no-daemon assembleDebug
-          Pop-Location
-      - name: Package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item android/app/build/outputs/apk/debug/app-debug.apk dist/mhgurecomp-android-arm64-debug.apk
-          Get-FileHash dist/mhgurecomp-android-arm64-debug.apk -Algorithm SHA256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mhgurecomp-android-arm64-debug
-          path: dist/mhgurecomp-android-arm64-debug.apk
