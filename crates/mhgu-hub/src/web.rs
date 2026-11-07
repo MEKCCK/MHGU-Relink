@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::config::Live;
+use crate::proto;
 use crate::server::{Shared, WebView};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -55,6 +56,10 @@ fn t(l: Lang, key: &str) -> &'static str {
         "age" => s!("age", "存活", "edad"),
         "status" => s!("status", "状态", "estado"),
         "open" => s!("open", "可加入", "abierta"),
+        "access" => s!("access", "访问", "acceso"),
+        "public room" => s!("public", "公开", "pública"),
+        "key room" => s!("key", "Key 房间", "sala con Key"),
+        "phone room" => s!("phone only", "仅手机", "solo Android"),
         "waiting" => s!("waiting", "等待中", "esperando"),
         "no hubs" => s!("No hubs right now.", "当前没有房间。", "Ahora no hay salas."),
         "traffic" => s!("traffic", "流量", "tráfico"),
@@ -379,26 +384,32 @@ impl Web {
         let v = self.view();
         let mut rows = String::new();
         for (i, h) in v.hubs.iter().enumerate() {
+            let public = h.room == [0u8; 4];
+            let phone = h.room == proto::room_from_key("public-phone")[..4];
+            let keyed = !public && !phone;
             rows.push_str(&format!(
-                "<tr><td>{} {}</td><td>{}</td><td>{}</td></tr>",
+                "<tr><td>{} {}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 t(l, "room"), i + 1,
                 h.players,
+                if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
+                else if phone { format!("<span class=warn>📱 {}</span>", t(l, "phone room")) }
+                else { format!("<span class=ok>🌐 {}</span>", t(l, "public room")) },
                 if h.players > 1 { format!("<span class=ok>{}</span>", t(l, "open")) } else { format!("<span class=warn>{}</span>", t(l, "waiting")) }
             ));
         }
         if rows.is_empty() {
-            rows = format!("<tr><td colspan=3>{}</td></tr>", t(l, "no hubs"));
+            rows = format!("<tr><td colspan=4>{}</td></tr>", t(l, "no hubs"));
         }
         let body = format!(
             r#"<div class=stats>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div></div>
-<table><tr><th>{}</th><th>{}</th><th>{}</th></tr>{rows}</table>
+<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>{rows}</table>
 <p style="color:#9a8a76">{}</p>"#,
             v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
             v.conns, t(l, "connections"), uptime(v.uptime), t(l, "uptime"), traffic(v.bytes), t(l, "traffic"),
-            t(l, "room"), t(l, "players"), t(l, "status"),
+            t(l, "room"), t(l, "players"), t(l, "access"), t(l, "status"),
             t(l, "refresh")
         );
         layout(l, "hubs", &body, false)
@@ -421,7 +432,7 @@ impl Web {
             ));
         }
         if rows.is_empty() {
-            rows = format!("<tr><td colspan=3>{}</td></tr>", t(l, "no hubs"));
+            rows = format!("<tr><td colspan=4>{}</td></tr>", t(l, "no hubs"));
         }
         let mut ban_rows = String::new();
         for ip in &bans {
@@ -519,8 +530,9 @@ impl Web {
         let mut hubs = Vec::new();
         for h in &v.hubs {
             hubs.push(format!(
-                r#"{{"id":"{:#x}","players":{},"link":{},"age":{}}}"#,
-                h.id, h.players, h.link_proto, h.age
+                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}"}}"#,
+                h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
+                if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" }
             ));
         }
         format!(

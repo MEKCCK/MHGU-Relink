@@ -83,8 +83,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 `mhgu-hub` 自带一个无依赖的 Web 界面（`-web :39511`，默认开；`off` 关闭）：
 
-- `GET /`：公开页，只列「房间 1、房间 2 …」和各自人数（不显示内部 id / key 哈希），另有总人数/连接数/运行时长，5 秒自动刷新；
-- `GET /api/hubs`：同样的 JSON；
+- `GET /`：公开页，列「房间 1、房间 2 …」、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；
+- `GET /api/hubs`：同样的 JSON，带 `locked` 和 `access`（`public` / `phone` / `key`）；
 - `GET /admin?token=…`：管理员页：统计、每个 hub 的 `Close`（`POST /admin/close`，会通知主机并踢掉该房间）、
   IP 封禁（`POST /admin/ban` / `unban`，被禁 IP 的连接立即被重置）、`/admin/log` 看最近 300 条事件；
 - 界面多语言：右上角 🌐 点开是语言列表（English / 中文 / Español），点击即切换；选择写进
