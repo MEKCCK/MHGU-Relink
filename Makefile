@@ -192,7 +192,7 @@ IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI
 MHGU_LINK_INC := crates/mhgu-link-ffi/include
 MHGU_LINK_LIB := $(abspath target/release/libmhgu_link_ffi.a)
 MHGU_XP_LIB   := $(abspath target/release/libmhgu_crossplay.a)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -Ithird_party/ffx-api -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.
