@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use crate::config::Live;
 use crate::server::{Shared, WebView};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -88,7 +89,22 @@ fn t(l: Lang, key: &str) -> &'static str {
         "banned" => s!("banned", "已封禁", "bloqueadas"),
         "ban" => s!("Ban", "封禁", "Bloquear"),
         "unban" => s!("Unban", "解封", "Desbloquear"),
-        "ban ip" => s!("Ban an IP address", "封禁 IP 地址", "Bloquear una dirección IP"),
+        "ban ip" => s!("Ban an IP address", "封禁 IP 地址", "Bloquear una dirección IP"),        "settings" => s!("Live settings", "热设置", "Ajustes en vivo"),
+        "min protocol" => s!("Oldest link protocol", "最低链路协议", "Protocolo de enlace mínimo"),
+        "separate phones" => s!("Android public room separate", "Android 公共房间独立", "Sala pública Android separada"),
+        "verbose" => s!("Verbose logs", "详细日志", "Registros detallados"),
+        "max connections" => s!("Max connections", "最大连接数", "Conexiones máximas"),
+        "max connections per ip" => s!("Max connections / IP", "每 IP 最大连接", "Conexiones máximas / IP"),
+        "max hubs" => s!("Max hubs", "最大房间数", "Salas máximas"),
+        "max hubs per ip" => s!("Max hubs / IP", "每 IP 最大房间", "Salas máximas / IP"),
+        "list max" => s!("Hubs per search", "每次搜索房间数", "Salas por búsqueda"),
+        "requests rate" => s!("Requests / second", "每秒请求数", "Solicitudes / segundo"),
+        "request burst" => s!("Request burst", "请求突发", "Ráfaga de solicitudes"),
+        "bandwidth" => s!("Bandwidth (bytes/s)", "带宽（字节/秒）", "Ancho de banda (bytes/s)"),
+        "save" => s!("Save", "保存", "Guardar"),
+        "applied" => s!("Settings applied.", "设置已应用。", "Ajustes aplicados."),
+        "invalid settings" => s!("Invalid settings.", "设置无效。", "Ajustes no válidos."),
+
         "no bans" => s!("No banned addresses.", "没有封禁地址。", "No hay direcciones bloqueadas."),
         "log" => s!("log", "日志", "registro"),
         "hubs page" => s!("hubs", "房间", "salas"),
@@ -219,6 +235,23 @@ impl Web {
                 if token_ok {
                     let only = q("only").unwrap_or_default();
                     (200, "text/html; charset=utf-8", self.log_page(lang, &only))
+                } else {
+                    (401, "text/html; charset=utf-8", layout(lang, "admin", &login(lang), true))
+                }
+            }
+            ("POST", "/admin/settings") => {
+                if token_ok {
+                    let cur = self.shared.lock().unwrap().live();
+                    let msg = match parse_live(&body_str(&body), &cur) {
+                        Ok(next) => {
+                            let n = self.shared.lock().unwrap().apply_live(next);
+                            format!("<p class=ok>{} ({} hub(s) closed)</p><p><a href=\"/admin?token={}\">← {}</a></p>",
+                                    t(lang, "applied"), n, self.token, t(lang, "admin"))
+                        }
+                        Err(why) => format!("<p class=err>{}</p><p><code>{}</code></p><p><a href=\"/admin?token={}\">← {}</a></p>",
+                                            t(lang, "invalid settings"), html(&why), self.token, t(lang, "admin")),
+                    };
+                    (200, "text/html; charset=utf-8", layout(lang, "admin", &msg, true))
                 } else {
                     (401, "text/html; charset=utf-8", layout(lang, "admin", &login(lang), true))
                 }
@@ -372,9 +405,9 @@ impl Web {
 
     fn admin_page(&self, l: Lang) -> String {
         let v = self.view();
-        let bans = {
+        let (bans, live) = {
             let g = self.shared.lock().unwrap();
-            g.bans()
+            (g.bans(), g.live())
         };
         let mut rows = String::new();
         for (i, h) in v.hubs.iter().enumerate() {
@@ -405,7 +438,7 @@ impl Web {
             self.token,
             t(l, "ban")
         );
-        let log_link = format!("<p><a href=\"/admin/log?token={}\">{}</a></p>", self.token, t(l, "log"));
+        let log_link = format!("<p><a href=\"/admin/log?token={}\">{}</a></p>", self.token, t(l, "log"));        let settings = settings_form(self, l, &live);
         let mut player_rows = String::new();
         for (k, (hub, p)) in v.pairs.iter().enumerate() {
             let room = v.hubs.iter().position(|h| h.id == *hub).map(|i| i + 1);
@@ -435,7 +468,7 @@ impl Web {
 <h2>{}</h2>
 <table><tr><th>{}</th><th>{}</th><th>IP</th><th>↓</th><th>↑</th><th>{}</th><th></th></tr>{player_rows}</table>
 <table><tr><th>{}</th><th></th></tr>{ban_rows}</table>
-{ban_form}{log_link}"#,
+{ban_form}{log_link}{settings}"#,
             v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
             v.conns, t(l, "connections"), v.ips, t(l, "ips"),
             uptime(v.uptime), t(l, "uptime"), traffic(v.bytes), t(l, "traffic"),
@@ -574,6 +607,10 @@ button{background:#5a3f22;color:#fff;border:0;border-radius:6px;padding:5px 12px
 button:hover{background:#7a5630}
 a{color:#f0c674}
 input{padding:6px 10px;border-radius:6px;border:1px solid #4a3a28;background:#1c1610;color:#e8ded0}
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:10px 0}
+.settings label{display:flex;justify-content:space-between;gap:10px;align-items:center;background:#1c1610;border:1px solid #3a2e22;border-radius:8px;padding:8px 12px}
+.settings input[type=number]{width:96px}
+.settings button{justify-self:start}
 details.lang{position:relative}
 details.lang summary{cursor:pointer;list-style:none;padding:4px 10px;border:1px solid #4a3a28;border-radius:6px;background:#241c14}
 details.lang summary::-webkit-details-marker{display:none}
@@ -581,6 +618,86 @@ details.lang .menu{position:absolute;right:0;top:110%;background:#241c14;border:
 details.lang .menu a{display:block;padding:6px 12px;white-space:nowrap}
 details.lang .menu a:hover,details.lang .menu a.cur{background:#3a2e22}
 "#;
+
+fn html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// The live-settings form on /admin. Every field is sent on submit (unchecked checkboxes are absent).
+fn settings_form(w: &Web, l: Lang, v: &Live) -> String {
+    let check = |on: bool| if on { " checked" } else { "" };
+    format!(
+        "<h2>{}</h2>\
+         <form method=post action=\"/admin/settings?token={}\" class=settings>\
+         <label>{} <input type=number name=min_proto min=0 max=65535 value=\"{}\"></label>\
+         <label><input type=checkbox name=separate_phones{}> {}</label>\
+         <label><input type=checkbox name=verbose{}> {}</label>\
+         <label>{} <input type=number name=max_conns min=1 value=\"{}\"></label>\
+         <label>{} <input type=number name=max_conns_per_ip min=1 value=\"{}\"></label>\
+         <label>{} <input type=number name=max_hubs min=1 value=\"{}\"></label>\
+         <label>{} <input type=number name=max_hubs_per_ip min=1 value=\"{}\"></label>\
+         <label>{} <input type=number name=list_max min=1 max=64 value=\"{}\"></label>\
+         <label>{} <input type=number name=req_rate min=0.01 step=0.01 value=\"{}\"></label>\
+         <label>{} <input type=number name=req_burst min=1 step=1 value=\"{}\"></label>\
+         <label>{} <input type=number name=bandwidth min=1 step=1 value=\"{}\"></label>\
+         <button>{}</button></form>",
+        t(l, "settings"), w.token,
+        t(l, "min protocol"), v.min_proto,
+        check(v.separate_phones), t(l, "separate phones"),
+        check(v.verbose), t(l, "verbose"),
+        t(l, "max connections"), v.max_conns,
+        t(l, "max connections per ip"), v.max_conns_per_ip,
+        t(l, "max hubs"), v.max_hubs,
+        t(l, "max hubs per ip"), v.max_hubs_per_ip,
+        t(l, "list max"), v.list_max,
+        t(l, "requests rate"), v.req_rate,
+        t(l, "request burst"), v.req_burst,
+        t(l, "bandwidth"), v.bandwidth,
+        t(l, "save")
+    )
+}
+
+/// Reads the admin form. Missing fields keep `cur`; bad values are refused (the server keeps its settings).
+fn parse_live(body: &str, cur: &Live) -> Result<Live, String> {
+    let num = |key: &str| kv(body, key);
+    let parse = |key: &str, default: f64| -> Result<f64, String> {
+        match num(key) {
+            None => Ok(default),
+            Some(v) => v.parse::<f64>().map_err(|_| format!("{key}: not a number")),
+        }
+    };
+    let uint = |key: &str, default: usize| -> Result<usize, String> {
+        match num(key) {
+            None => Ok(default),
+            Some(v) => v.parse::<usize>().map_err(|_| format!("{key}: not a number")),
+        }
+    };
+    let min_proto = uint("min_proto", cur.min_proto as usize)?;
+    if min_proto > 65535 { return Err("min_proto: at most 65535".into()); }
+    let max_conns = uint("max_conns", cur.max_conns)?;
+    let max_conns_per_ip = uint("max_conns_per_ip", cur.max_conns_per_ip)?;
+    let max_hubs = uint("max_hubs", cur.max_hubs)?;
+    let max_hubs_per_ip = uint("max_hubs_per_ip", cur.max_hubs_per_ip)?;
+    let list_max = uint("list_max", cur.list_max)?;
+    let req_rate = parse("req_rate", cur.req_rate)?;
+    let req_burst = parse("req_burst", cur.req_burst)?;
+    let bandwidth = parse("bandwidth", cur.bandwidth)?;
+    if max_conns == 0 || max_conns_per_ip == 0 || max_hubs == 0 || max_hubs_per_ip == 0 || list_max == 0 || list_max > 64 {
+        return Err("connection/hub/list limits must be positive (list at most 64)".into());
+    }
+    if !(req_rate.is_finite() && req_rate > 0.0 && req_burst.is_finite() && req_burst >= 1.0) {
+        return Err("request rate must be > 0 and burst >= 1".into());
+    }
+    if !(bandwidth.is_finite() && bandwidth >= 1.0) {
+        return Err("bandwidth must be at least 1 byte/s".into());
+    }
+    Ok(Live {
+        min_proto: min_proto as u16,
+        separate_phones: num("separate_phones").is_some(),
+        verbose: num("verbose").is_some(),
+        max_conns, max_conns_per_ip, max_hubs, max_hubs_per_ip, list_max, req_rate, req_burst, bandwidth,
+    })
+}
 
 fn kv(s: &str, key: &str) -> Option<String> {
     for part in s.split(&['&', ';', ' '][..]) {
@@ -645,4 +762,25 @@ fn traffic(b: u64) -> String {
 
 fn uptime(s: u64) -> String {
     format!("{}h {:02}m", s / 3600, (s % 3600) / 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, Live};
+
+    #[test]
+    fn live_settings_parse_and_validate() {
+        let cur = Live::from_config(&Config::default());
+        let v = parse_live("min_proto=2&max_hubs=10&separate_phones=on&verbose=on", &cur).unwrap();
+        assert_eq!(v.min_proto, 2);
+        assert_eq!(v.max_hubs, 10);
+        assert!(v.separate_phones && v.verbose);
+        assert_eq!(v.bandwidth, cur.bandwidth);
+        assert!(parse_live("min_proto=99999", &cur).is_err());
+        assert!(parse_live("max_conns=0", &cur).is_err());
+        assert!(parse_live("list_max=65", &cur).is_err());
+        assert!(parse_live("bandwidth=0", &cur).is_err());
+        assert!(parse_live("req_burst=0", &cur).is_err());
+    }
 }

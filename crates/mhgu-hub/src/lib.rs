@@ -9,7 +9,7 @@ pub mod config;
 mod server;
 pub mod web;
 
-pub use config::Config;
+pub use config::{Config, Live};
 pub use server::Server;
 
 /// The wire formats, re-exported for clients and tests.

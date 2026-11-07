@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use mhgu_protocol as proto;
 
 use crate::bucket::TokenBucket;
-use crate::config::Config;
+use crate::config::{Config, Live};
 
 type NetInfo = [u8; proto::NETINFO_SIZE];
 
@@ -30,6 +30,9 @@ struct Hub {
     created: Instant,
     /// Frames for the host's writer thread (tickets and pings).
     out: SyncSender<Vec<u8>>,
+    /// The host's connection, to end it when an admin closes the hub or raises the minimum protocol.
+    conn: TcpStream,
+    ip: std::net::IpAddr,
     /// Pending and spliced players.
     joins: usize,
 }
@@ -73,6 +76,8 @@ struct Pair {
 
 pub struct Shared {
     pub(crate) cfg: Config,
+    /// Settings changeable from the admin page without a restart.
+    pub(crate) live: Live,
     hubs: HashMap<u64, Hub>,
     pending: HashMap<u64, SyncSender<TcpStream>>,
     pairs: HashMap<u32, Arc<Pair>>,
@@ -86,7 +91,7 @@ pub struct Shared {
 }
 
 /// A hub as the web UI shows it.
-pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64, pub room: [u8; 4] }
+pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64 }
 
 /// A player of a hub, as the admin page shows it.
 pub struct PlayerView { pub pair: u32, pub ip: String, pub down_bps: u64, pub up_bps: u64, pub idle: u64 }
@@ -106,7 +111,6 @@ impl Shared {
                 players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
                 link_proto: h.link_proto,
                 age: h.created.elapsed().as_secs(),
-                room: [h.room[0], h.room[1], h.room[2], h.room[3]],
             })
             .collect();
         hubs.sort_by(|a, b| b.players.cmp(&a.players).then(a.id.cmp(&b.id)));
@@ -181,17 +185,50 @@ impl Shared {
         true
     }
 
-    /// Drops a hub: its host's writer channel closes (the link ends), and its listed state goes.
+    /// The settings the admin page changes (a copy while the lock is held).
+    pub(crate) fn live(&self) -> Live {
+        self.live.clone()
+    }
+
+    /// Applies live settings. A raised minimum protocol closes the hosts of older hubs; other limits apply
+    /// to the next connection/request/pair. Returns how many hubs were closed.
+    pub(crate) fn apply_live(&mut self, next: Live) -> usize {
+        let old = self.live.clone();
+        self.live = next.clone();
+        for st in self.ips.values_mut() {
+            st.req = TokenBucket::new(next.req_rate, next.req_burst);
+        }
+        let mut gone = Vec::new();
+        if next.min_proto > old.min_proto {
+            gone.extend(self.hubs.values().filter(|h| h.link_proto < next.min_proto).map(|h| h.id));
+        }
+        for id in &gone {
+            self.close_hub(*id);
+        }
+        if old != next {
+            self.note(format!(
+                "admin: settings min-proto {} -> {}, separate-phones {} -> {} ({} hub(s) closed)",
+                old.min_proto, next.min_proto, old.separate_phones, next.separate_phones, gone.len()
+            ));
+        }
+        gone.len()
+    }
+
+    /// Drops a hub: its host's connection and writer channel close, and its listed state goes.
     pub(crate) fn close_hub(&mut self, id: u64) -> bool {
         self.pending.remove(&id);
-        if self.hubs.contains_key(&id) {
-            self.note(format!("admin: closed hub {id:#x}"));
+        let Some(h) = self.hubs.remove(&id) else { return false };
+        if let Some(st) = self.ips.get_mut(&h.ip) {
+            st.hubs = st.hubs.saturating_sub(1);
         }
-        if let Some(h) = self.hubs.get(&id) {
-            // Tell the host its hub is gone (its link ends), then drop the listing.
-            let _ = h.out.try_send(mhgu_protocol::frame(proto::T_ERROR, &[&1u32.to_le_bytes()]));
-        }
-        self.hubs.remove(&id).is_some()
+        // Tell the host its hub is gone, then close the connection after the writer had a moment to deliver it.
+        let _ = h.out.try_send(mhgu_protocol::frame(proto::T_ERROR, &[&1u32.to_le_bytes()]));
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            let _ = h.conn.shutdown(Shutdown::Both);
+        });
+        self.note(format!("admin: closed hub {id:#x}"));
+        true
     }
 }
 
@@ -217,8 +254,10 @@ impl Server {
         } else {
             Some(proto::room_from_key(&cfg.key))
         };
+        let live = Live::from_config(&cfg);
         let shared = Arc::new(Mutex::new(Shared {
             key_room,
+            live,
             cfg,
             hubs: HashMap::new(),
             pending: HashMap::new(),
@@ -233,6 +272,16 @@ impl Server {
             udp: Arc::new(udp),
             shared,
         })
+    }
+
+    /// Live settings as they are now.
+    pub fn live(&self) -> Live {
+        self.shared.lock().unwrap().live()
+    }
+
+    /// Applies settings without a restart (the admin page and tests); returns the hubs closed by a raised min_proto.
+    pub fn apply(&self, live: Live) -> usize {
+        self.shared.lock().unwrap().apply_live(live)
     }
 
     /// The address actually bound (useful with port 0).
@@ -306,16 +355,16 @@ impl Drop for AdmitGuard {
 
 fn admit(shared: &Arc<Mutex<Shared>>, ip: IpAddr) -> bool {
     let mut guard = shared.lock().unwrap();
-    let Shared { cfg, ips, conns, banned, .. } = &mut *guard;
-    let (rate, burst) = (cfg.req_rate, cfg.req_burst);
+    let live = guard.live.clone();
+    let Shared { ips, conns, banned, .. } = &mut *guard;
     let st = ips.entry(ip).or_insert_with(|| IpState {
         conns: 0,
         hubs: 0,
-        req: TokenBucket::new(rate, burst),
+        req: TokenBucket::new(live.req_rate, live.req_burst),
         seen: Instant::now(),
     });
     st.seen = Instant::now();
-    if *conns >= cfg.max_conns || st.conns >= cfg.max_conns_per_ip {
+    if *conns >= live.max_conns || st.conns >= live.max_conns_per_ip {
         return false;
     }
     if banned.contains(&ip) {
@@ -363,15 +412,14 @@ fn handle(conn: TcpStream, shared: Arc<Mutex<Shared>>) {
     };
     let (min_proto, separate_phones) = {
         let s = shared.lock().unwrap();
-        (s.cfg.min_proto, s.cfg.separate_phones)
+        (s.live.min_proto, s.live.separate_phones)
     };
     if hdr.link_proto < min_proto {
         if t == proto::T_HOST {
-            shared.lock().unwrap().note(format!(
-                "hub refused (protocol {}, {})",
-                hdr.link_proto,
-                room_name(hdr.room)
-            ));
+            let mut s = shared.lock().unwrap();
+            if s.live.verbose {
+                s.note(format!("hub refused (protocol {}, {})", hdr.link_proto, room_name(hdr.room)));
+            }
         }
         let _ = send_error(&mut c, proto::ERR_VERSION);
         return;
@@ -462,7 +510,7 @@ fn list(c: &mut TcpStream, shared: &Arc<Mutex<Shared>>, link_proto: u16, room: [
             .filter(|h| h.link_proto == link_proto && h.room == room)
             .map(|h| (h.id, h.info, h.created))
             .collect();
-        (v, s.cfg.list_max)
+        (v, s.live.list_max)
     };
     let free = |info: &NetInfo| info[proto::NI_NODE_COUNT] < info[proto::NI_NODE_MAX];
 
@@ -510,15 +558,19 @@ fn host(
     info: &[u8],
 ) {
     let cfg = shared.lock().unwrap().cfg.clone();
+    let host_conn = match c.try_clone() {
+        Ok(h) => h,
+        Err(_) => return,
+    };
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(16);
 
     // Reserve the slot under one lock (avoids a TOCTOU with the limits).
     let mut note_after: Option<String> = None;
     let reserved = {
         let mut guard = shared.lock().unwrap();
-        let Shared { cfg: cfgref, hubs, ips, .. } = &mut *guard;
+        let Shared { live: live_ref, hubs, ips, .. } = &mut *guard;
         match ips.get_mut(&ip) {
-            Some(st) if hubs.len() < cfgref.max_hubs && st.hubs < cfgref.max_hubs_per_ip => {
+            Some(st) if hubs.len() < live_ref.max_hubs && st.hubs < live_ref.max_hubs_per_ip => {
                 st.hubs += 1;
                 let mut cand = 0u64;
                 while cand == 0 || hubs.contains_key(&cand) {
@@ -535,10 +587,14 @@ fn host(
                         info: ninfo,
                         created: Instant::now(),
                         out: tx,
+                        conn: host_conn,
+                        ip,
                         joins: 0,
                     },
                 );
-                note_after = Some(format!("hub {cand:#x} listed (protocol {link_proto}, {})", room_name(room)));
+                if live_ref.verbose {
+                    note_after = Some(format!("hub {cand:#x} listed (protocol {link_proto}, {})", room_name(room)));
+                }
                 Reserved::Ok(cand)
             }
             _ => Reserved::Busy,
@@ -665,7 +721,10 @@ fn join(
     room: [u8; 16],
     id: u64,
 ) {
-    let cfg = shared.lock().unwrap().cfg.clone();
+    let (cfg, live) = {
+        let g = shared.lock().unwrap();
+        (g.cfg.clone(), g.live.clone())
+    };
     let (host_tx, host_rx) = mpsc::sync_channel::<TcpStream>(1);
 
     let setup = {
@@ -743,12 +802,13 @@ fn join(
             cand = rand64() as u32;
         }
         pair_id = cand;
+        let bandwidth = s.live.bandwidth;
         s.pairs.insert(
             pair_id,
             Arc::new(Pair {
                 secret,
                 addr: Mutex::new([None, None]),
-                lim: TokenBucket::new(cfg.bandwidth, cfg.bandwidth),
+                lim: TokenBucket::new(bandwidth, bandwidth),
                 hub: id,
                 player: c.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default(),
                 socks: Mutex::new([None, None]),
@@ -758,10 +818,12 @@ fn join(
             }),
         );
     }
-    shared
-        .lock()
-        .unwrap()
-        .note(format!("pair {pair_id:#x} spliced (hub {id:#x}, player {})", c.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default()));
+    {
+        let mut s = shared.lock().unwrap();
+        if s.live.verbose {
+            s.note(format!("pair {pair_id:#x} spliced (hub {id:#x}, player {})", c.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default()));
+        }
+    }
     let _pair_guard = PairGuard {
         shared: Arc::clone(shared),
         id: pair_id,
@@ -788,7 +850,7 @@ fn join(
         }
     }
     let pair = shared.lock().unwrap().pairs.get(&pair_id).cloned();
-    splice(host_conn, c, cfg.bandwidth, pair);
+    splice(host_conn, c, live.bandwidth, pair);
 }
 
 fn attach(mut c: TcpStream, shared: &Arc<Mutex<Shared>>, ticket: u64) {

@@ -56,7 +56,6 @@ cd build && ./mhgurecomp <游戏目录>
 - `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并；
 - `-v`：记录 hub、加入与因协议被拒的请求（不记录 IP）。
 
-本树不含上游的 crossplay（Ryujinx/suyu 房间，C/ENet 实现）；与这些模拟器房间互通需要另行移植。
 
 ### Matchmaking Key（房间）
 
@@ -74,8 +73,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 ### 打包与分发
 
-- Linux 绿色包：`dist/mhgu-hub-0.1.0-linux-x86_64.tar.gz`（二进制 + systemd unit + 示例自定义 UI）；
-- Arch 包：`cd packaging/arch && makepkg -f` → `mhgu-hub-0.1.0-1-x86_64.pkg.tar.zst`；
+- Linux 绿色包：`dist/mhgu-hub-0.1.6-linux-x86_64.tar.gz`（二进制 + systemd unit + 示例自定义 UI）；
+- Arch 包：`cd packaging/arch && makepkg -f` → `mhgu-hub-0.1.6-1-x86_64.pkg.tar.zst`；
 - Windows：`packaging/windows/build.sh`（需要 `mingw-w64-gcc` 与 `rustup target add x86_64-pc-windows-gnu`）；
 - WebUI 可替换：`-web-dir <目录>` 提供 `index.html` / `admin.html` / `log.html` 与静态资源，
   `/api/hubs` 的 JSON 接口不变，页面自己用 JS 取数据。
@@ -94,6 +93,24 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 - 后台有 **Players** 表（每个已拼接连路的 pair、所属房间、玩家 IP、`↓/↑` 平均速率、`live`/`idle Ns`）与 `Kick`（`POST /admin/kick pair=…`，
   关掉该玩家两侧的 socket，pipe 线程结束、`joins` 递减）；日志可按 `?only=hubs|admin` 过滤；
 - 令牌来自 `-web-token`，不填则启动时随机生成并打印。
+
+### 热设置（WebUI，无需重启）
+
+管理员页新增 **Live settings** 表单，`POST /admin/settings` 立即生效：
+
+| 字段 | 作用 | 生效范围 |
+|---|---|---|
+| `Oldest link protocol` | 拒绝低于该链路协议的客户端 | 立即；低于新值的已有 hub 会被关闭，主机收到错误并断开 |
+| `Android public room separate` | Android 公共房间是否独立 | 下一次 LIST / JOIN |
+| `Verbose logs` | 记录 hub、拼接连路、拒绝原因（不记录 IP） | 立即 |
+| `Max connections` / `Max connections / IP` | 连接上限 | 新连接 |
+| `Max hubs` / `Max hubs / IP` | 房间上限 | 新 HOST |
+| `Hubs per search` | 单次 LIST 返回上限（1–64） | 下一次 LIST |
+| `Requests / second` / `Request burst` | 每 IP 请求速率 | 立即重建所有 IP 的令牌桶 |
+| `Bandwidth (bytes/s)` | 每条 pair 每方向带宽 | 新建 pair；已有 pair 保持原值 |
+
+非法值（非数字、0 上限、list > 64、带宽 < 1）整次拒绝，服务器保持原设置。
+修改会写入管理员日志；所有设置也可用启动参数指定，WebUI 只负责运行中修改。
 
 ```sh
 ./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <你的令牌> -key <房间 Key>

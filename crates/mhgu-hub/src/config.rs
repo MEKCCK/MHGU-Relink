@@ -68,3 +68,38 @@ impl Default for Config {
         }
     }
 }
+
+/// Settings that can change while the server runs (the admin page; the JSON API): limits apply to new
+/// connections/requests/pairs, and a raised min_proto takes older hubs off the list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Live {
+    pub min_proto: u16,
+    pub separate_phones: bool,
+    pub verbose: bool,
+    pub max_conns: usize,
+    pub max_conns_per_ip: usize,
+    pub max_hubs: usize,
+    pub max_hubs_per_ip: usize,
+    pub list_max: usize,
+    pub req_rate: f64,
+    pub req_burst: f64,
+    pub bandwidth: f64,
+}
+
+impl Live {
+    pub fn from_config(c: &Config) -> Live {
+        Live {
+            min_proto: c.min_proto,
+            separate_phones: c.separate_phones,
+            verbose: c.verbose,
+            max_conns: c.max_conns,
+            max_conns_per_ip: c.max_conns_per_ip,
+            max_hubs: c.max_hubs,
+            max_hubs_per_ip: c.max_hubs_per_ip,
+            list_max: c.list_max,
+            req_rate: c.req_rate,
+            req_burst: c.req_burst,
+            bandwidth: c.bandwidth,
+        }
+    }
+}

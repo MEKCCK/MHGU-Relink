@@ -368,3 +368,17 @@ fn hub_limit_per_ip() {
     let p = expect(&mut c, proto::T_ERROR);
     assert_eq!(err_code(&p), proto::ERR_BUSY);
 }
+
+#[test]
+fn live_min_proto_closes_old_hubs() {
+    let ts = start(|_| {});
+    let (mut host_conn, _id) = host(&ts, 0, 1);
+    let mut live = ts._srv.live();
+    live.min_proto = 3;
+    assert_eq!(ts._srv.apply(live), 1, "the old hub is closed");
+    // The host was told the hub is gone, and older clients are refused from now on.
+    let _ = expect(&mut host_conn, proto::T_ERROR);
+    let mut c = dial(&ts);
+    send(&mut c, proto::T_LIST, &[&header(2, 0)[..]]);
+    assert_eq!(err_code(&expect(&mut c, proto::T_ERROR)), proto::ERR_VERSION);
+}
