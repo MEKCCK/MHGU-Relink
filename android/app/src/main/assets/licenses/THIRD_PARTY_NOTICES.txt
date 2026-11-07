@@ -7,6 +7,8 @@ below.
 - Forge (the MHGU plugin loader): the ImGui overlay's style (runtime/overlay.cpp) follows Forge's own. MIT License.
 - cimgui (third_party/cimgui): MIT License.
 - Dear ImGui (third_party/cimgui/imgui): MIT License.
+- Junrar 8.1.2 (Android RAR import, com.github.junrar:junrar): UnRAR License; full text is in Junrar.txt. It may not be used to develop a RAR-compatible archiver.
+- SLF4J API 2.0.17 (Junrar runtime dependency, org.slf4j:slf4j-api): MIT License; full text is in SLF4J.txt.
 - AMD FidelityFX SDK 1.1.4 (third_party/fsr-vulkan/upstream/ffx-1.1.4): the FSR 3.1 upscaler's host code, Vulkan
   backend and shaders, and the ffx-api headers (third_party/ffx-api). MIT License, Copyright (C) 2024 Advanced Micro
   Devices, Inc.; the licence files are kept beside the code (third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt,

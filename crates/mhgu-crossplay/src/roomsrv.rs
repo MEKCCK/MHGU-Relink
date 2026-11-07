@@ -296,7 +296,12 @@ fn room_loop(mut host: Host<UdpSocket>) {
                 Err(_) => Act::Done,
             };
             match act {
-                Act::Connect(id) => { pending.insert(id, Instant::now()); }
+                Act::Connect(id) => {
+                    let peer = host.peer_mut(id);
+                    peer.set_ping_interval(1000);
+                    peer.set_timeout(2, 5000, 15000);
+                    pending.insert(id, Instant::now());
+                }
                 Act::Recv(id, d, loopback) if !d.is_empty() => {
                     let mut srv = SRV.lock().unwrap();
                     on_message(&mut host, &mut srv, id, &d, loopback);

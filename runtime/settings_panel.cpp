@@ -440,8 +440,9 @@ bool equal(const Config &a, const Config &b) {
 #undef SAME
     if (a.lock_on != b.lock_on)
         return false;
-    if (memcmp(a.touch_show, b.touch_show, sizeof a.touch_show) || memcmp(a.touch_combo, b.touch_combo, sizeof a.touch_combo) ||
-        memcmp(a.touch_combo_pad, b.touch_combo_pad, sizeof a.touch_combo_pad))
+    if (memcmp(a.touch_show, b.touch_show, sizeof a.touch_show) ||
+        memcmp(a.touch_weapon_combo, b.touch_weapon_combo, sizeof a.touch_weapon_combo) ||
+        memcmp(a.touch_weapon_combo_pad, b.touch_weapon_combo_pad, sizeof a.touch_weapon_combo_pad))
         return false;
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
@@ -896,8 +897,8 @@ void reset_section() {
         c.phone_rumble = f.phone_rumble;
         c.lock_on = f.lock_on;
         memcpy(c.touch_show, f.touch_show, sizeof c.touch_show);
-        memcpy(c.touch_combo, f.touch_combo, sizeof c.touch_combo);
-        memcpy(c.touch_combo_pad, f.touch_combo_pad, sizeof c.touch_combo_pad);
+        memcpy(c.touch_weapon_combo, f.touch_weapon_combo, sizeof c.touch_weapon_combo);
+        memcpy(c.touch_weapon_combo_pad, f.touch_weapon_combo_pad, sizeof c.touch_weapon_combo_pad);
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -996,7 +997,7 @@ void conflict_rows(std::vector<Row> &r) {
         if (ia > ib)
             std::swap(ia, ib);
         const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
-        std::string text = fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second);
+        std::string text = fmt(tr("%s and %s both change %d file(s); %s is used"), first, second, c.replaced, second);
         std::string a = first, b = second;
         action(r, "mods.conflict." + std::to_string(k), text, []() {});
         {  // select it to choose which of the two is used: that one moves below the other
@@ -1005,7 +1006,7 @@ void conflict_rows(std::vector<Row> &r) {
             copy.title = tr("Which mod is used?");
             row.menu = true;
             row.activate = [copy, a, b]() {
-                choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+                choices(copy, {fmt(tr("Use %s"), a.c_str()), fmt(tr("Use %s"), b.c_str())}, 1, [a, b](int v) {
                     int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
                     if (ia < 0 || ib < 0 || win > lose)
                         return;
@@ -1121,7 +1122,7 @@ void mods_rows(std::vector<Row> &r) {
         if (found.empty())
             action(r, "mods.clear", tr("No conflicts found"), []() {});
         else {
-            action(r, "mods.conflicts", fmt("Mods change the same files (%d): select to review", (int)found.size()),
+            action(r, "mods.conflicts", fmt(tr("Mods change the same files (%d): select to review"), (int)found.size()),
                    []() { push(View::Conflicts, ""); });
             r.back().value = "!";
         }
@@ -1440,13 +1441,13 @@ std::vector<Row> main_rows() {
         text(r, "ryu.servers", tr("RyuLdn servers"), c.ryu_servers, sizeof c.ryu_servers,
              *c.ryu_servers ? c.ryu_servers : std::string(tr("None")), ini("RyuServers"));
         add_bool(r, "ryu.host", tr("Run a RyuLdn server"), &c.ryu_host, ini("RyuHost"));
-        number(r, "ryu.port", tr("RyuLdn port"), &c.ryu_port, (int)lo("Port"), (int)hi("Port"), 1, ini("RyuPort"));
+        number(r, "ryu.port", tr("RyuLdn port"), &c.ryu_port, (int)lo("RyuPort"), (int)hi("RyuPort"), 1, ini("RyuPort"));
         text(r, "ryu.password", tr("RyuLdn passphrase"), c.ryu_password, sizeof c.ryu_password,
              *c.ryu_password ? "********" : tr("None"), ini("RyuPassword"));
         text(r, "room.server", tr("Room server"), c.room_server, sizeof c.room_server,
              *c.room_server ? c.room_server : std::string(tr("None")), ini("RoomServer"));
         add_bool(r, "room.host", tr("Run a room server"), &c.room_host, ini("RoomHost"));
-        number(r, "room.port", tr("Room port"), &c.room_port, (int)lo("Port"), (int)hi("Port"), 1, ini("RoomPort"));
+        number(r, "room.port", tr("Room port"), &c.room_port, (int)lo("RoomPort"), (int)hi("RoomPort"), 1, ini("RoomPort"));
         text(r, "room.name", tr("Room name"), c.room_name, sizeof c.room_name, c.room_name, ini("RoomName"));
         text(r, "room.password", tr("Room password"), c.room_password, sizeof c.room_password,
              *c.room_password ? "********" : tr("None"), ini("RoomPassword"));
@@ -1644,9 +1645,11 @@ const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", 
                                        "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
                                        "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
                                        "ShowMenuZR"};
-int s_combo;  // the combined button being edited
+int s_combo, s_combo_profile;  // the combined button and weapon layout being edited
 void touch_button_rows(std::vector<Row> &r) {
     Config &c = s.draft;
+    int profile = config_live_touch_profile();
+    if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES) profile = 0;
     header(r, "tb.head", tr("Buttons on the screen"));
     for (int i = 0; i < TB_COUNT; i++) {
         add_bool(r, ("tb." + std::to_string(i)).c_str(), TB_TITLES[i], &c.touch_show[i], nullptr);
@@ -1656,9 +1659,11 @@ void touch_button_rows(std::vector<Row> &r) {
     for (int k = 0; k < TOUCH_COMBOS; k++) {
         action(r, "tc." + std::to_string(k), fmt("Button %d", k + 1), [k]() {
             s_combo = k;
+            s_combo_profile = config_live_touch_profile();
+            if (s_combo_profile < 0 || s_combo_profile >= TOUCH_LAYOUT_PROFILES) s_combo_profile = 0;
             push(View::ComboEdit, "ce.0");
         });
-        r.back().value = c.touch_combo[k][0] ? c.touch_combo[k] : tr("Empty");
+        r.back().value = c.touch_weapon_combo[profile][k][0] ? c.touch_weapon_combo[profile][k] : tr("Empty");
     }
     r.back().help = tr("A button of your own presses several of the game's together. Place it with Customize touch controls.");
     action(r, "tb.back", tr("Back"), []() { pop(); });
@@ -1668,26 +1673,36 @@ void combo_rows(std::vector<Row> &r) {
     static const int ORDER[16] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 15, 12, 14, 4, 5};  // (the face buttons first)
     Config &c = s.draft;
     int k = s_combo;
-    uint32_t mask = config_combo_mask(c.touch_combo[k]);
+    add_choice(r, "ce.weapon", "Touch layout", s_combo_profile,
+               {tr("Great Sword"), tr("Sword & Shield"), tr("Hammer"), tr("Lance"), tr("Heavy Bowgun"), tr("Light Bowgun"),
+                tr("Long Sword"), tr("Switch Axe"), tr("Gunlance"), tr("Bow"), tr("Dual Blades"), tr("Hunting Horn"),
+                tr("Insect Glaive"), tr("Charge Blade"), tr("Prowler"), tr("Melee layout 1"), tr("Melee layout 2"),
+                tr("Melee layout 3"), tr("Ranged layout")},
+               [](int v) { s_combo_profile = v; });
+    int profile = s_combo_profile >= 0 && s_combo_profile < TOUCH_LAYOUT_PROFILES ? s_combo_profile : 0;
+    uint32_t mask = config_combo_mask(c.touch_weapon_combo[profile][k]);
     for (int n = 0; n < 16; n++) {
         int b = ORDER[n];
         Row row;
         row.id = "ce." + std::to_string(n);
         row.title = tr(NAMES[b]);
         row.toggle = mask >> b & 1;
-        row.activate = [k, b, mask]() { config_combo_text(mask ^ 1u << b, s.draft.touch_combo[k], sizeof s.draft.touch_combo[k]); };
-        row.adjust = [k, b, mask](int d) {
-            config_combo_text(d > 0 ? mask | 1u << b : mask & ~(1u << b), s.draft.touch_combo[k], sizeof s.draft.touch_combo[k]);
+        row.activate = [k, profile, b, mask]() {
+            config_combo_text(mask ^ 1u << b, s.draft.touch_weapon_combo[profile][k], sizeof s.draft.touch_weapon_combo[profile][k]);
+        };
+        row.adjust = [k, profile, b, mask](int d) {
+            config_combo_text(d > 0 ? mask | 1u << b : mask & ~(1u << b), s.draft.touch_weapon_combo[profile][k],
+                              sizeof s.draft.touch_weapon_combo[profile][k]);
         };
         r.push_back(std::move(row));
     }
-    add_choice(r, "ce.pad", "Controller button", c.touch_combo_pad[k],
+    add_choice(r, "ce.pad", "Controller button", c.touch_weapon_combo_pad[profile][k],
                {tr("None"), "L3", "R3", tr("Minus"), "Guide", "Misc", "Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad"},
-               [k](int v) { s.draft.touch_combo_pad[k] = v; });
+               [k, profile](int v) { s.draft.touch_weapon_combo_pad[profile][k] = v; });
     r.back().help = tr("That button of a controller does the same, and no longer does what it did.");
-    action(r, "ce.clear", tr("Clear"), [k]() {
-        s.draft.touch_combo[k][0] = 0;
-        s.draft.touch_combo_pad[k] = 0;
+    action(r, "ce.clear", tr("Clear"), [k, profile]() {
+        s.draft.touch_weapon_combo[profile][k][0] = 0;
+        s.draft.touch_weapon_combo_pad[profile][k] = 0;
     });
     action(r, "ce.back", tr("Back"), []() { pop(); });
 }
@@ -1940,6 +1955,8 @@ const PhoneHelp PHONE_HELP[] = {
 std::string help_text(const Row &r) {
     if (!r.help.empty() || r.key.empty())
         return r.help;
+    if (s.draft.language == 2)
+        if (const char *help = settings_crossplay_help_zh(r.key.c_str())) return help;
 #ifdef __ANDROID__
     for (const PhoneHelp &h : PHONE_HELP)
         if (r.key == h.key) return s.draft.language == 1 ? h.es : h.en;

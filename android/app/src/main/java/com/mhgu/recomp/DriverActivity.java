@@ -32,7 +32,6 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -50,7 +49,7 @@ public class DriverActivity extends Activity {
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
     private static final int ALERT = Color.rgb(255, 150, 120), LIT = Color.rgb(96, 62, 24);
 
-    private boolean es, changed;
+    private boolean es, zh, changed;
     private TextView status;
     private LinearLayout list;
     private Button add;
@@ -93,16 +92,20 @@ public class DriverActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        es = "es".equals(Locale.getDefault().getLanguage());
+        int language = RecompLanguage.from(this);
+        es = language == 1;
+        zh = language == 2;
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(24), dp(14), dp(24), dp(16));
         box.setBackground(plate(WINE));
-        TextView title = text(es ? "DRIVER DE GPU" : "GPU DRIVER", 20, GOLD, true);
+        TextView title = text(zh ? "GPU 驱动" : es ? "DRIVER DE GPU" : "GPU DRIVER", 20, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
-        TextView body = text(es
+        TextView body = text(zh
+                ? "仅适用于 Adreno GPU，使用风险由你自行承担。不适合你的 GPU 的驱动可能导致游戏退出或画面异常。如果游戏启动失败，应用会自动切回系统驱动。请添加包含 meta.json 和驱动库的 .zip 压缩包。"
+                : es
                 ? "Solo para GPU Adreno y bajo tu propio riesgo: un driver que no sea para tu GPU puede cerrar el juego o verse mal. "
                   + "Si te falla al arrancar, la app vuelve sola al driver del sistema. Agrega un .zip con meta.json y la librería."
                 : "For Adreno GPUs only, at your own risk: a driver that isn't right for your GPU can close the game or look wrong. "
@@ -122,7 +125,7 @@ public class DriverActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(12), 0, 0);
-        add = button(es ? "Agregar driver" : "Add a driver", true, BRONZE);
+        add = button(zh ? "添加驱动" : es ? "Agregar driver" : "Add a driver", true, BRONZE);
         add.setOnClickListener(v -> {
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             pick.addCategory(Intent.CATEGORY_OPENABLE);
@@ -132,7 +135,7 @@ public class DriverActivity extends Activity {
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(add, size);
-        Button close = button(es ? "Cerrar" : "Close", false, BRONZE);
+        Button close = button(zh ? "关闭" : es ? "Cerrar" : "Close", false, BRONZE);
         close.setOnClickListener(v -> {
             if (changed) restart();
             else finish();
@@ -154,7 +157,8 @@ public class DriverActivity extends Activity {
 
         File failed = new File(root(), "failed");
         if (failed.isFile()) {
-            say((es ? "No funcionó: " : "It didn't work: ") + firstLine(failed) + (es ? ". Se usa el del sistema." : ". The system's is in use."), true);
+            say((zh ? "驱动无法运行：" : es ? "No funcionó: " : "It didn't work: ") + firstLine(failed)
+                    + (zh ? "。当前使用系统驱动。" : es ? ". Se usa el del sistema." : ". The system's is in use."), true);
             failed.delete();
         }
         refresh();
@@ -189,7 +193,7 @@ public class DriverActivity extends Activity {
     private void refresh() {
         list.removeAllViews();
         String picked = firstLine(new File(root(), "selected"));
-        Button system = button((picked.isEmpty() ? "● " : "") + (es ? "Driver del sistema" : "The system's driver"), picked.isEmpty(), picked.isEmpty() ? LIT : BRONZE);
+        Button system = button((picked.isEmpty() ? "● " : "") + (zh ? "系统驱动" : es ? "Driver del sistema" : "The system's driver"), picked.isEmpty(), picked.isEmpty() ? LIT : BRONZE);
         system.setOnClickListener(v -> choose(null, null));
         LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
         wide.setMargins(0, dp(4), 0, dp(4));
@@ -206,7 +210,7 @@ public class DriverActivity extends Activity {
             Button use = button((on ? "● " : "") + info.get(0), on, on ? LIT : BRONZE);
             use.setOnClickListener(v -> choose(d.getName(), info.get(1)));
             row.addView(use, new LinearLayout.LayoutParams(0, dp(46), 1));
-            Button remove = button(es ? "Quitar" : "Remove", false, BRONZE);
+            Button remove = button(zh ? "移除" : es ? "Quitar" : "Remove", false, BRONZE);
             remove.setOnClickListener(v -> {
                 if (on) choose(null, null);
                 delete(d);
@@ -255,13 +259,14 @@ public class DriverActivity extends Activity {
             try (FileWriter w = new FileWriter(selected)) {
                 w.write(folder + "\n" + library + "\n");
             } catch (IOException e) {
-                say((es ? "No se pudo guardar: " : "Could not save it: ") + e.getMessage(), true);
+                say((zh ? "保存失败：" : es ? "No se pudo guardar: " : "Could not save it: ") + e.getMessage(), true);
                 return;
             }
         }
         changed = true;
-        closeButton.setText(es ? "Reiniciar el juego" : "Restart the game");
-        say(es ? "Se aplica al reiniciar el juego. Guarda antes tu partida." : "It applies when the game restarts. Save your game first.", false);
+        closeButton.setText(zh ? "重启游戏" : es ? "Reiniciar el juego" : "Restart the game");
+        say(zh ? "重启游戏后生效。请先保存游戏进度。"
+                : es ? "Se aplica al reiniciar el juego. Guarda antes tu partida." : "It applies when the game restarts. Save your game first.", false);
         refresh();
     }
 
@@ -286,7 +291,7 @@ public class DriverActivity extends Activity {
         if (request != PICK || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri zip = data.getData();
         add.setEnabled(false);
-        say(es ? "Instalando…" : "Installing…", false);
+        say(zh ? "正在安装…" : es ? "Instalando…" : "Installing…", false);
         new Thread(() -> {
             String name = null, error = null;
             try {
@@ -298,8 +303,9 @@ public class DriverActivity extends Activity {
             final String done = name, why = error;
             runOnUiThread(() -> {
                 add.setEnabled(true);
-                if (done != null) say((es ? "Instalado: " : "Installed: ") + done + (es ? ". Tócalo para usarlo." : ". Tap it to use it."), false);
-                else say((es ? "No se pudo instalar: " : "Could not install it: ") + why, true);
+                if (done != null) say((zh ? "已安装：" : es ? "Instalado: " : "Installed: ") + done
+                        + (zh ? "。点击即可使用。" : es ? ". Tócalo para usarlo." : ". Tap it to use it."), false);
+                else say((zh ? "安装失败：" : es ? "No se pudo instalar: " : "Could not install it: ") + why, true);
                 refresh();
             });
         }).start();
@@ -309,40 +315,43 @@ public class DriverActivity extends Activity {
     private String install(Uri zip) throws Exception {
         File tmp = new File(root(), ".new");
         delete(tmp);
-        if (!tmp.mkdirs()) throw new IOException("no folder");
+        if (!tmp.mkdirs()) throw new IOException(zh ? "无法创建文件夹" : es ? "No se pudo crear la carpeta" : "no folder");
         JSONObject meta = null;
         List<String> libs = new ArrayList<>();
         long total = 0;
-        try (InputStream in = getContentResolver().openInputStream(zip); ZipInputStream z = new ZipInputStream(in)) {
-            byte[] buf = new byte[65536];
-            for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
-                if (e.isDirectory()) continue;
-                String base = new File(e.getName()).getName();  // (nothing outside the folder, whatever the zip says)
-                if (base.equalsIgnoreCase("meta.json")) {
-                    ByteArrayOutputStream json = new ByteArrayOutputStream();
-                    for (int n; (n = z.read(buf)) > 0; ) if (json.size() < 65536) json.write(buf, 0, n);
-                    meta = new JSONObject(json.toString("UTF-8"));
-                } else if (base.endsWith(".so")) {
-                    try (OutputStream out = new FileOutputStream(new File(tmp, base))) {
-                        for (int n; (n = z.read(buf)) > 0; ) {
-                            total += n;
-                            if (total > MAX_BYTES) throw new IOException(es ? "demasiado grande" : "too large");
-                            out.write(buf, 0, n);
+        try (InputStream in = getContentResolver().openInputStream(zip)) {
+            if (in == null) throw new IOException(zh ? "无法读取 ZIP 文件" : es ? "No se pudo leer el archivo ZIP" : "could not read ZIP file");
+            try (ZipInputStream z = new ZipInputStream(in)) {
+                byte[] buf = new byte[65536];
+                for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                    if (e.isDirectory()) continue;
+                    String base = new File(e.getName()).getName();  // (nothing outside the folder, whatever the zip says)
+                    if (base.equalsIgnoreCase("meta.json")) {
+                        ByteArrayOutputStream json = new ByteArrayOutputStream();
+                        for (int n; (n = z.read(buf)) > 0; ) if (json.size() < 65536) json.write(buf, 0, n);
+                        meta = new JSONObject(json.toString("UTF-8"));
+                    } else if (base.endsWith(".so")) {
+                        try (OutputStream out = new FileOutputStream(new File(tmp, base))) {
+                            for (int n; (n = z.read(buf)) > 0; ) {
+                                total += n;
+                                if (total > MAX_BYTES) throw new IOException(zh ? "驱动文件过大" : es ? "demasiado grande" : "too large");
+                                out.write(buf, 0, n);
+                            }
                         }
+                        libs.add(base);
                     }
-                    libs.add(base);
                 }
             }
         }
         if (libs.isEmpty()) {
             delete(tmp);
-            throw new IOException(es ? "el zip no trae ninguna librería .so" : "the zip has no .so library");
+            throw new IOException(zh ? "ZIP 中没有 .so 驱动库" : es ? "el zip no trae ninguna librería .so" : "the zip has no .so library");
         }
         String library = meta != null ? meta.optString("libraryName", "") : "";
         if (library.isEmpty() || !libs.contains(library)) library = libs.get(0);
         if (!arm64(new File(tmp, library))) {
             delete(tmp);
-            throw new IOException(es ? "no es una librería para ARM de 64 bits" : "not a 64-bit ARM library");
+            throw new IOException(zh ? "这不是 64 位 ARM 驱动库" : es ? "no es una librería para ARM de 64 bits" : "not a 64-bit ARM library");
         }
         library = ownName(tmp, library);
         String shown = meta != null ? meta.optString("name", "") : "";
@@ -356,7 +365,7 @@ public class DriverActivity extends Activity {
         }
         File to = new File(root(), folder);
         delete(to);
-        if (!tmp.renameTo(to)) throw new IOException("no folder");
+        if (!tmp.renameTo(to)) throw new IOException(zh ? "无法安装驱动文件夹" : es ? "No se pudo instalar la carpeta del driver" : "no folder");
         return shown;
     }
 

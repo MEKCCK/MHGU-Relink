@@ -22,7 +22,9 @@ static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
-                     live_touch, live_touch_hud, live_touch_show[TB_COUNT], live_touch_combo[TOUCH_COMBOS], live_touch_combo_pad[TOUCH_COMBOS], live_touch_cam, live_touch_opacity, live_lock_on = {1},
+                     live_touch, live_touch_profile, live_touch_hud, live_touch_show[TB_COUNT],
+                     live_touch_combo[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS], live_touch_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS],
+                     live_touch_cam, live_touch_opacity, live_lock_on = {1},
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
                      live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
                      live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_bonus;
@@ -37,6 +39,7 @@ static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key / Join: read b
 static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key], live_ldn_join[sizeof saved.ldn_join];
 static SDL_SpinLock live_hp_lock;  // [Monster HP], HubHP: read when a large monster's HP is set (runtime/hle/hpscale.c)
 static HpScale live_hp;
+static Config live_crossplay;  // protected by live_ldn_lock
 // A save updates changed hot fields only. Saving the volume must not silently
 // remove an unchanged FOV/FPS override supplied by the development environment.
 static void publish_live(const Config *c, bool all) {
@@ -60,10 +63,11 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->touch_controls != saved.touch_controls) SDL_SetAtomicInt(&live_touch, c->touch_controls);
     if (all || c->touch_hud != saved.touch_hud) SDL_SetAtomicInt(&live_touch_hud, c->touch_hud);
     for (int i = 0; i < TB_COUNT; i++) SDL_SetAtomicInt(&live_touch_show[i], c->touch_show[i]);
-    for (int i = 0; i < TOUCH_COMBOS; i++) {
-        SDL_SetAtomicInt(&live_touch_combo[i], (int)config_combo_mask(c->touch_combo[i]));
-        SDL_SetAtomicInt(&live_touch_combo_pad[i], c->touch_combo_pad[i]);
-    }
+    for (int profile = 0; profile < TOUCH_LAYOUT_PROFILES; profile++)
+        for (int i = 0; i < TOUCH_COMBOS; i++) {
+            SDL_SetAtomicInt(&live_touch_combo[profile][i], (int)config_combo_mask(c->touch_weapon_combo[profile][i]));
+            SDL_SetAtomicInt(&live_touch_combo_pad[profile][i], c->touch_weapon_combo_pad[profile][i]);
+        }
     if (all || c->lock_on != saved.lock_on) SDL_SetAtomicInt(&live_lock_on, c->lock_on);
     if (all || c->touch_camera != saved.touch_camera) set_float(&live_touch_cam, c->touch_camera);
     if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
@@ -93,6 +97,18 @@ static void publish_live(const Config *c, bool all) {
         if (all || strcmp(c->ldn_join, saved.ldn_join)) memcpy(live_ldn_join, c->ldn_join, sizeof live_ldn_join);
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
+    SDL_LockSpinlock(&live_ldn_lock);
+    if (all || c->crossplay != saved.crossplay) live_crossplay.crossplay = c->crossplay;
+    if (all || strcmp(c->ryu_servers, saved.ryu_servers)) memcpy(live_crossplay.ryu_servers, c->ryu_servers, sizeof live_crossplay.ryu_servers);
+    if (all || c->ryu_host != saved.ryu_host) live_crossplay.ryu_host = c->ryu_host;
+    if (all || c->ryu_port != saved.ryu_port) live_crossplay.ryu_port = c->ryu_port;
+    if (all || strcmp(c->ryu_password, saved.ryu_password)) memcpy(live_crossplay.ryu_password, c->ryu_password, sizeof live_crossplay.ryu_password);
+    if (all || strcmp(c->room_server, saved.room_server)) memcpy(live_crossplay.room_server, c->room_server, sizeof live_crossplay.room_server);
+    if (all || c->room_host != saved.room_host) live_crossplay.room_host = c->room_host;
+    if (all || c->room_port != saved.room_port) live_crossplay.room_port = c->room_port;
+    if (all || strcmp(c->room_name, saved.room_name)) memcpy(live_crossplay.room_name, c->room_name, sizeof live_crossplay.room_name);
+    if (all || strcmp(c->room_password, saved.room_password)) memcpy(live_crossplay.room_password, c->room_password, sizeof live_crossplay.room_password);
+    SDL_UnlockSpinlock(&live_ldn_lock);
     if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
     if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
@@ -159,11 +175,21 @@ int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
 int config_live_touch_controls(void) { return SDL_GetAtomicInt(&live_touch); }
+int config_live_touch_profile(void) { return SDL_GetAtomicInt(&live_touch_profile); }
+void config_set_touch_profile(int profile) {
+    if (profile >= 0 && profile < TOUCH_LAYOUT_PROFILES) SDL_SetAtomicInt(&live_touch_profile, profile);
+}
 int config_live_touch_hud(void) { return SDL_GetAtomicInt(&live_touch_hud); }
 int config_live_lock_on(void) { return SDL_GetAtomicInt(&live_lock_on); }
 int config_live_touch_show(int button) { return SDL_GetAtomicInt(&live_touch_show[button]); }
-uint32_t config_live_touch_combo(int index) { return (uint32_t)SDL_GetAtomicInt(&live_touch_combo[index]); }
-int config_live_touch_combo_pad(int index) { return SDL_GetAtomicInt(&live_touch_combo_pad[index]); }
+uint32_t config_live_touch_combo(int profile, int index) {
+    if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES || index < 0 || index >= TOUCH_COMBOS) return 0;
+    return (uint32_t)SDL_GetAtomicInt(&live_touch_combo[profile][index]);
+}
+int config_live_touch_combo_pad(int profile, int index) {
+    if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES || index < 0 || index >= TOUCH_COMBOS) return PADB_NONE;
+    return SDL_GetAtomicInt(&live_touch_combo_pad[profile][index]);
+}
 
 // The names of a combined button's parts, in BTN_* order (hle/input.h)
 static const char *const COMBO_NAMES[16] = {"A", "B", "X", "Y", "L3", "R3", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down"};
@@ -206,6 +232,20 @@ void config_live_ldn(char *server, size_t server_size, char *key, size_t key_siz
     SDL_LockSpinlock(&live_ldn_lock);
     if (server) SDL_strlcpy(server, live_ldn_server, server_size);
     if (key) SDL_strlcpy(key, live_ldn_key, key_size);
+    SDL_UnlockSpinlock(&live_ldn_lock);
+}
+void config_live_crossplay(Config *out) {
+    SDL_LockSpinlock(&live_ldn_lock);
+    out->crossplay = live_crossplay.crossplay;
+    memcpy(out->ryu_servers, live_crossplay.ryu_servers, sizeof out->ryu_servers);
+    out->ryu_host = live_crossplay.ryu_host;
+    out->ryu_port = live_crossplay.ryu_port;
+    memcpy(out->ryu_password, live_crossplay.ryu_password, sizeof out->ryu_password);
+    memcpy(out->room_server, live_crossplay.room_server, sizeof out->room_server);
+    out->room_host = live_crossplay.room_host;
+    out->room_port = live_crossplay.room_port;
+    memcpy(out->room_name, live_crossplay.room_name, sizeof out->room_name);
+    memcpy(out->room_password, live_crossplay.room_password, sizeof out->room_password);
     SDL_UnlockSpinlock(&live_ldn_lock);
 }
 int config_language(void) { return SDL_GetAtomicInt(&language); }
@@ -251,7 +291,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 
 // What config_save writes: a setting of the table (setting) or a Quest<number> entry (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-#define ENTRY_MAX (HP_QUESTS_MAX + 160)  // (every setting of g_settings, and the quests set apart)
+#define ENTRY_MAX (HP_QUESTS_MAX + 384)  // settings, including 15 layouts' combos, and the quest overrides
 static void normalize(const char *s, char *out, size_t size) {
     size_t n = 0;
     for (; *s && n + 1 < size; s++)

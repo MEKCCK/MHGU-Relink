@@ -142,7 +142,8 @@ extern "C" void perfstats_draw(float w, float h) {
     if (fps < 0) return;  // (nothing measured yet)
 
     // the line: "60 FPS · 16.6 ms · max 24.1 · 38.5 °C (moderate)", the status only when there is one
-    bool es = config_language() == 1;
+    int language = config_language();
+    bool es = language == 1, zh = language >= 2;
     char f[16], ms[16], mx[16];
     snprintf(f, sizeof f, "%.0f", fps);
     decimal(ms, sizeof ms, avg_ms, es);
@@ -158,11 +159,14 @@ extern "C" void perfstats_draw(float w, float h) {
     add(avg_ms > 0 ? ms : "--", INK);
     add(" ms", GOLD);
     add(SEP, DIM);
-    add(es ? "m\xC3\xA1x " : "max ", GOLD);
+    add(zh ? "\xE5\xB3\xB0\xE5\x80\xBC " : es ? "m\xC3\xA1x " : "max ", GOLD);
     add(mx, INK);
 #ifdef __ANDROID__
     static const char *const STATUS_EN[7] = {"", "light", "moderate", "severe", "critical", "emergency", "shutdown"};
     static const char *const STATUS_ES[7] = {"", "leve", "moderado", "grave", "cr\xC3\xADtico", "emergencia", "apagando"};
+    static const char *const STATUS_ZH[7] = {"", "\xE8\xBD\xBB\xE5\xBE\xAE", "\xE4\xB8\xAD\xE5\xBA\xA6",
+                                              "\xE4\xB8\xA5\xE9\x87\x8D", "\xE4\xB8\xB4\xE7\x95\x8C",
+                                              "\xE7\xB4\xA7\xE6\x80\xA5", "\xE5\x85\xB3\xE6\x9C\xBA"};
     char tc[16];
     int t = g_temp, st = g_thermal;
     float room = g_headroom;  // (NaN: every comparison false)
@@ -175,7 +179,7 @@ extern "C" void perfstats_draw(float w, float h) {
     }
     if (st >= 1 && st <= 6) {
         if (t != INT_MIN) add(" (", GOLD); else add(SEP, DIM);
-        add(es ? STATUS_ES[st] : STATUS_EN[st], st >= 2 ? BAD : GOLD);
+        add(zh ? STATUS_ZH[st] : es ? STATUS_ES[st] : STATUS_EN[st], st >= 2 ? BAD : GOLD);
         if (t != INT_MIN) add(")", GOLD);
     }
 #endif

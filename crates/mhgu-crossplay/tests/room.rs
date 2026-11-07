@@ -31,7 +31,15 @@ fn wait(f: impl Fn() -> bool, secs: u64) -> bool {
 #[test]
 fn room_roundtrip() {
     let port = 24900 + (std::process::id() % 400) as u16;
-    if std::env::var("ROOM_ROLE").as_deref() == Ok("b") { role_b(port); return; }
+    match std::env::var("ROOM_ROLE").as_deref() {
+        Ok("b") => { role_b(port); return; }
+        Ok("crash") => {
+            let port: u16 = std::env::var("ROOM_PORT").unwrap().parse().unwrap();
+            room::join(&format!("127.0.0.1:{port}"), "b", "").expect("b joined");
+            std::process::exit(0);
+        }
+        _ => {}
+    }
     roomsrv::start(port, "MHGU", "", "MHGU Host").expect("room server");
     room::set_hooks(room::RoomHooks { ldn: Some(on_ldn), members: Some(on_members), ..Default::default() });
     let ip = room::join(&format!("127.0.0.1:{port}"), "a", "").expect("a joined");
@@ -46,6 +54,24 @@ fn room_roundtrip() {
     assert_eq!(LAST.lock().unwrap().as_slice(), b"pong");
     room::leave();
     let _ = child.wait();
+
+    let mut crashed = std::process::Command::new(std::env::current_exe().unwrap())
+        .env("ROOM_ROLE", "crash").env("ROOM_PORT", port.to_string())
+        .arg("--exact").arg("room_roundtrip").arg("--nocapture")
+        .spawn().expect("spawn crashed client");
+    assert!(wait(|| MEMBERS.load(Ordering::SeqCst) >= 2, 10), "crashed client joined");
+    assert_eq!(crashed.wait().unwrap().code(), Some(0));
+    let deadline = Instant::now() + Duration::from_secs(22);
+    let mut rejoined = false;
+    while Instant::now() < deadline {
+        if room::join(&format!("127.0.0.1:{port}"), "b", "").is_ok() {
+            rejoined = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert!(rejoined, "same nickname can rejoin after its peer times out");
+    room::leave();
     roomsrv::stop();
 }
 

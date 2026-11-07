@@ -63,8 +63,8 @@ static Service *open_romfs_storage(void) {
     if (!opened) {
         char base[1024];
         snprintf(base, sizeof base, "%s/romfs", g_game_dir);
-        const char *layers[64];
-        int n = mods_romfs_layers(layers, 64);
+        const char *layers[MODS_MAX];
+        int n = mods_romfs_layers(layers, MODS_MAX);
         if (!romfs_open(base, layers, n)) FATAL("cannot read the game's romfs folder (%s)\n", base);
         opened = true;
     }

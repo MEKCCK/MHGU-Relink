@@ -716,14 +716,15 @@ void plat_error_box(const char *msg) {
 // The game's error screen, in a process of its own (LogShareActivity): this one is about to end, and sharing the log
 // must outlive it. SDL looked up at run time, as in plat_error_box.
 static bool crash_screen(void) {
+    int config_language(void);
     typedef void *(*Get)(void);
     Get get_env = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"), get_act = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity");
     JNIEnv *env = get_env ? (JNIEnv *)get_env() : NULL;
     jobject act = env && get_act ? (jobject)get_act() : NULL;
     if (!act) return false;
     jclass cls = (*env)->GetObjectClass(env, act);
-    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "crashReport", "()V") : NULL;
-    if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "crashReport", "(I)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jint)config_language());
     bool ok = m && !(*env)->ExceptionCheck(env);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     if (cls) (*env)->DeleteLocalRef(env, cls);

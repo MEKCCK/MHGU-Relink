@@ -624,7 +624,7 @@ fn handle(c: &Arc<Conn>, ty: u8, d: &[u8]) {
             c.cv.notify_all();
         }
         msg::PROXY_DATA => {
-            if c.deliver {
+            if c.deliver || c.peer {
                 got_data(c, d);
             }
         }

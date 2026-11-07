@@ -34,7 +34,8 @@ fn host_and_join_against_stub_server() {
     if std::env::var("RYU_ROLE").as_deref() == Ok("host") { run_host(); return; }
     let port = 30500 + (std::process::id() % 200) as u16;
     let stub = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/ryuldn_stub_server.py");
-    let mut srv = std::process::Command::new("python3").arg(stub).arg(port.to_string())
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let mut srv = std::process::Command::new(python).arg(stub).arg(port.to_string())
         .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().expect("stub server");
     std::thread::sleep(Duration::from_millis(800));
     let addr = format!("127.0.0.1:{port}");

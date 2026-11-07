@@ -1380,17 +1380,17 @@ void forge_init(void) {
     // the plugin files: the game's RomFS, then each mod's (a later one replaces one of the same name)
     static char found[MAX_PLUGINS][1400];  // (kept off the stack)
     char base[1024], dir[1100];
-    const char *layers[65];
+    const char *layers[MODS_MAX + 1];
     snprintf(base, sizeof base, "%s/romfs", g_game_dir);
     layers[0] = base;
-    int nl = 1 + mods_romfs_layers(layers + 1, 64), nf = 0;
+    int nl = 1 + mods_romfs_layers(layers + 1, MODS_MAX), nf = 0;
     for (int l = 0; l < nl; l++) {
         if (!ci_path(layers[l], "nativeNX/plugins", dir, sizeof dir)) continue;
         DIR *d = opendir(dir);
         struct dirent *e;
         while (d && (e = readdir(d))) {
-            const char *ext = strrchr(e->d_name, '.');  // (Forge: the name ends in ".nro", exactly)
-            if (!ext || strcmp(ext, ".nro")) continue;
+            const char *ext = strrchr(e->d_name, '.');
+            if (!ext || strcasecmp(ext, ".nro")) continue;
             int i = 0;
             while (i < nf && strcasecmp(strrchr(found[i], '/') + 1, e->d_name)) i++;
             if (i == MAX_PLUGINS) {

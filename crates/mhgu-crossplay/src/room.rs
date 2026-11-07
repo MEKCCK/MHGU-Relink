@@ -425,7 +425,11 @@ pub fn join(server: &str, nick: &str, password: &str) -> Result<[u8; 4], String>
     let end = Instant::now() + Duration::from_millis(CONNECT_MS);
     loop {
         match h.service() {
-            Ok(Some(Event::Connect { .. })) => break,
+            Ok(Some(Event::Connect { .. })) => {
+                h.peer_mut(id).set_ping_interval(1000);
+                h.peer_mut(id).set_timeout(2, 5000, 15000);
+                break;
+            }
             Ok(_) => {}
             Err(_) => return Err("no answer from the room".into()),
         }

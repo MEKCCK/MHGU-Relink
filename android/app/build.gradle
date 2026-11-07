@@ -47,9 +47,9 @@ android {
         jniLibs {
             // libmhgugame.so es enorme: extraída al instalar (dlopen por ruta) y sin comprimir dentro del APK no hace falta
             useLegacyPackaging = true
-            // El APK público no lleva código del juego: cada jugador crea el suyo (tools/build_game.py). -Pwithgame lo mete
-            // para pruebas propias; un APK así no se publica.
+            // Public builds exclude game code; -Pwithgame preserves the personal bundle.
             if (!project.hasProperty('withgame')) excludes += ['**/libmhgugame.so']
+            keepDebugSymbols += ['**/libmhgugame.so']
             // (Gradle quita la info de depuración: los símbolos dinámicos y .eh_frame quedan para los backtraces)
         }
     }
@@ -62,3 +62,26 @@ android {
         checkReleaseBuilds = false
     }
 }
+
+dependencies {
+    implementation 'com.github.junrar:junrar:8.1.2'
+    runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
+}
+
+def validateBundledGame = tasks.register('validateBundledGame') {
+    def gameLibrary = file('src/main/jniLibs/arm64-v8a/libmhgugame.so')
+    def bundledId = file('src/main/assets/libmhgugame.id')
+    def runtimeId = file('src/main/assets/gamelib_id.txt')
+    onlyIf { project.hasProperty('withgame') }
+    inputs.files(gameLibrary, bundledId, runtimeId)
+    doLast {
+        if (!gameLibrary.isFile() || !bundledId.isFile() || !runtimeId.isFile()) {
+            throw new GradleException('The bundled libmhgugame.so and its ID files are required.')
+        }
+        def expected = bundledId.getText('UTF-8').trim()
+        if (!(expected ==~ /[0-9a-f]{16}/) || expected != runtimeId.getText('UTF-8').trim()) {
+            throw new GradleException('The bundled game library ID does not match this runtime. Rebuild compatible game code.')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn(validateBundledGame) }

@@ -57,6 +57,7 @@ struct Peer {
 struct State {
     running: bool,
     hosting: bool,
+    disconnect_reason: u32,
     /// The host's listener address (the port is the one the game announced); for a joiner, the
     /// host's port (the network's id).
     listen_port: u16,
@@ -79,6 +80,7 @@ struct State {
     node: u8,
     stop: Arc<AtomicBool>,
     accept_thread: Option<std::thread::JoinHandle<()>>,
+    udp_thread: Option<std::thread::JoinHandle<()>>,
     reader_thread: Option<std::thread::JoinHandle<()>>,
     /// The host's UDP socket (LAN answers and the game's datagrams), and the station's one.
     udp: Option<Arc<UdpSocket>>,
@@ -111,6 +113,7 @@ impl State {
         State {
             running: false,
             hosting: false,
+            disconnect_reason: 0,
             listen_port: 0,
             own_ip: 0,
             subnet: 0,
@@ -125,6 +128,7 @@ impl State {
             node: 0,
             stop: Arc::new(AtomicBool::new(false)),
             accept_thread: None,
+            udp_thread: None,
             reader_thread: None,
             udp: None,
             usock: None,
@@ -307,6 +311,7 @@ pub extern "C" fn mhgu_ldn_host(
     {
         let mut g = STATE.lock().unwrap();
         let st = g.get_or_insert_with(State::new);
+        st.disconnect_reason = 0;
         st.running = true;
         st.hosting = true;
         st.listen_port = local.port();
@@ -335,8 +340,8 @@ pub extern "C" fn mhgu_ldn_host(
         }
         st.mac = mac;
         st.lcv = u16::from_le_bytes([
-            st.info.get(0x14).copied().unwrap_or(0),
-            st.info.get(0x15).copied().unwrap_or(0),
+            st.info.get(n0 + proto::NODE_LCV).copied().unwrap_or(0),
+            st.info.get(n0 + proto::NODE_LCV + 1).copied().unwrap_or(0),
         ]);
         let _ = n0;
         let (own_ip, own_mac, own_name, own_lcv) = (st.own_ip, st.mac, st.name.clone(), st.lcv);
@@ -359,7 +364,7 @@ pub extern "C" fn mhgu_ldn_host(
         let udp = Arc::new(udp);
         with(|st| st.udp = Some(Arc::clone(&udp)));
         let stop_udp = Arc::clone(&stop);
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let _ = udp.set_read_timeout(Some(Duration::from_millis(200)));
             let mut buf = [0u8; 16 + proto::LINK_UDP_MAX_PAYLOAD];
             while !stop_udp.load(Ordering::Relaxed) {
@@ -439,6 +444,7 @@ pub extern "C" fn mhgu_ldn_host(
                 }
             }
         });
+        with(|st| st.udp_thread = Some(handle));
     }
     // A non-blocking accept loop: `mhgu_ldn_leave` sets the flag and joins this thread, so the port is
     // free again when the game creates a new network right after (re-hosting used to fail with
@@ -480,6 +486,8 @@ fn relay_prefix(pair: u32, secret: u64) -> [u8; 16] {
 }
 
 fn serve_peer_relay(stream: TcpStream, relay: Option<(u32, u64)>) {
+    // Windows accepted sockets inherit the nonblocking listener mode.
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut hello_stream = stream;
@@ -496,6 +504,11 @@ fn serve_peer_relay(stream: TcpStream, relay: Option<(u32, u64)>) {
         }
     };
     let Some(hello) = hello else { return };
+    if hello.scan_only {
+        let info = with(|st| st.info.clone());
+        let _ = write_frame(&mut hello_stream, proto::F_INFO, &[&info]);
+        return;
+    }
 
     // The WELCOME must already show this peer's node: the joining client checks that the entry at the
     // WELCOME's node index is marked connected in the NetworkInfo it is handed.
@@ -723,7 +736,7 @@ fn station_udp_start(peer: SocketAddr, token: u32, relay: Option<(u32, u64)>, st
         st.udp_up = false;
         st.relay = relay;
     });
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let mut next = std::time::Instant::now();
         let mut buf = [0u8; 32 + proto::LINK_UDP_MAX_PAYLOAD];
         while !stop.load(Ordering::Relaxed) {
@@ -773,6 +786,7 @@ fn station_udp_start(peer: SocketAddr, token: u32, relay: Option<(u32, u64)>, st
             }
         }
     });
+    with(|st| st.udp_thread = Some(handle));
 }
 
 /// "host[:port]" -> a socket address (the hub server's port defaults to 39510).
@@ -912,6 +926,7 @@ pub extern "C" fn mhgu_ldn_join_server(
     let _ = client.set_read_timeout(Some(Duration::from_millis(50)));
     let stop = Arc::new(AtomicBool::new(false));
     with(|st| {
+        st.disconnect_reason = 0;
         st.running = true;
         st.hosting = false;
         let (ip, subnet) = joiner_own_ip(&info_blob, node);
@@ -925,7 +940,7 @@ pub extern "C" fn mhgu_ldn_join_server(
     });
     station_udp_start(addr, wel_token, Some((sp.pair, sp.secret)), Arc::clone(&stop));
     let reader_stop = Arc::clone(&stop);
-    std::thread::spawn(move || loop {
+    let handle = std::thread::spawn(move || loop {
         if reader_stop.load(Ordering::Relaxed) {
             break;
         }
@@ -952,11 +967,12 @@ pub extern "C" fn mhgu_ldn_join_server(
             }
             Ok(Event::Aux(d)) => with(|st| st.aux.push_back(d)),
             Ok(Event::Info(i)) => with(|st| st.info = i),
-            Ok(Event::Destroy(_)) => break,
+            Ok(Event::Destroy(reason)) => { station_disconnected(&reader_stop, reason); break; },
             Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
-            Err(_) => break,
+            Err(_) => { station_disconnected(&reader_stop, 6); break; },
         }
     });
+    with(|st| st.reader_thread = Some(handle));
     eprintln!("[link] joined hub {hub:#x} on {addr} as node {node}");
     true
 }
@@ -1074,6 +1090,7 @@ pub extern "C" fn mhgu_ldn_join(addr: *const c_char, name: *const c_char, info: 
     {
         let mut g = STATE.lock().unwrap();
         let st = g.get_or_insert_with(State::new);
+        st.disconnect_reason = 0;
         st.running = true;
         st.hosting = false;
         let (ip, subnet) = joiner_own_ip(&info_blob, node);
@@ -1117,10 +1134,10 @@ pub extern "C" fn mhgu_ldn_join(addr: *const c_char, name: *const c_char, info: 
             }
             Ok(Event::Aux(d)) => with(|st| st.aux.push_back(d)),
             Ok(Event::Info(i)) => with(|st| st.info = i),
-            Ok(Event::Destroy(_)) => break,
+            Ok(Event::Destroy(reason)) => { station_disconnected(&reader_stop, reason); break; },
             Err(e)
                 if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
-            Err(_) => break,
+            Err(_) => { station_disconnected(&reader_stop, 6); break; },
         }
     });
     with(|st| st.reader_thread = Some(handle));
@@ -1142,34 +1159,58 @@ pub extern "C" fn mhgu_ldn_join(addr: *const c_char, name: *const c_char, info: 
     true
 }
 
+fn station_disconnected(stop: &Arc<AtomicBool>, reason: u32) {
+    with(|st| {
+        if Arc::ptr_eq(&st.stop, stop) {
+            st.running = false;
+            st.disconnect_reason = reason;
+            stop.store(true, Ordering::Relaxed);
+        }
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_disconnect_reason() -> u32 {
+    with(|st| st.disconnect_reason)
+}
+
 #[no_mangle]
 pub extern "C" fn mhgu_ldn_leave() {
-    let (accept, reader, stop, peers) = {
+    let (accept, reader, udp, peers, writer) = {
         let mut g = STATE.lock().unwrap();
         match g.as_mut() {
             Some(st) => {
                 st.running = false;
                 st.own_hub = 0;
+                st.udp = None;
+                st.usock = None;
+                st.udp_up = false;
+                st.packets.clear();
+                st.aux.clear();
                 let a = st.accept_thread.take();
                 let r = st.reader_thread.take();
                 let stop = Arc::clone(&st.stop);
                 stop.store(true, Ordering::Relaxed);
                 let peers: Vec<Arc<Mutex<TcpStream>>> = st.peers.drain(..).map(|p| p.stream).collect();
-                st.writer = None;
-                (a, r, stop, peers)
+                (a, r, st.udp_thread.take(), peers, st.writer.take())
             }
             None => return,
         }
     };
-    let _ = stop;
     for p in peers {
-        let _ = p.lock().unwrap().shutdown(std::net::Shutdown::Both);
+        let mut stream = p.lock().unwrap();
+        let _ = write_frame(&mut stream, proto::F_DESTROY, &[&3u32.to_le_bytes()]);
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    if let Some(w) = writer {
+        let _ = w.lock().unwrap().shutdown(std::net::Shutdown::Both);
     }
     // The accept loop ends on the flag; joining it releases the listening port before we return.
     if let Some(t) = accept {
         let _ = t.join();
     }
-    drop(reader);
+    if let Some(t) = reader { let _ = t.join(); }
+    if let Some(t) = udp { let _ = t.join(); }
 }
 
 #[no_mangle]

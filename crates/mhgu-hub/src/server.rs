@@ -915,10 +915,8 @@ fn janitor(shared: Arc<Mutex<Shared>>) {
 }
 
 fn rand64() -> u64 {
-    use std::fs::File;
-    let mut f = File::open("/dev/urandom").expect("/dev/urandom");
     let mut b = [0u8; 8];
-    f.read_exact(&mut b).expect("/dev/urandom");
+    getrandom::fill(&mut b).expect("OS randomness unavailable");
     u64::from_le_bytes(b)
 }
 

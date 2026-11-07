@@ -7,6 +7,9 @@ below.
 - Forge (the MHGU plugin loader): the ImGui overlay's style (runtime/overlay.cpp) follows Forge's own. MIT License.
 - cimgui (third_party/cimgui): MIT License.
 - Dear ImGui (third_party/cimgui/imgui): MIT License.
+- Noto Sans CJK SC (android/app/src/main/assets/cjk.ttf): SIL Open Font License 1.1, Copyright 2014-2021 Adobe; its full license is in android/app/src/main/assets/licenses/NotoSansCJK-OFL.txt.
+- Junrar 8.1.2 (Android RAR import, com.github.junrar:junrar): UnRAR License; full text is in android/app/src/main/assets/licenses/Junrar.txt. It may not be used to develop a RAR-compatible archiver.
+- SLF4J API 2.0.17 (Junrar runtime dependency, org.slf4j:slf4j-api): MIT License; full text is in android/app/src/main/assets/licenses/SLF4J.txt.
 - AMD FidelityFX SDK 1.1.4 (third_party/fsr-vulkan/upstream/ffx-1.1.4): the FSR 3.1 upscaler's host code, Vulkan
   backend and shaders, and the ffx-api headers (third_party/ffx-api). MIT License, Copyright (C) 2024 Advanced Micro
   Devices, Inc.; the licence files are kept beside the code (third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt,
@@ -295,3 +298,13 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+MHGU-Relink crossplay networking
+================================================================================
+Network adapters and Rust crates adapted from MEKCCK/MHGU-Relink,
+commit a3fbb0155f8b64a5bedf6fde272a920059ad91e3 (MIT).
+Source: https://github.com/MEKCCK/MHGU-Relink
+The MIT license is included in android/app/src/main/assets/licenses/MHGU-Relink-LICENSE.txt.
+Rust dependency notices are included in
+android/app/src/main/assets/licenses/MHGU-Crossplay-THIRD-PARTY.txt.
