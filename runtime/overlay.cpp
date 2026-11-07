@@ -488,7 +488,7 @@ static void context_init(const char *font_path, float font_size) {
     if (cjk) {
         // (the one font for everything: JetBrains Maple Mono has the Latin glyphs too)
         cfg.OversampleH = cfg.OversampleV = 1;
-        if (strstr(cjk, ".ttc")) cfg.FontNo = 2;  // (Noto's collection: 2 is the Simplified Chinese face)
+        if (strstr(cjk, ".ttc")) cfg.FontNo = 0;  // (a collection's first face: msyh/Noto index 2 is not always there)
         font = io.Fonts->AddFontFromFileTTF(cjk, g_font_size, &cfg, ranges);
         if (font) font_path = cjk;
     }
