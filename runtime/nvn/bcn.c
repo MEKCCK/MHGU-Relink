@@ -9,7 +9,11 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #define BCDEC_IMPLEMENTATION
 #define BCDEC_BC4BC5_PRECISE
@@ -116,9 +120,19 @@ static void *bcn_worker(void *unused) {
     return NULL;
 }
 
+static long bcn_cores(void) {
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (long)si.dwNumberOfProcessors;
+#else
+    return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
+}
+
 static void bcn_workers_start(void) {
     if (P.started) return;
-    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    long cores = bcn_cores();
     int n = cores > BCN_WORKERS + 1 ? BCN_WORKERS : cores > 1 ? (int)cores - 1 : 0;
     P.started = n > 0 ? n : -1;
     for (int i = 0; i < n; i++) {
