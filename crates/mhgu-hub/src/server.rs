@@ -91,7 +91,7 @@ pub struct Shared {
 }
 
 /// A hub as the web UI shows it.
-pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64 }
+pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64, pub room: [u8; 4] }
 
 /// A player of a hub, as the admin page shows it.
 pub struct PlayerView { pub pair: u32, pub ip: String, pub down_bps: u64, pub up_bps: u64, pub idle: u64 }
@@ -111,6 +111,7 @@ impl Shared {
                 players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
                 link_proto: h.link_proto,
                 age: h.created.elapsed().as_secs(),
+                room: [h.room[0], h.room[1], h.room[2], h.room[3]],
             })
             .collect();
         hubs.sort_by(|a, b| b.players.cmp(&a.players).then(a.id.cmp(&b.id)));

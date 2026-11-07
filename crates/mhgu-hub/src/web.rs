@@ -70,6 +70,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "no players" => s!("No players yet.", "还没有玩家。", "Aún no hay jugadores."),
         "all" => s!("all", "全部", "todo"),
         "room" => s!("Room", "房间", "Sala"),
+        "key" => s!("Key", "Key", "Key"),
         "player" => s!("player", "玩家", "jugador"),
         "refresh" => s!("This page refreshes every 5 seconds.", "每 5 秒自动刷新。", "Se actualiza cada 5 segundos."),
         "admin" => s!("admin", "管理", "admin"),
@@ -412,10 +413,11 @@ impl Web {
         let mut rows = String::new();
         for (i, h) in v.hubs.iter().enumerate() {
             rows.push_str(&format!(
-                "<tr><td>{} {}</td><td>{}</td><td>{}</td><td>{}</td>\
+                "<tr><td>{} {}</td><td>{}</td><td>{}</td><td>{}</td><td><code>{:02x}{:02x}{:02x}{:02x}</code></td>\
                  <td><form method=post action=\"/admin/close?token={}\" style=\"margin:0\">\
                  <input type=hidden name=hub value=\"{}\"><button>{}</button></form></td></tr>",
-                t(l, "room"), i + 1, h.players, h.link_proto, secs(h.age), self.token, h.id, t(l, "close")
+                t(l, "room"), i + 1, h.players, h.link_proto, secs(h.age),
+                h.room[0], h.room[1], h.room[2], h.room[3], self.token, h.id, t(l, "close")
             ));
         }
         if rows.is_empty() {
@@ -462,7 +464,7 @@ impl Web {
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div></div>
-<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th></th></tr>{rows}</table>
+<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th></th></tr>{rows}</table>
 <p style="color:#9a8a76">{}</p>
 <p>{}</p>
 <h2>{}</h2>
@@ -472,7 +474,7 @@ impl Web {
             v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
             v.conns, t(l, "connections"), v.ips, t(l, "ips"),
             uptime(v.uptime), t(l, "uptime"), traffic(v.bytes), t(l, "traffic"),
-            t(l, "room"), t(l, "players"), t(l, "link"), t(l, "age"),
+            t(l, "room"), t(l, "players"), t(l, "link"), t(l, "age"), t(l, "key"),
             t(l, "closing hint"),
             match v.key_room {
                 Some(r) => format!("{} <code>{:02x}{:02x}{:02x}{:02x}</code>", t(l, "key locked"), r[0], r[1], r[2], r[3]),
