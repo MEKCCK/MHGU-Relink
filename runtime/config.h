@@ -36,8 +36,11 @@ enum {
 // The game's buttons, for showing each on the screen or not ([Touch] Show*: runtime/touch.cpp)
 enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, TB_L, TB_ZL, TB_ZR, TB_L3, TB_R3, TB_STICK,
        TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_ZL, TB_MENU_ZR, TB_COUNT };
-#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0}
+#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0}
 #define TOUCH_COMBOS 6
+#define TOUCH_WEAPON_LAYOUTS 15
+#define TOUCH_LEGACY_LAYOUTS 4
+#define TOUCH_LAYOUT_PROFILES (TOUCH_WEAPON_LAYOUTS + TOUCH_LEGACY_LAYOUTS)
 // a controller's buttons a combined button can be on (the less used ones)
 enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
        PADB_TOUCHPAD, PADB_COUNT };
@@ -118,12 +121,24 @@ typedef struct {
     char touch_combo[TOUCH_COMBOS][32];  // [Touch] Combo1..: the game's buttons one screen button presses together
                                          // ("A+X"; config_combo_mask); "" none
     int touch_combo_pad[TOUCH_COMBOS];   // [Touch] Combo1Pad..: PADB_*, a controller's button that does the same
+    char touch_weapon_combo[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS][32];
+    int touch_weapon_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS];
+    int crossplay;            // [Multiplayer] Crossplay: XP_OFF, XP_RYU, XP_ROOM or XP_MIXED
+    char ryu_servers[256];    // [Multiplayer] RyuServers: RyuLdn servers (host[:port], comma separated)
+    int ryu_host;             // [Multiplayer] RyuHost: run the RyuLdn server in this process when hosting
+    int ryu_port;             // [Multiplayer] RyuPort: the embedded server's TCP port
+    char ryu_password[64];    // [Multiplayer] RyuPassword: the lobby's passphrase (empty: public)
+    char room_server[256];    // [Multiplayer] RoomServer: suyu room server (host[:port]); empty: none
+    int room_host;            // [Multiplayer] RoomHost: run the room server in this process when hosting
+    int room_port;            // [Multiplayer] RoomPort: the embedded room server's port
+    char room_name[64];       // [Multiplayer] RoomName: the room's name
+    char room_password[64];   // [Multiplayer] RoomPassword: the room's password (empty: open)
 } Config;
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
-// The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
-// none). "" = no default: no internet hubs unless the player names a server.
-#define LDN_DEFAULT_SERVER ""
+// The hub server used when ini Server is empty (runtime/net/ldn.c, server/).
+#define LDN_DEFAULT_SERVER "114.66.25.224:39510"
+enum { XP_OFF, XP_RYU, XP_ROOM, XP_MIXED };
 #define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
 #define LOW_END_FPS 30
 #define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
@@ -209,8 +224,10 @@ int config_live_touch_controls(void);  // [Touch] (runtime/touch.cpp)
 int config_live_touch_hud(void);
 int config_live_lock_on(void);
 int config_live_touch_show(int button);        // TB_*
-uint32_t config_live_touch_combo(int index);   // its buttons (config_combo_mask)
-int config_live_touch_combo_pad(int index);    // PADB_*
+int config_live_touch_profile(void);
+void config_set_touch_profile(int profile);
+uint32_t config_live_touch_combo(int profile, int index);   // per-layout buttons (config_combo_mask)
+int config_live_touch_combo_pad(int profile, int index);    // per-layout PADB_*
 float config_live_touch_camera(void);
 float config_live_touch_opacity(void);
 int config_live_touch_vibration(void);  // [Touch] Vibration
@@ -222,6 +239,7 @@ int config_live_bloom(void);            // [Performance] Bloom
 int config_live_reverb(void);           // [Audio] Reverb
 void config_live_test(const Config *c);  // (config.c: a test run's overrides of Shadows, Bloom, FPS; not saved)
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
+void config_live_crossplay(Config *out);  // coherent snapshot of saved Crossplay/Ryu*/Room* settings
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)

@@ -22,6 +22,17 @@ cd "$SRC"
 GAMELIB_ID=$( (cat tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
                runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h | tr -d '\r'; echo "$GENFLAGS") | sha256sum | cut -c1-16)
 SHADER_ID=$(cat runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h | tr -d '\r' | sha256sum | cut -c1-16)
+BUNDLED_ID="$ROOT/android/app/src/main/assets/libmhgugame.id"
+if [ "$ABI" = arm64-v8a ]; then
+  if [ ! -f "$ROOT/android/app/src/main/jniLibs/$ABI/libmhgugame.so" ] || [ ! -f "$BUNDLED_ID" ]; then
+    echo "The bundled libmhgugame.so and libmhgugame.id are required." >&2
+    exit 1
+  fi
+  if [ "$(tr -d '\r\n' < "$BUNDLED_ID")" != "$GAMELIB_ID" ]; then
+    echo "The bundled game library does not match this runtime (expected $GAMELIB_ID)." >&2
+    exit 1
+  fi
+fi
 VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
 cd "$HERE"
 
@@ -43,6 +54,7 @@ cp "$OUT/libmain.so" "$OUT/libmhguffmpeg.so" "$ROOT/deps/out/$ABI/sdl3/lib/libSD
 cp "$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/$( [ $ABI = arm64-v8a ] && echo aarch64 || echo x86_64)-linux-android/libc++_shared.so" "$J/"
 # (a driver of the player's own: runtime/platform/android_gpu.c; these are found in the app's nativeLibraryDir)
 [ "$ABI" = arm64-v8a ] && cp "$OUT"/adrenotools/src/hook/lib*_hook.so "$OUT/adrenotools/src/hook/libhook_impl.so" "$J/"
-[ -f "$OUT/libmhgugame.so" ] && cp "$OUT/libmhgugame.so" "$J/"
+# Keep the supplied ARM64 library; a generated build must not replace it silently.
+if [ "$ABI" != arm64-v8a ] && [ -f "$OUT/libmhgugame.so" ]; then cp "$OUT/libmhgugame.so" "$J/"; fi
 echo "native $ABI: ok (GAMELIB_ID $GAMELIB_ID)"
 ls -la "$J"

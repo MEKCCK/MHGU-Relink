@@ -26,7 +26,7 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 
 ### Menus and comfort
 
-- **Menus made for your thumb:** the movement stick stays where it is and moves the cursor. Confirm and Back sit on a pill in the same place as the attacks, and dragging on the screen moves the cursor too. L and R are tabs
+- **Menus made for your thumb:** the movement stick stays where it is and moves the hunter; the D-pad, when shown, or a screen drag moves the menu cursor. Confirm and Back sit on a pill in the same place as the attacks. L and R are tabs
 - Your phone's keyboard works for typing your character's name
 - The settings menu works by touch and matches the game's look
 - **Faster drinking and eating:** two optional cheats, off by default, under the gear, **Cheats**. They speed up the animation x1.7 or x2.5, but they don't let you walk while drinking
@@ -84,7 +84,7 @@ Adjustable monster HP and Village quests in the Hub are also in the settings, bu
 ## Cheats and mods
 
 - **Cheats:** `.txt` files in Atmosphere's format, for version 1.4.0 (its build id is `FB08F1D20FD1204F`). Under the gear, **Cheats**, **Add cheats**, pick the file, and turn each one on in that same page. They start off.
-- **Mods:** a mod's folder with `romfs` or `exefs` in it, or a `.zip` of that folder. Under the gear, **Mods**, **Add a mod**. Then order them and turn them on in that page.
+- **Mods:** under the gear, **Mods**, **Add a mod**, choose a folder, ZIP or RAR with `romfs`, `exefs` or `nativeNX`, or an individual `.nro`, `.ips`, `.ips32` or `.pchtxt` file. If a package has multiple variants, choose one. Order and enable mods on that page, then restart. Code plugins must match the game's version and the port's supported interfaces; see [模组导入与兼容范围](docs/MODS-zh-CN.md).
 - You can also copy them yourself into your game folder, into `cheats` and `mods` folders beside `exefs` and `romfs`. The game reads them at start.
 - Cheats and mods that change the game's code work, but that part of the game runs slower. Use cheats online only if everyone in the hub agrees.
 

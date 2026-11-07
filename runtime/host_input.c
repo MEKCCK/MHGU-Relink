@@ -801,7 +801,7 @@ void host_input_update(void) {
     if (kx && ky) k = k * 7071 / 10000;  // diagonals: same length as straight
     lx += kx * k, ly += ky * k;
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
-    touch_input(real_pad_connected(), typing, &b, &lx, &ly, &tdx, &tdy);  // (a real controller open hides them)
+    touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
     if (tdx != 0 || tdy != 0) mouse_dx += tdx, mouse_dy += tdy, touch_cam_ns = plat_now_ns();
     bool mouse_moved = mouse_dx != 0 || mouse_dy != 0;  // (the mouse or a finger turning the camera: the lock-on waits)
     mouse_update(&rx, &ry);
@@ -813,9 +813,10 @@ void host_input_update(void) {
             SDL_GAMEPAD_BUTTON_GUIDE, SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
             SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_TOUCHPAD};
         uint64_t taken = 0;
+        int profile = config_live_touch_profile();
         for (int i = 0; i < TOUCH_COMBOS; i++) {
-            int on = config_live_touch_combo_pad(i);
-            uint32_t combo = config_live_touch_combo(i);
+            int on = config_live_touch_combo_pad(profile, i);
+            uint32_t combo = config_live_touch_combo(profile, i);
             if (on <= PADB_NONE || on >= PADB_COUNT || !combo) continue;
             taken |= 1ull << pad_of[on];
             if (SDL_GetGamepadButton(pad, pad_of[on])) b |= combo;

@@ -20,6 +20,8 @@ android/app/build/
 android/app/src/main/jniLibs/
 android/local.properties
 native/build/
+target/
+tests/network/output/
 deps/src/
 deps/out/
 deps/tmp/

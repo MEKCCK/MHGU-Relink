@@ -16,6 +16,8 @@
 #define VT_DRAWN      94u          // the slot of the vtable
 #define FN_DRAWN      0x4a2444u
 #define PL_FLAGS      0x2749u      // (bit 0: the weapon is out, drawing included)
+#define PL_DATA       0x13c4u
+#define PD_WEAPON     0x14cu
 #define PL_ACT_ST     0x2506u      // the current action (u16 act_st, act_no: hle/movelog.c)
 #define PL_ACT_NO     0x250au
 #define VT_HEAVY      0x194bdc4u   // those classes' vtables
@@ -50,6 +52,19 @@ uint32_t weapon_hunter(void) {
         LOG("[weapon] player slot %08x (vtable %08x): hunter %08x\n", pl, LD32(pl), h);
     seen_pl = pl, seen_h = h;
     return h;
+}
+
+// The player's data holds the weapon id used by the game's weapon tables (15: Prowler).
+int weapon_type(void) {
+    uint32_t gc = LD32(G_GAMECONTROL), sp = LD32(G_SPLAYER);
+    if (!sane(gc) || !sane(sp)) return -1;
+    uint32_t slot = LD32(gc + 0x30);
+    if (slot > 3) return -1;
+    uint32_t pl = LD32(sp + 0x1c + 4u * slot);
+    uint32_t pd = sane(pl) ? LD32(pl + PL_DATA) : 0;
+    if (!sane(pd)) return -1;
+    uint32_t type = LD32(pd + PD_WEAPON);
+    return type <= 15 && type != 5 ? (int)type : -1;
 }
 
 // The game's option Bow Controls (sGameControl +0x6c, the options copied there from the save): 0 Type 1, X draws and R

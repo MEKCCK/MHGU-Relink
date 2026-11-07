@@ -114,8 +114,9 @@ static const char *boot_text(const char *english) {
     int n = 0;
     SDL_Locale **loc = SDL_GetPreferredLocales(&n);
     bool spanish = loc && n > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "es", 2);
+    bool chinese = loc && n > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "zh", 2);
     SDL_free(loc);
-    return settings_text(spanish ? 1 : 0, english);
+    return settings_text(spanish ? 1 : chinese ? 2 : 0, english);
 }
 // These files can't be played: GameFolderActivity shows what is wrong with them at the next start
 static void files_rejected(void) {
@@ -175,11 +176,16 @@ static void android_env(void) {
 #endif
     }
     Dl_info di;
-    if (!getenv("MHGU_GAME_LIB") && dladdr((void *)android_env, &di) && di.dli_fname) {
+    if (dladdr((void *)android_env, &di) && di.dli_fname) {
         char lib[1100];
         snprintf(lib, sizeof lib, "%s", di.dli_fname);
         char *s = strrchr(lib, '/');
-        if (s) { snprintf(s + 1, sizeof lib - (size_t)(s + 1 - lib), "libmhgugame.so"); setenv("MHGU_GAME_LIB", lib, 0); }
+        if (s) {
+            snprintf(s + 1, sizeof lib - (size_t)(s + 1 - lib), "libmhgugame.so");
+            struct stat st;
+            // Bundled game code takes priority over an older library retained by a previous installation.
+            if (stat(lib, &st) == 0) setenv("MHGU_GAME_LIB", lib, 1);
+        }
     }
 }
 #endif

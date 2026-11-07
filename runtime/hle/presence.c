@@ -22,6 +22,7 @@
 // - Monster ids (small << 12 | variant << 8 | em number) -> name: the game's (id, index) table 0x1797ea4 (137 pairs),
 //   then the index's UI number 0x182e7f8, the string number in GUI\06_msg\monsterName_eng.gmd.
 #include <pthread.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,10 @@
 #define TOWN_NONE      0xffu
 #define TICK_NS        1000000000ull
 #define MENU_NS        15000000000ull
+
+static SDL_AtomicInt presence_place;
+static SDL_AtomicInt presence_quest;
+int presence_in_quest(void) { return SDL_GetAtomicInt(&presence_quest); }
 
 static const char *const g_weapons[] = {
     "Great Sword", "Sword & Shield", "Hammer", "Lance", "Heavy Bowgun", NULL, "Light Bowgun", "Long Sword",
@@ -165,12 +170,18 @@ void presence_tick(void) {
     int town = sane(gc) ? LD8(gc + GC_TOWN) : -1;
     uint32_t quest = town == TOWN_NONE && sane(qd) ? LD32(qd + 8) : 0;
     int place = !sane(pd) ? -1 : town == TOWN_NONE ? (quest ? 100 : -2) : town;  // -1 menus, 100 quest, -2 between
+    SDL_SetAtomicInt(&presence_quest, place == 100);
     // (no hunter while loading too: the menus only after a while; loading, the arena's waiting room...: what was
     // shown stays)
     static uint64_t no_hunter;
     if (place != -1) no_hunter = 0;
     else if (!no_hunter) no_hunter = now;
-    if (place == -2 || (place == -1 && last_place != -1 && last_place != -2 && now - no_hunter < MENU_NS)) return;
+    if (place == -2) {
+        SDL_SetAtomicInt(&presence_place, 0);
+        return;
+    }
+    if (place == -1 && last_place != -1 && last_place != -2 && now - no_hunter < MENU_NS) return;
+    SDL_SetAtomicInt(&presence_place, place);
     if (place != last_place && place >= 0 && place < 100) LOG("[discord] town %d\n", place);
     if (place != last_place || quest != last_quest) since = (int64_t)time(NULL);
     last_place = place, last_quest = quest;

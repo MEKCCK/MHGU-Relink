@@ -41,6 +41,43 @@ set(FSR_CXX ${FSR}/src/ffx_vk_fsr3_portable.cpp ${FSR}/src/ffx_fsr3_shaderblobs.
 add_library(main SHARED ${RT_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
                         ${S}/runtime/perfstats.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
 
+# The emulator room protocols live in Rust; the existing C local-play link stays intact.
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+  set(RUST_TARGET aarch64-linux-android)
+elseif(ANDROID_ABI STREQUAL "x86_64")
+  set(RUST_TARGET x86_64-linux-android)
+else()
+  message(FATAL_ERROR "Crossplay does not support Android ABI ${ANDROID_ABI}")
+endif()
+get_filename_component(NDK_BIN ${CMAKE_C_COMPILER} DIRECTORY)
+set(RUST_LINKER "${NDK_BIN}/${RUST_TARGET}${ANDROID_PLATFORM_LEVEL}-clang")
+if(CMAKE_HOST_WIN32)
+  string(APPEND RUST_LINKER ".cmd")
+endif()
+string(TOUPPER "${RUST_TARGET}" RUST_TARGET_ENV)
+string(REPLACE "-" "_" RUST_TARGET_ENV "${RUST_TARGET_ENV}")
+string(REPLACE "-" "_" RUST_CC_ENV "${RUST_TARGET}")
+set(CROSSPLAY_LIB "${CMAKE_CURRENT_BINARY_DIR}/cargo/${RUST_TARGET}/release/libmhgu_crossplay.a")
+file(GLOB_RECURSE CROSSPLAY_INPUTS CONFIGURE_DEPENDS ${S}/crates/mhgu-crossplay/*.rs ${S}/crates/mhgu-crossplay/*.toml)
+add_custom_command(OUTPUT ${CROSSPLAY_LIB}
+  COMMAND ${CMAKE_COMMAND} -E env
+    "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}/cargo"
+    "CARGO_TARGET_${RUST_TARGET_ENV}_LINKER=${RUST_LINKER}"
+    "CC_${RUST_CC_ENV}=${CMAKE_C_COMPILER}"
+    "CFLAGS_${RUST_CC_ENV}=--target=${CMAKE_C_COMPILER_TARGET}"
+    "AR_${RUST_CC_ENV}=${CMAKE_AR}"
+    "RUSTFLAGS=-C panic=abort -C relocation-model=pic"
+    ${CARGO_EXECUTABLE} build --locked --release --target ${RUST_TARGET} -p mhgu-crossplay -j 4
+  WORKING_DIRECTORY ${S}
+  DEPENDS ${S}/Cargo.toml ${S}/Cargo.lock ${CROSSPLAY_INPUTS}
+  VERBATIM)
+add_custom_target(crossplay_build DEPENDS ${CROSSPLAY_LIB})
+add_library(crossplay STATIC IMPORTED)
+set_target_properties(crossplay PROPERTIES IMPORTED_LOCATION ${CROSSPLAY_LIB})
+add_dependencies(crossplay crossplay_build)
+target_link_libraries(main PRIVATE crossplay)
+
 set(LIB_INC ${DEPS}/sdl3/include ${DEPS}/shaderc/include ${DEPS}/ffmpeg/include)
 target_include_directories(main PRIVATE ${S}/runtime ${S}/third_party/vk_mem_alloc ${IMGUI} ${IMGUI}/imgui
                            ${FSR}/include ${S}/third_party/ffx-api ${LIB_INC})
@@ -82,6 +119,9 @@ set_target_properties(mhguffmpeg PROPERTIES LINK_DEPENDS  # (they are link optio
 # player's own through libadrenotools)
 set(ADRENOTOOLS_GEN OFF)
 add_subdirectory(${S}/third_party/libadrenotools adrenotools)
+foreach(HOOK_TARGET hook_impl main_hook file_redirect_hook gsl_alloc_hook)
+  target_link_options(${HOOK_TARGET} PRIVATE -Wl,-z,max-page-size=16384)
+endforeach()
 target_compile_definitions(main PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR VMA_STATIC_VULKAN_FUNCTIONS=1
                            VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 target_include_directories(main PRIVATE ${S}/third_party/volk)

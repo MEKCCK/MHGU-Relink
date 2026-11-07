@@ -33,7 +33,7 @@
 #define CONFIG_DEFAULT_FXAA 1
 #endif
 #define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, \
-    1, 0, 1, 1, TOUCH_SHOW_DEFAULT
+    1, 0, 1, 1, TOUCH_SHOW_DEFAULT, {0}, {0}, {{0}}, {{0}}, XP_OFF, "", 0, 30456, "", "", 0, 24872, "MHGU", ""
 // (in Config's order, config.h: a new field there needs its value here, in its place - shadows, adreno_fix, bloom, reverb before
 // touch_show: without them the touch buttons' defaults moved two places and most buttons were off)
 Config g_config = {CONFIG_DEFAULT_VALUES};
@@ -251,7 +251,7 @@ static const char DEFAULT_INI[] =
     "ShowSheathe = On\n"
     "ShowPlus = On\n"
     "ShowMinus = Off\n"
-    "ShowDpad = Off\n"
+    "ShowDpad = On\n"
     "ShowL = Off\n"
     "ShowZL = Off\n"
     "ShowZR = Off\n"
@@ -286,6 +286,31 @@ static const char DEFAULT_INI[] =
     "Combo5Pad = None\n"
     "Combo6 =\n"
     "Combo6Pad = None\n"
+    "; Per-layout combinations: each weapon layout and each of the four layouts outside a quest has its own Combo1..6\n"
+#define DEFAULT_LAYOUT_COMBOS(name) \
+    name "Combo1 =\n" name "Combo1Pad = None\n" name "Combo2 =\n" name "Combo2Pad = None\n" \
+    name "Combo3 =\n" name "Combo3Pad = None\n" name "Combo4 =\n" name "Combo4Pad = None\n" \
+    name "Combo5 =\n" name "Combo5Pad = None\n" name "Combo6 =\n" name "Combo6Pad = None\n"
+    DEFAULT_LAYOUT_COMBOS("GreatSword")
+    DEFAULT_LAYOUT_COMBOS("SwordShield")
+    DEFAULT_LAYOUT_COMBOS("Hammer")
+    DEFAULT_LAYOUT_COMBOS("Lance")
+    DEFAULT_LAYOUT_COMBOS("HeavyBowgun")
+    DEFAULT_LAYOUT_COMBOS("LightBowgun")
+    DEFAULT_LAYOUT_COMBOS("LongSword")
+    DEFAULT_LAYOUT_COMBOS("SwitchAxe")
+    DEFAULT_LAYOUT_COMBOS("Gunlance")
+    DEFAULT_LAYOUT_COMBOS("Bow")
+    DEFAULT_LAYOUT_COMBOS("DualBlades")
+    DEFAULT_LAYOUT_COMBOS("HuntingHorn")
+    DEFAULT_LAYOUT_COMBOS("InsectGlaive")
+    DEFAULT_LAYOUT_COMBOS("ChargeBlade")
+    DEFAULT_LAYOUT_COMBOS("Prowler")
+    DEFAULT_LAYOUT_COMBOS("Melee1")
+    DEFAULT_LAYOUT_COMBOS("Melee2")
+    DEFAULT_LAYOUT_COMBOS("Melee3")
+    DEFAULT_LAYOUT_COMBOS("RangedLayout")
+#undef DEFAULT_LAYOUT_COMBOS
     "\n"
     "; How far a drag turns the camera (1: about 90 degrees for a drag the screen's height)\n"
     "; Between 0.2 and 5\n"
@@ -343,7 +368,7 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Hub server for playing over the internet without port forwarding: hubs you create are listed there, and\n"
     "; Search Hubs shows its hubs next to the LAN's. host or host:port (default port 39510).\n"
-    "; Empty or Off: no internet hubs.\n"
+    "; Empty: use the default server. Off: no internet hubs.\n"
     "; Default:\n"
     "Server =\n"
     "\n"
@@ -351,6 +376,46 @@ static const char DEFAULT_INI[] =
     "; only see each other's hubs. Empty: public, your hubs are seen by (and you see) everyone without a key.\n"
     "; Default:\n"
     "Key =\n"
+    "\n"
+    "; Crossplay mode: Off keeps native hubs; Ryujinx uses RyuLdn servers; Room uses suyu-compatible rooms; Mixed bridges both. Use the same MHGU game version (1.4.0). Port-only features such as small-monster synchronization and HP scaling are disabled in crossplay hubs.\n"
+    "; Default: Off\n"
+    "Crossplay = Off\n"
+    "\n"
+    "; RyuLdn server addresses, host[:port], separated by commas. Default port: 30456. Leave empty when only running the built-in server. Use a server that allows your client.\n"
+    "; Default: \n"
+    "RyuServers =\n"
+    "\n"
+    "; Run a RyuLdn server on this device for Ryujinx players. Other players use this device address and RyuPort as their LDN server. Internet connections need port forwarding or a shared VPN.\n"
+    "; Default: Off\n"
+    "RyuHost = Off\n"
+    "\n"
+    "; TCP port for the built-in RyuLdn server. Between 1 and 65535.\n"
+    "; Default: 30456\n"
+    "RyuPort = 30456\n"
+    "\n"
+    "; RyuLdn lobby passphrase. Empty means public. For a private lobby use Ryujinx- followed by eight hexadecimal digits and use the same passphrase on every client.\n"
+    "; Default: \n"
+    "RyuPassword =\n"
+    "\n"
+    "; suyu-compatible room server address, host[:port]. Default port: 24872. Empty uses no remote room; RoomHost can run one on this device.\n"
+    "; Default: \n"
+    "RoomServer =\n"
+    "\n"
+    "; Run a suyu-compatible room on this device for suyu, yuzu, Eden or Citron clients with multiplayer support. Other players use this device address and RoomPort. Internet connections need port forwarding or a shared VPN.\n"
+    "; Default: Off\n"
+    "RoomHost = Off\n"
+    "\n"
+    "; Port for the built-in room server. Between 1 and 65535.\n"
+    "; Default: 24872\n"
+    "RoomPort = 24872\n"
+    "\n"
+    "; Name used for the built-in room and when joining a room.\n"
+    "; Default: MHGU\n"
+    "RoomName = MHGU\n"
+    "\n"
+    "; Room password. Empty allows joining without a password. Every player must use the same password.\n"
+    "; Default: \n"
+    "RoomPassword =\n"
     "\n"
     "; Sync small monsters between players in multiplayer.\n"
     "; (Currently off by default, pending a bug investigation where small monsters may refuse to attack players)\n"
@@ -421,7 +486,7 @@ static const char DEFAULT_INI[] =
     "ConfirmExit = On\n"
     "\n"
     "; Language of the settings menu (F1, or Minus + Plus on a controller)\n"
-    "; English, Spanish\n"
+    "; English, Spanish, Simplified Chinese\n"
     "; Default: English\n"
     "Language = English\n"
     "\n"
@@ -530,6 +595,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_FSR "Invalid FSR quality, provider, sharpness or reactive mask."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
+#define ERR_XP "Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -593,7 +659,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Touch", "ShowSheathe", touch_show[TB_SHEATHE], false),
     ON_OFF("Touch", "ShowPlus", touch_show[TB_PLUS], false),
     ON_OFF("Touch", "ShowMinus", touch_show[TB_MINUS], false),
-    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], false),
+    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], true),
     ON_OFF("Touch", "ShowL", touch_show[TB_L], false),
     ON_OFF("Touch", "ShowZL", touch_show[TB_ZL], false),
     ON_OFF("Touch", "ShowZR", touch_show[TB_ZR], false),
@@ -613,6 +679,20 @@ const ConfigSetting g_settings[] = {
     {"Touch", "Combo" #n "Pad", SET_CHOICE, F(touch_combo_pad[n - 1]), 0, 0, 0, \
      "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
     COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
+#define WEAPON_COMBO(profile, name, n) {"Touch", name "Combo" #n, SET_TEXT, F(touch_weapon_combo[profile][n - 1]), sizeof g_config.touch_weapon_combo[0][0], 0, 0, NULL, NULL, false, ERR_MISC}, \
+    {"Touch", name "Combo" #n "Pad", SET_CHOICE, F(touch_weapon_combo_pad[profile][n - 1]), 0, 0, 0, \
+     "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
+#define WEAPON_COMBOS(profile, name) WEAPON_COMBO(profile, name, 1), WEAPON_COMBO(profile, name, 2), \
+    WEAPON_COMBO(profile, name, 3), WEAPON_COMBO(profile, name, 4), WEAPON_COMBO(profile, name, 5), WEAPON_COMBO(profile, name, 6)
+    WEAPON_COMBOS(0, "GreatSword"), WEAPON_COMBOS(1, "SwordShield"), WEAPON_COMBOS(2, "Hammer"),
+    WEAPON_COMBOS(3, "Lance"), WEAPON_COMBOS(4, "HeavyBowgun"), WEAPON_COMBOS(5, "LightBowgun"),
+    WEAPON_COMBOS(6, "LongSword"), WEAPON_COMBOS(7, "SwitchAxe"), WEAPON_COMBOS(8, "Gunlance"),
+    WEAPON_COMBOS(9, "Bow"), WEAPON_COMBOS(10, "DualBlades"), WEAPON_COMBOS(11, "HuntingHorn"),
+    WEAPON_COMBOS(12, "InsectGlaive"), WEAPON_COMBOS(13, "ChargeBlade"), WEAPON_COMBOS(14, "Prowler"),
+    WEAPON_COMBOS(15, "Melee1"), WEAPON_COMBOS(16, "Melee2"), WEAPON_COMBOS(17, "Melee3"),
+    WEAPON_COMBOS(18, "RangedLayout"),
+#undef WEAPON_COMBOS
+#undef WEAPON_COMBO
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
     {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Touch", "Vibration", touch_vibration, false),
@@ -626,6 +706,16 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
+    {"Multiplayer", "Crossplay", SET_CHOICE, F(crossplay), 0, 0, 0, "Off,Ryujinx,Room,Mixed", NULL, false, ERR_XP},
+    {"Multiplayer", "RyuServers", SET_TEXT, F(ryu_servers), sizeof g_config.ryu_servers, 0, 0, NULL, NULL, false, ERR_XP},
+    ON_OFF("Multiplayer", "RyuHost", ryu_host, false),
+    {"Multiplayer", "RyuPort", SET_INT, F(ryu_port), 0, 1, 65535, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RyuPassword", SET_TEXT, F(ryu_password), sizeof g_config.ryu_password, 0, 0, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomServer", SET_TEXT, F(room_server), sizeof g_config.room_server, 0, 0, NULL, NULL, false, ERR_XP},
+    ON_OFF("Multiplayer", "RoomHost", room_host, false),
+    {"Multiplayer", "RoomPort", SET_INT, F(room_port), 0, 1, 65535, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomName", SET_TEXT, F(room_name), sizeof g_config.room_name, 0, 0, NULL, NULL, false, ERR_XP},
+    {"Multiplayer", "RoomPassword", SET_TEXT, F(room_password), sizeof g_config.room_password, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, true),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
     {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
@@ -641,7 +731,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Audio", "Reverb", reverb, false),
     ON_OFF("Application", "PauseInBackground", pause_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
-    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
+    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0,
+     "English|en,Spanish|es,Simplified Chinese|zh-CN|zh-Hans|Chinese|zh", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
     {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
@@ -951,6 +1042,27 @@ bool config_help(const char *key, char *buf, size_t size) {
 static int desktop_w, desktop_h;
 static bool render_auto = true;
 static bool g_shadows_set, g_bloom_set;  // (the file says Shadows / Bloom: an older one doesn't, and LowEnd then takes them off)
+static bool touch_weapon_combo_seen[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS];
+static bool touch_weapon_combo_pad_seen[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS];
+static const char *const TOUCH_LAYOUT_NAMES[TOUCH_LAYOUT_PROFILES] = {
+    "greatsword", "swordshield", "hammer", "lance", "heavybowgun", "lightbowgun", "longsword", "switchaxe",
+    "gunlance", "bow", "dualblades", "huntinghorn", "insectglaive", "chargeblade", "prowler", "melee1", "melee2",
+    "melee3", "rangedlayout"
+};
+
+static int touch_combo_profile(const char *key, int *index, bool *pad) {
+    for (int profile = 0; profile < TOUCH_LAYOUT_PROFILES; profile++) {
+        size_t n = strlen(TOUCH_LAYOUT_NAMES[profile]);
+        const char *combo = key + n;
+        if (!strncmp(key, TOUCH_LAYOUT_NAMES[profile], n) && !strncmp(combo, "combo", 5) &&
+            combo[5] >= '1' && combo[5] <= '6' && (!combo[6] || !strcmp(combo + 6, "pad"))) {
+            *index = combo[5] - '1';
+            *pad = combo[6] != 0;
+            return profile;
+        }
+    }
+    return -1;
+}
 
 static void set_key(const char *key, char *val, int line) {
     char k[64], v[256];
@@ -958,6 +1070,13 @@ static void set_key(const char *key, char *val, int line) {
     snprintf(v, sizeof v, "%s", val);
     squash(k);
     squash(v);
+    int combo_index;
+    bool combo_pad;
+    int profile = touch_combo_profile(k, &combo_index, &combo_pad);
+    if (profile >= 0) {
+        if (combo_pad) touch_weapon_combo_pad_seen[profile][combo_index] = true;
+        else touch_weapon_combo_seen[profile][combo_index] = true;
+    }
     if (!strncmp(k, "quest", 5) && isdigit((unsigned char)k[5])) {  // [Monster HP] Quest<number> = factors
         HpScale *h = &g_config.hp;
         char *end;
@@ -1021,27 +1140,33 @@ static void append_missing_sections(const char *path, const char *seen) {
 }
 
 void config_load(void) {
+    memset(touch_weapon_combo_seen, 0, sizeof touch_weapon_combo_seen);
+    memset(touch_weapon_combo_pad_seen, 0, sizeof touch_weapon_combo_pad_seen);
     char path[1100];
     config_path(path, sizeof path);
     FILE *f = fopen(path, "r");
     if (!f) {
         FILE *o = fopen(path, "w");
-        const char *ini = DEFAULT_INI, *lang = NULL;
+        const char *ini = DEFAULT_INI, *lang = NULL, *language_name = NULL;
+        int detected_language = 0;
 #ifdef __ANDROID__
-        // (a phone set to Spanish: the settings menu in Spanish from the start)
+        // (a phone set to Spanish or Chinese: the settings menu in that language from the start)
         int nloc = 0;
         SDL_Locale **loc = SDL_GetPreferredLocales(&nloc);
         bool spanish = loc && nloc > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "es", 2);
+        bool chinese = loc && nloc > 0 && loc[0]->language && !SDL_strncasecmp(loc[0]->language, "zh", 2);
         SDL_free(loc);
-        if (spanish) lang = strstr(ini, "Language = English\n");
+        if (spanish) language_name = "Spanish", detected_language = 1;
+        else if (chinese) language_name = "Simplified Chinese", detected_language = 2;
+        if (language_name) lang = strstr(ini, "Language = English\n");
 #endif
         if (o && lang) {
             fwrite(ini, 1, (size_t)(lang - ini), o);
-            fputs("Language = Spanish\n", o);
+            fprintf(o, "Language = %s\n", language_name);
             fputs(lang + strlen("Language = English\n"), o);
             fclose(o);
-            g_config.language = 1;
-            LOG("[config] wrote the default settings to %s (the menu in Spanish, as the system)\n", path);
+            g_config.language = detected_language;
+            LOG("[config] wrote the default settings to %s (localized to the system language)\n", path);
         } else if (o) {
             fputs(ini, o);
             fclose(o);
@@ -1073,6 +1198,14 @@ void config_load(void) {
         fclose(f);
         append_missing_sections(path, seen);
     }
+
+    for (int profile = 0; profile < TOUCH_LAYOUT_PROFILES; profile++)
+        for (int i = 0; i < TOUCH_COMBOS; i++) {
+            if (!touch_weapon_combo_seen[profile][i])
+                memcpy(g_config.touch_weapon_combo[profile][i], g_config.touch_combo[i], sizeof g_config.touch_combo[i]);
+            if (!touch_weapon_combo_pad_seen[profile][i])
+                g_config.touch_weapon_combo_pad[profile][i] = g_config.touch_combo_pad[i];
+        }
 
     // (a file of an older version, with LowEnd on and no Shadows: off, as the menu's Low-end mode now sets them)
     if (f && !g_shadows_set && g_config.low_end) g_config.shadows = 0;
@@ -1106,6 +1239,27 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
+    static const struct { const char *env, *key; } crossplay_env[] = {
+        {"MHGU_CROSSPLAY", "Crossplay"}, {"MHGU_RYU_SERVERS", "RyuServers"},
+        {"MHGU_RYU_HOST", "RyuHost"}, {"MHGU_RYU_PORT", "RyuPort"},
+        {"MHGU_RYU_PASSWORD", "RyuPassword"}, {"MHGU_ROOM_SERVER", "RoomServer"},
+        {"MHGU_ROOM_HOST", "RoomHost"}, {"MHGU_ROOM_PORT", "RoomPort"},
+        {"MHGU_ROOM_NAME", "RoomName"}, {"MHGU_ROOM_PASSWORD", "RoomPassword"}
+    };
+    for (unsigned i = 0; i < sizeof crossplay_env / sizeof *crossplay_env; ++i) {
+        const ConfigSetting *setting = config_setting(crossplay_env[i].key);
+        const char *value = getenv(crossplay_env[i].env);
+        if (!value) continue;
+        if (setting->kind == SET_BOOL && (!strcmp(value, "0") || !strcmp(value, "1")))
+            value = *value == '0' ? "Off" : "On";
+        if (!strcmp(crossplay_env[i].key, "Crossplay") && strlen(value) == 1 && *value >= '0' && *value <= '3') {
+            static const char *const modes[] = {"Off", "Ryujinx", "Room", "Mixed"};
+            value = modes[*value - '0'];
+        }
+        if (setting->kind == SET_TEXT && strlen(value) >= setting->field2) continue;
+        Config candidate = g_config;
+        if (config_parse(setting, value, &candidate) && config_valid(setting, &candidate)) g_config = candidate;
+    }
     if ((e = getenv("MHGU_ASPECT"))) parse_aspect(e, &g_config.aspect_ratio);
     if ((e = getenv("MHGU_FOV")) && strtof(e, NULL) >= 0.5f && strtof(e, NULL) <= 2.0f) g_config.fov = strtof(e, NULL);
     if ((e = getenv("MHGU_UI_ANCHOR"))) config_parse(config_setting("UIAnchor"), e, &g_config);

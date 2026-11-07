@@ -87,7 +87,7 @@ static uint64_t fnv_file(uint64_t h, const char *path) {
 
 bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, size_t outsz) {
     uint64_t h = 14695981039346656037ull;
-    h = fnv(h, "2", 1);  // (merge version: 0.10.8's matched entries by name alone, its merges aren't to be reused)
+    h = fnv(h, "3", 1);  // Previous merges could truncate an entry count above 65535.
     h = fnv_file(fnv_file(fnv_file(h, orig), prev), mod);
     snprintf(out, outsz, "cache/arcmerge/%016llx.arc", (unsigned long long)h);
     struct stat st;
@@ -113,7 +113,13 @@ bool arc_merge(const char *orig, const char *prev, const char *mod, char *out, s
         if (r && base && !same(base, r) && !same(r, &m.e[i]))  // (an earlier mod changed it as well)
             LOG("[mods] %s changes %s, which an earlier mod changed too: this one is used. The order the mods "
                 "load in (alphabetical) can be set in mods/load_order.txt\n", mod, m.e[i].name);
-        if (!r) r = &res[n++];
+        if (!r) {
+            if (n == UINT16_MAX) {
+                LOG("[mods] %s: archive has too many entries to merge\n", mod);
+                goto done;
+            }
+            r = &res[n++];
+        }
         *r = m.e[i];
         changed++;
     }

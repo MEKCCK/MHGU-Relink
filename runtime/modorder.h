@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 const char *mods_dir(void);
+#define MODS_SEARCH_DEPTH 8
 // The folder named `want` (any case) in dir or up to `depth` levels below it, shallowest first
 bool mods_find_dir(const char *dir, const char *want, int depth, char *out, size_t n);
 // The folder of mod `name` to layer over the RomFS (its romfs/, else its bare nativeNX/'s parent)

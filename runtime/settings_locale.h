@@ -2,7 +2,7 @@
 #pragma once
 #include <string.h>
 
-static inline const char *settings_text(int language, const char *english) {
+static inline const char *settings_text_es(int language, const char *english) {
     if (language != 1) return english;
     static const struct { const char *en, *es; } messages[] = {
         {"SETTINGS", "OPCIONES"},
@@ -461,8 +461,30 @@ static inline const char *settings_text(int language, const char *english) {
         {", and its shader package is missing", ", y falta su paquete de sombreadores"},
         {"The game stopped because of an error. The details are in log.txt, in Android/data/com.mhgu.recomp/files.",
          "El juego se detuvo por un error. Los detalles están en log.txt, en Android/data/com.mhgu.recomp/files."},
+        {"Crossplay", "Crossplay"},
+        {"Ryujinx", "Ryujinx"},
+        {"Room", "Room"},
+        {"Mixed", "Mixed"},
+        {"RyuLdn servers", "RyuLdn servers"},
+        {"Run a RyuLdn server", "Run a RyuLdn server"},
+        {"RyuLdn port", "RyuLdn port"},
+        {"RyuLdn passphrase", "RyuLdn passphrase"},
+        {"Room server", "Room server"},
+        {"Run a room server", "Run a room server"},
+        {"Room port", "Room port"},
+        {"Room name", "Room name"},
+        {"Room password", "Room password"},
+        {"Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#').", "Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#')."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;
+    return english;
+}
+
+#include "settings_locale_zh.h"
+
+static inline const char *settings_text(int language, const char *english) {
+    if (language == 1) return settings_text_es(language, english);
+    if (language == 2) return settings_text_zh(language, english);
     return english;
 }

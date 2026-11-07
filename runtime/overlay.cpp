@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <unistd.h>  // access
+#include <SDL3/SDL.h>
 
 #include "imgui.h"
 #ifndef MHGU_NULL_BACKEND
@@ -407,7 +408,26 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
         if (!font_path && access(p, R_OK) == 0) font_path = p;
 #endif
     ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
-    if (!font) io.Fonts->AddFontDefaultVector(&cfg);
+    if (!font) font = io.Fonts->AddFontDefaultVector(&cfg);
+#ifdef __ANDROID__
+    char cjk_path[1024];
+    const char *cjk_font = nullptr;
+    if (g_config.language >= 2) {
+        const char *home = SDL_GetAndroidExternalStoragePath();
+        if (home) {
+            snprintf(cjk_path, sizeof cjk_path, "%s/cjk.ttf", home);
+            if (access(cjk_path, R_OK) == 0) cjk_font = cjk_path;
+        }
+    }
+    if (cjk_font) {
+        ImFontConfig cjk_cfg;
+        cjk_cfg.SizePixels = g_font_size;
+        cjk_cfg.MergeMode = true;
+        ImFont *with_cjk = io.Fonts->AddFontFromFileTTF(cjk_font, g_font_size, &cjk_cfg,
+                                                        io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+        if (with_cjk) font = with_cjk;
+    }
+#endif
     ImGui::StyleColorsDark();
     forge_style(ImGui::GetStyle());
     ImGui::GetStyle().FontSizeBase = g_font_size;
