@@ -48,7 +48,7 @@ jobs:
           exit 1
       - name: Runtime and DLL bundle
         shell: msys2 {0}
-        run: make -j4 FFMPEG=bundled
+        run: make -j4 GEN=/nonexistent FFMPEG=bundled
       - name: Package
         shell: msys2 {0}
         run: |
