@@ -74,7 +74,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 ### 打包与分发
 
 - Linux 绿色包：`dist/mhgu-hub-0.1.6-linux-x86_64.tar.gz`（二进制 + systemd unit + 示例自定义 UI）；
-- Arch 包：`cd packaging/arch && makepkg -f` → `mhgu-hub-0.1.6-1-x86_64.pkg.tar.zst`；
+- Arch 包：`cd packaging/arch && makepkg -f` → `mhgu-hub-0.1.6-2-x86_64.pkg.tar.zst`；
 - Windows：`packaging/windows/build.sh`（需要 `mingw-w64-gcc` 与 `rustup target add x86_64-pc-windows-gnu`）；
 - WebUI 可替换：`-web-dir <目录>` 提供 `index.html` / `admin.html` / `log.html` 与静态资源，
   `/api/hubs` 的 JSON 接口不变，页面自己用 JS 取数据。

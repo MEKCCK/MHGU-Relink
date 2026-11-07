@@ -1,7 +1,7 @@
 # Maintainer: mhgu
 pkgname=mhgu-hub
 pkgver=0.1.6
-pkgrel=1
+pkgrel=2
 pkgdesc="MHGU Relink hub server (Rust, wire-compatible with the game and gu-native)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/elite/mhgu"
