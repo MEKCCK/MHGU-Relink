@@ -34,6 +34,18 @@ jobs:
       - name: Rust link and crossplay libraries
         shell: msys2 {0}
         run: cargo build --release --locked -p mhgu-link-ffi -p mhgu-crossplay
+      - name: Fetch FFmpeg source (retry; ffmpeg.org resets connections sometimes)
+        shell: msys2 {0}
+        run: |
+          mkdir -p third_party/ffmpeg
+          for i in 1 2 3 4 5; do
+            if curl -fL --retry 5 --retry-all-errors --retry-delay 2               -o third_party/ffmpeg/ffmpeg-9.0.2.tar.xz.part               https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz; then
+              mv third_party/ffmpeg/ffmpeg-9.0.2.tar.xz.part third_party/ffmpeg/ffmpeg-9.0.2.tar.xz
+              exit 0
+            fi
+            sleep $((i * 5))
+          done
+          exit 1
       - name: Runtime and DLL bundle
         shell: msys2 {0}
         run: make -j4 FFMPEG=bundled
