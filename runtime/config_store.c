@@ -28,6 +28,13 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
                      live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
                      live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_bonus;
+static SDL_AtomicInt live_kerning, live_bold;
+// [HDR]
+static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
+static SDL_AtomicInt live_hdr_scene = {1}, live_hdr_analysis;
+static SDL_AtomicInt live_hdr_peak = {0x447a0000}, live_hdr_game = {0x434b0000}, live_hdr_ui = {0x434b0000};
+static SDL_AtomicInt live_hdr_exposure, live_hdr_highlights, live_hdr_shadows, live_hdr_contrast, live_hdr_saturation,
+                     live_hdr_highlight_saturation, live_hdr_flare, live_hdr_bloom;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -58,6 +65,26 @@ static void publish_live(const Config *c, bool all) {
         SDL_SetAtomicInt(&live_chat_key, *c->chat_key ? (int)SDL_GetScancodeFromName(c->chat_key) : 0);
     if (all || c->fxaa_mode != saved.fxaa_mode) SDL_SetAtomicInt(&live_fxaa_mode, c->fxaa_mode);
     if (all || c->smooth_gradients != saved.smooth_gradients) SDL_SetAtomicInt(&live_smooth, c->smooth_gradients);
+    if (all || c->fix_kerning != saved.fix_kerning) SDL_SetAtomicInt(&live_kerning, c->fix_kerning);
+    if (all || c->bold_text != saved.bold_text) SDL_SetAtomicInt(&live_bold, c->bold_text);
+    if (all || c->hdr != saved.hdr) SDL_SetAtomicInt(&live_hdr, c->hdr);
+    if (all || c->hdr_format != saved.hdr_format) SDL_SetAtomicInt(&live_hdr_format, c->hdr_format);
+    if (all || c->hdr_gamma != saved.hdr_gamma) SDL_SetAtomicInt(&live_hdr_gamma, c->hdr_gamma);
+    if (all || c->hdr_peak != saved.hdr_peak) set_float(&live_hdr_peak, c->hdr_peak);
+    if (all || c->hdr_game != saved.hdr_game) set_float(&live_hdr_game, c->hdr_game);
+    if (all || c->hdr_ui != saved.hdr_ui) set_float(&live_hdr_ui, c->hdr_ui);
+    if (all || c->hdr_tonemap != saved.hdr_tonemap) SDL_SetAtomicInt(&live_hdr_tonemap, c->hdr_tonemap);
+    if (all || c->hdr_scene != saved.hdr_scene) SDL_SetAtomicInt(&live_hdr_scene, c->hdr_scene);
+    if (all || c->hdr_analysis != saved.hdr_analysis) SDL_SetAtomicInt(&live_hdr_analysis, c->hdr_analysis);
+    if (all || c->hdr_exposure != saved.hdr_exposure) set_float(&live_hdr_exposure, c->hdr_exposure);
+    if (all || c->hdr_highlights != saved.hdr_highlights) set_float(&live_hdr_highlights, c->hdr_highlights);
+    if (all || c->hdr_shadows != saved.hdr_shadows) set_float(&live_hdr_shadows, c->hdr_shadows);
+    if (all || c->hdr_contrast != saved.hdr_contrast) set_float(&live_hdr_contrast, c->hdr_contrast);
+    if (all || c->hdr_saturation != saved.hdr_saturation) set_float(&live_hdr_saturation, c->hdr_saturation);
+    if (all || c->hdr_highlight_saturation != saved.hdr_highlight_saturation)
+        set_float(&live_hdr_highlight_saturation, c->hdr_highlight_saturation);
+    if (all || c->hdr_flare != saved.hdr_flare) set_float(&live_hdr_flare, c->hdr_flare);
+    if (all || c->hdr_bloom != saved.hdr_bloom) set_float(&live_hdr_bloom, c->hdr_bloom);
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->touch_controls != saved.touch_controls) SDL_SetAtomicInt(&live_touch, c->touch_controls);
@@ -149,6 +176,25 @@ int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
+int config_live_fix_kerning(void) { return SDL_GetAtomicInt(&live_kerning); }
+int config_live_bold_text(void) { return SDL_GetAtomicInt(&live_bold); }
+int config_live_hdr(void) { return SDL_GetAtomicInt(&live_hdr); }
+int config_live_hdr_format(void) { return SDL_GetAtomicInt(&live_hdr_format); }
+int config_live_hdr_gamma(void) { return SDL_GetAtomicInt(&live_hdr_gamma); }
+float config_live_hdr_peak(void) { return get_float(&live_hdr_peak); }
+float config_live_hdr_game(void) { return get_float(&live_hdr_game); }
+float config_live_hdr_ui(void) { return get_float(&live_hdr_ui); }
+int config_live_hdr_tonemap(void) { return SDL_GetAtomicInt(&live_hdr_tonemap); }
+int config_live_hdr_scene(void) { return SDL_GetAtomicInt(&live_hdr_scene); }
+int config_live_hdr_analysis(void) { return SDL_GetAtomicInt(&live_hdr_analysis); }
+float config_live_hdr_exposure(void) { return get_float(&live_hdr_exposure); }
+float config_live_hdr_highlights(void) { return get_float(&live_hdr_highlights); }
+float config_live_hdr_shadows(void) { return get_float(&live_hdr_shadows); }
+float config_live_hdr_contrast(void) { return get_float(&live_hdr_contrast); }
+float config_live_hdr_saturation(void) { return get_float(&live_hdr_saturation); }
+float config_live_hdr_highlight_saturation(void) { return get_float(&live_hdr_highlight_saturation); }
+float config_live_hdr_flare(void) { return get_float(&live_hdr_flare); }
+float config_live_hdr_bloom(void) { return get_float(&live_hdr_bloom); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
@@ -291,7 +337,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 
 // What config_save writes: a setting of the table (setting) or a Quest<number> entry (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-#define ENTRY_MAX (HP_QUESTS_MAX + 384)  // settings, including 15 layouts' combos, and the quest overrides
+#define ENTRY_MAX (HP_QUESTS_MAX + 448)  // settings, including 15 layouts' combos, and the quest overrides
 static void normalize(const char *s, char *out, size_t size) {
     size_t n = 0;
     for (; *s && n + 1 < size; s++)

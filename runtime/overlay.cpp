@@ -34,6 +34,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
 #include "config.h"
+#include "hdr_stats.h"
 #include "touch.h"
 #include "forge.h"
 #include "menu_confirm.h"
@@ -53,6 +54,7 @@ void vk_unlock(void);
 SDL_Window *ui_window(void);
 void vi_pause_game(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
+bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open;
@@ -681,8 +683,72 @@ static void draw_fps(uint64_t now) {
     }
 }
 
+// ------------------------------------------------------------------ HDR analysis ([HDR] Analysis)
+// Lilium's HDR analysis, roughly: the picture's nits and gamut in the top left, a waveform (brightness by screen
+// column, log scale) in the bottom right, from what the GPU measured (nvn/vulkan/hdr.c vk_hdr_analyze). Drawn at UI
+// brightness and not measured itself.
+static HdrStats g_hdr_stats;
+static void draw_hdr_analysis(const HdrStats &st, float scale) {
+    ImGuiIO &io = ImGui::GetIO();
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+    float top = config_show_fps() ? 50 * scale : 10 * scale;
+    ImGui::SetNextWindowPos(ImVec2(10 * scale, top), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    if (ImGui::Begin("HDR analysis##stats", nullptr, flags)) {
+        ImGui::Text("HDR analysis (%s)", st.pq ? "HDR10" : "scRGB");
+        ImGui::Text("        %10s %10s", "nits", "CLL");
+        ImGui::Text("max     %10.2f %10.2f", st.max_nits, st.max_cll);
+        ImGui::Text("avg     %10.2f %10.2f", st.avg_nits, st.avg_cll);
+        ImGui::Text("min     %10.4f", st.min_nits);
+        ImGui::Text("centre  %10.2f %10.2f", st.center_nits, st.center_cll);
+        ImGui::Text("BT.709  %9.3f%%", st.bt709);
+        ImGui::Text("DCI-P3  %9.3f%%", st.p3);
+        ImGui::Text("BT.2020 %9.3f%%", st.bt2020);
+        if (st.outside > 0) ImGui::Text("outside %9.3f%%", st.outside);
+        ImGui::Text("peak %.0f  game %.0f  UI %.0f", st.peak, st.game, st.ui);
+    }
+    ImGui::End();
+    // the centre's spot
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+    float r = 6 * scale;
+    dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), IM_COL32(255, 255, 255, 160), 1.0f);
+    dl->AddLine(ImVec2(c.x, c.y - r), ImVec2(c.x, c.y + r), IM_COL32(255, 255, 255, 160), 1.0f);
+    // the waveform
+    float gw = io.DisplaySize.x * 0.34f, gh = io.DisplaySize.y * 0.30f, label = ImGui::CalcTextSize("10000").x + 8 * scale;
+    ImVec2 p1(io.DisplaySize.x - 10 * scale, io.DisplaySize.y - 10 * scale), p0(p1.x - gw, p1.y - gh);
+    dl->AddRectFilled(ImVec2(p0.x - label, p0.y - 4 * scale), ImVec2(p1.x + 4 * scale, p1.y + 4 * scale), IM_COL32(0, 0, 0, 170));
+    auto y_of = [&](float nits) {
+        float v = (log10f(fmaxf(nits, 1e-6f)) - HDR_WF_LO) / (HDR_WF_HI - HDR_WF_LO);
+        return p1.y - fminf(fmaxf(v, 0.f), 1.f) * gh;
+    };
+    static const float marks[] = {0.01f, 0.05f, 0.25f, 1, 2.5f, 10, 25, 100, 400, 1000, 4000, 10000};
+    for (float m : marks) {
+        float y = y_of(m);
+        dl->AddLine(ImVec2(p0.x, y), ImVec2(p1.x, y), IM_COL32(255, 255, 255, 40));
+        char t[16];
+        snprintf(t, sizeof t, m < 1 ? "%.2f" : m < 10 && m != floorf(m) ? "%.1f" : "%.0f", m);
+        dl->AddText(ImVec2(p0.x - label + 2 * scale, y - ImGui::GetFontSize() * 0.5f), IM_COL32(200, 200, 200, 255), t);
+    }
+    float cw = gw / HDR_WF_W, ch = gh / HDR_WF_H, lmax = logf(1.0f + (float)st.wf_max);
+    for (int row = 0; row < HDR_WF_H; row++)
+        for (int col = 0; col < HDR_WF_W; col++) {
+            uint32_t v = st.wf[row][col];
+            if (!v) continue;
+            float a = lmax > 0 ? logf(1.0f + (float)v) / lmax : 1.0f;
+            int alpha = (int)(60 + 195 * a);
+            ImVec2 q0(p0.x + col * cw, p1.y - (row + 1) * ch);
+            dl->AddRectFilled(q0, ImVec2(q0.x + cw + 0.5f, q0.y + ch + 0.5f), IM_COL32(255, 255, 255, alpha));
+        }
+    float yp = y_of(st.peak), yg = y_of(st.game);  // (the peak: red; the game's white: yellow)
+    dl->AddLine(ImVec2(p0.x, yp), ImVec2(p1.x, yp), IM_COL32(255, 60, 60, 220), 1.5f);
+    dl->AddLine(ImVec2(p0.x, yg), ImVec2(p1.x, yg), IM_COL32(255, 210, 60, 160), 1.0f);
+}
+
 // ------------------------------------------------------------------ loading indicator
-// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs: on the black
+// A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them and then the
+// shader prewarm's while it runs: on the black
 // window until the game's first frame (overlay_loading: device.c's loading screen), then over the game while the
 // prewarm still has programs left, and for the game's first second at least (its own first frames are black too).
 // Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and the game's both draw it.)
@@ -709,8 +775,19 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     int language = config_language();
     const char *title = settings_text(language, "Loading");
     uint64_t done, total;
+    int mods_done, mods_total;
     char line[128] = "", widest[128] = "";
-    if (shader_prewarm_progress(&done, &total) && total) {
+    if (romfs_mods_progress(&mods_done, &mods_total)) {  // (before the game's first frame: a big mod can take a while)
+        if (!mods_total) {
+            snprintf(line, sizeof line, "%s  %d %s", settings_text(language, "Reading mods"), mods_done,
+                     settings_text(language, "files"));
+            snprintf(widest, sizeof widest, "%s", line);
+        } else {
+            const char *what = settings_text(language, "Applying mods");
+            snprintf(line, sizeof line, "%s  %d / %d", what, mods_done, mods_total);
+            snprintf(widest, sizeof widest, "%s  %d / %d", what, mods_total, mods_total);
+        }
+    } else if (shader_prewarm_progress(&done, &total) && total) {
         const char *what = settings_text(language, "Compiling shaders");
         snprintf(line, sizeof line, "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
         snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
@@ -923,11 +1000,18 @@ static void vk_check(VkResult r) {
 static bool backend_ready(const OverlayTarget *t) {
     if (!g_enabled) return false;
     g_disp_w = t->width, g_disp_h = t->height;
-    if (t->pass != g_pass) {  // (the window's render pass: made once, again only if the window's format changes)
-        if (g_pass) {
-            g_ready = false;
-            ImGui_ImplVulkan_Shutdown();
-        }
+    if (g_pass && t->pass != g_pass) {
+        // The window's format changed (HDR turned on or off: its render pass draws into the RGBA16F composition image
+        // instead). Only the pipeline is made again: shutting the backend down freed the textures' descriptor sets
+        // that the frame already built on the game's thread still named, and the game crashed drawing it.
+        ImGui_ImplVulkan_PipelineInfo pi = {};
+        pi.RenderPass = t->pass;
+        pi.Subpass = 0;
+        pi.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        ImGui_ImplVulkan_CreateMainPipeline(&pi);
+        g_pass = t->pass;
+    }
+    if (t->pass != g_pass) {  // (the window's render pass: the backend made once)
         ImGui_ImplVulkan_InitInfo info = {};
         info.ApiVersion = VK_API_VERSION_1_2;
         info.Instance = t->inst;

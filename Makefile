@@ -120,7 +120,7 @@ WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windr
 ICON_RES := $(O)/icon.res.o
 UPD_ICON_RES := $(O)/updater-icon.res.o
 LDFLAGS  := $(LINKER) -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
-            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
+            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic -lz \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared $(LINKER) -static-libgcc $(O)/mhgurecomp.dll.a
@@ -136,7 +136,7 @@ FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
 # doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
-LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(abspath target/release/libmhgu_link_ffi.a) $(abspath target/release/libmhgu_crossplay.a) -lpthread -ldl -lm -lrt
+LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(abspath target/release/libmhgu_link_ffi.a) $(abspath target/release/libmhgu_crossplay.a) -lz -lpthread -ldl -lm -lrt
 # The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.

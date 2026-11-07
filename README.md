@@ -3,7 +3,7 @@
 **Monster Hunter Generations Ultimate（Switch 1.4.0）的 PC / Android 原生重编译版，加上 Rust 联机与模拟器 Crossplay。**
 
 游戏原本的 32 位 ARM 代码由本项目静态翻译成 C，再由同一份宿主运行时在 Vulkan 上执行；Switch 的系统服务、
-NVN 图形 API、音频与媒体库都由运行时重新实现。联机层用 Rust 重写，支持局域网、互联网 hub，以及和
+NVN 图形 API、音频与媒体库都由运行时重新实现；PC/Android 均支持原生 HDR 输出。联机层用 Rust 重写，支持局域网、互联网 hub，以及和
 Ryujinx / suyu 模拟器互通。
 
 **本仓库不包含任何游戏代码、ROM、密钥、存档或 APK。** 游戏代码由玩家用自己的 `exefs` / `romfs` 在本机生成。
@@ -15,6 +15,9 @@ Ryujinx / suyu 模拟器互通。
 | [docs/pc.md](docs/pc.md) | PC 版安装、控制、设置、模组、从源码构建 |
 | [docs/android.md](docs/android.md) | Android 安装、游戏文件、存档导入导出、排错 |
 | [docs/online.md](docs/online.md) | 局域网、hub 服务器、Ryujinx / suyu Crossplay、混合 hub |
+| [docs/CROSSPLAY-zh-CN.md](docs/CROSSPLAY-zh-CN.md) | Crossplay 选项与端口速查 |
+| [docs/HDR.md](docs/HDR.md) | 原生 HDR 输出与 HDR 分析 |
+| [docs/MODS-zh-CN.md](docs/MODS-zh-CN.md) | Android 模组导入格式与兼容范围 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 项目结构、构建、测试与开发约定 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 两个原项目的合并来源与验证记录 |
 

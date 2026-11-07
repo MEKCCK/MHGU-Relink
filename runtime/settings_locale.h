@@ -5,6 +5,10 @@
 
 static inline const char *settings_text(int language, const char *english) {
     if (language != 1 && language != 2) return english;
+    if (language == 2) {
+        const char *zh = settings_text_zh(language, english);
+        if (zh && strcmp(zh, english)) return zh;
+    }
     static const struct { const char *en, *es, *zh; } messages[] = {
         {"SETTINGS", "OPCIONES", "设置"},
         {"Sections", "Secciones", "分类"},
@@ -494,6 +498,23 @@ static inline const char *settings_text(int language, const char *english) {
         {"Sword & Shield", "Sword & Shield", "片手剑"},
         {"Weapon layout", "Weapon layout", "武器布局"},
         {"Touch layout", "Diseño táctil", "触控布局"},
+        {"BT.1886", "BT.1886", "BT.1886"},
+        {"NOT FOR HDR400 DISPLAYS", "NO PARA PANTALLAS HDR400", "不适用于 HDR400 显示器"},
+        {"Fix kerning", "Ajustar interletraje", "修正字距"},
+        {"Bold text", "Texto en negrita", "粗体文字"},
+        {"HDR", "HDR", "HDR"},
+        {"Peak brightness (nits)", "Brillo máximo (nits)", "峰值亮度（尼特）"},
+        {"Game brightness (nits)", "Brillo del juego (nits)", "游戏亮度（尼特）"},
+        {"UI brightness (nits)", "Brillo de la interfaz (nits)", "界面亮度（尼特）"},
+        {"Gamma correction", "Corrección de gamma", "伽马校正"},
+        {"Exposure", "Exposición", "曝光"},
+        {"Highlights", "Luces", "高光"},
+        {"Contrast", "Contraste", "对比度"},
+        {"Saturation", "Saturación", "饱和度"},
+        {"Highlight saturation", "Saturación de luces", "高光饱和度"},
+        {"HDR analysis", "Análisis HDR", "HDR 分析"},
+        {"Off (HDR)", "Desactivado (HDR)", "关闭（HDR）"},
+        {"Invalid HDR setting.", "Ajuste HDR no válido.", "HDR 设置无效。"},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) {

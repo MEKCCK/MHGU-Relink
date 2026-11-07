@@ -139,13 +139,18 @@ typedef struct TexBackend {
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
     VkFormat ms_fmt;        // the format ms is rendered as
-    bool wide;              // RGBA16 UNORM standing in for the game's RGBA8 render target (textures.c vk_rt_widen)
+    uint8_t wide;           // WIDE_*: RGBA16 UNORM / RGBA16F standing in for the game's RGBA8 render target (textures.c vk_rt_widen)
     uint64_t ms_models;     // (colour) the frame 3D models (depth-writing draws) were last drawn into this image, once
                             // a pass without MSAA did (g_present_count; menus: exec.c ms_expand), 0 none lately
 } TexBackend;
 
 bool vk_wide_rt_on(void);  // (textures.c) RGBA8 render targets as RGBA16 UNORM ([Graphics] SmoothGradients)
-void vk_rt_widen(NvnTexture *t, bool wide);  // (exec.c begin_pass, outside a render pass)
+enum { WIDE_NONE, WIDE_UNORM16, WIDE_FLOAT16 };
+void vk_rt_widen(NvnTexture *t, int wide);  // WIDE_* (exec.c begin_pass, outside a render pass)
+static inline VkFormat vk_wide_format(int wide) {
+    return wide == WIDE_FLOAT16 ? VK_FORMAT_R16G16B16A16_SFLOAT : wide == WIDE_UNORM16 ? VK_FORMAT_R16G16B16A16_UNORM
+                                                                                     : VK_FORMAT_R8G8B8A8_UNORM;
+}
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 VkFormat vk_format(uint32_t nvn_format);

@@ -3,7 +3,8 @@
 // deleting it resets everything; keys that are missing or not understood keep their defaults (the log says which).
 //   MHGU_CONFIG=<path>   another settings file
 //   MHGU_WINDOW=WxH      windowed at that size, MHGU_RENDER=WxH  3D resolution, MHGU_MSAA=1|2|4|8, MHGU_FXAA=0|1,
-//                        MHGU_RT16=0|1 (SmoothGradients), MHGU_PAD_POSITIONAL=0|1 (test runs; override the file)
+//                        MHGU_RT16=0|1 (SmoothGradients), MHGU_FIX_KERNING=0|1, MHGU_BOLD_TEXT=0|1, MHGU_HDR=0|1,
+//                        MHGU_PAD_POSITIONAL=0|1 (test runs; override the file)
 #include <ctype.h>
 #include <float.h>
 #include <math.h>
@@ -36,6 +37,14 @@
 #define CONFIG_DEFAULT_H 1080
 #define CONFIG_DEFAULT_FXAA 1
 #endif
+// [Graphics] BoldText: on by default on Android (a phone's small screen reads the bolder letters more easily)
+#ifdef __ANDROID__
+#define BOLD_TEXT_DEFAULT 1
+#define BOLD_TEXT_DEFAULT_INI "On"
+#else
+#define BOLD_TEXT_DEFAULT 0
+#define BOLD_TEXT_DEFAULT_INI "Off"
+#endif
 // (designated: a new field in config.h needs its default here, and nowhere else)
 #define CONFIG_DEFAULT_VALUES                                                                       \
     /* [Display] */                                                                                 \
@@ -64,6 +73,26 @@
     /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
     .smooth_gradients = 0,                                                                          \
+    .fix_kerning = 1,                                                                               \
+    .bold_text = BOLD_TEXT_DEFAULT,                                                                 \
+    /* [HDR] */                                                                                 \
+    .hdr = 0,                                                                                   \
+    .hdr_peak = 1000.0f,                                                                        \
+    .hdr_game = 203.0f,                                                                         \
+    .hdr_ui = 203.0f,                                                                           \
+    .hdr_tonemap = HDR_TONEMAP_RENODRT,                                                         \
+    .hdr_gamma = HDR_GAMMA_22,                                                                  \
+    .hdr_exposure = 0.65f,                                                                      \
+    .hdr_highlights = 60.0f,                                                                    \
+    .hdr_shadows = 50.0f,                                                                       \
+    .hdr_contrast = 50.0f,                                                                      \
+    .hdr_saturation = 50.0f,                                                                    \
+    .hdr_highlight_saturation = 82.0f,                                                          \
+    .hdr_flare = 0.0f,                                                                          \
+    .hdr_bloom = 100.0f,                                                                        \
+    .hdr_scene = 1,                                                                             \
+    .hdr_format = HDR_FORMAT_AUTO,                                                              \
+    .hdr_analysis = 0,                                                                          \
     /* [Performance] */                                                                             \
     .show_fps = 0,                                                                                  \
     .show_battery = BATTERY_OFF,                                                                    \
@@ -256,6 +285,86 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "SmoothGradients = Off\n"
     "\n"
+    "; Evens out the spacing between letters in the game's text: exact placement, even margins and kerning\n"
+    "; (closer pairs such as \"Va\" and \"To\"). Off: the text as the game sets it\n"
+    "; Default: On\n"
+    "FixKerning = On\n"
+    "\n"
+    "; Draws letters slightly thicker and wider, as the original game does. Some players, including players with\n"
+    "; dyslexia, find this easier to read. Off: letters at their true size, thinner and crisper\n"
+    "; Default: " BOLD_TEXT_DEFAULT_INI "\n"
+    "BoldText = " BOLD_TEXT_DEFAULT_INI "\n"
+    "\n"
+    "[HDR]\n"
+    "; 16-bit HDR output for HDR capable monitors/phones (NOT FOR HDR400 DISPLAYS). Smooth gradients and FSR do not work with HDR\n"
+    "; Default: Off\n"
+    "HDR = Off\n"
+    "\n"
+    "; The brightest your display can show, in nits (its specifications, or Windows HDR Calibration)\n"
+    "; Between 80 and 10000\n"
+    "; Default: 1000\n"
+    "PeakBrightness = 1000\n"
+    "\n"
+    "; How bright the game's white is, in nits (203 is the HDR reference white)\n"
+    "; Between 48 and 500\n"
+    "; Default: 203\n"
+    "GameBrightness = 203\n"
+    "\n"
+    "; How bright the HUD, menus, text and this settings menu are, in nits\n"
+    "; Between 48 and 500\n"
+    "; Default: 203\n"
+    "UIBrightness = 203\n"
+    "\n"
+    "; Vanilla (the game's SDR picture, clipped), None (no tone mapping: clipped at the peak) or RenoDRT (highlights rolled\n"
+    "; off smoothly towards the peak)\n"
+    "; Default: RenoDRT\n"
+    "ToneMapper = RenoDRT\n"
+    "\n"
+    "; Off (sRGB), 2.2 (what most SDR displays show: deeper shadows) or BT.1886 (2.4, a dark room)\n"
+    "; Default: 2.2\n"
+    "GammaCorrection = 2.2\n"
+    "\n"
+    "; Brightness of the whole picture before tone mapping, 1 = the game's\n"
+    "; Between 0 and 2\n"
+    "; Default: 0.65\n"
+    "Exposure = 0.65\n"
+    "\n"
+    "; Colour grading, 50 = the game's: Highlights (brighter highlights above 50), Shadows (lighter shadows above 50),\n"
+    "; Contrast, Saturation, HighlightSaturation (more colour in bright areas above 50, whiter below)\n"
+    "; Between 0 and 100\n"
+    "; Default: 50 (Highlights 60, HighlightSaturation 82)\n"
+    "Highlights = 60\n"
+    "Shadows = 50\n"
+    "Contrast = 50\n"
+    "Saturation = 50\n"
+    "HighlightSaturation = 82\n"
+    "\n"
+    "; Lifts the darkest parts of the picture (a hazy, filmic look), 0 = none\n"
+    "; Between 0 and 100\n"
+    "; Default: 0\n"
+    "Flare = 0\n"
+    "\n"
+    "; Strength of the game's bloom (the glow around bright lights), 100 = the game's\n"
+    "; Between 0 and 100\n"
+    "; Default: 100\n"
+    "Bloom = 100\n"
+    "\n"
+    "; Everything the game renders (the 3D scene, depth of field, bloom) is 16-bit float, not only the post-processing,\n"
+    "; so the sun, fire and sparks keep their brightness and glow. Turn it off if anything looks wrong with HDR. Not in\n"
+    "; the settings menu\n"
+    "; Default: On\n"
+    "UnclampedScene = On\n"
+    "\n"
+    "; The HDR signal: Auto (HDR10 where the display offers it, else scRGB), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
+    "; Not in the settings menu\n"
+    "; Default: Auto\n"
+    "HDRFormat = Auto\n"
+    "\n"
+    "; Shows an HDR analysis over the game: the picture's brightness in nits (maximum, average, minimum, the middle of\n"
+    "; the screen), the colour gamut it uses and a waveform of its brightness across the screen, as the display gets it\n"
+    "; Default: Off\n"
+    "Analysis = Off\n"
+    "\n"
     "[Performance]\n"
     "; Framerate cap\n"
     "; Between 30 and 240\n"
@@ -279,11 +388,11 @@ static const char DEFAULT_INI[] =
     "\n"
     "; The shadows of the hunters, monsters and scenery. Off: none, a little faster on a weak GPU\n"
     "; Default: On\n"
-    "Shadows = On\n"
+    "ShadowsOn = On\n"
     "\n"
     "; The glow around lights and the blur of what is far away (bloom and depth of field). Off: faster on a weak GPU\n"
     "; Default: On\n"
-    "Bloom = On\n"
+    "BloomOn = On\n"
     "\n"
     "; An Adreno GPU with a Vulkan 1.1 driver can show the 3D picture repeated in a grid below 720 lines without MSAA.\n"
     "; Auto keeps 2x MSAA there; Off leaves MSAA as set (faster, and some of those drivers look better without it)\n"
@@ -695,6 +804,25 @@ static int parse_factors(const char *v, float f[4]) {
     return *v ? 0 : n;
 }
 
+// A 3D camera's aspect (tools/gen.py PATCHES: the three callers of the perspective matrix that load a camera's). One
+// made for the screen (16:9) gets the picture's shape. On a picture narrower than 16:9 (16:10), a model preview's camera
+// (the Smithy's, made for its box in the HUD) has the shape of that box stretched to the taller picture: the renderer
+// (nvn/vulkan/exec.c ui_preview_map) records the shapes of the preview boxes it drew, and a camera of one of those shapes
+// gets the box's 16:9 shape instead, so the model is as big and as wide as at 16:9 (the renderer draws it in a box of
+// that shape, g_preview_cam_present says it can). Any other camera keeps its aspect.
+volatile float g_preview_box_aspect[4];
+volatile uint64_t g_preview_box_present[4], g_preview_cam_present;
+float camera_aspect(float a) {
+    if (a > 1.77f && a < 1.786f) return g_render_aspect;
+    if (g_render_aspect >= 16.0f / 9.0f - 0.01f) return a;
+    for (int i = 0; i < 4; i++)
+        if (g_preview_box_present[i] + 30 >= g_present_count && fabsf(a / g_preview_box_aspect[i] - 1.0f) < 0.001f) {
+            g_preview_cam_present = g_present_count;
+            return a * (16.0f / 9.0f) / g_render_aspect;
+        }
+    return a;
+}
+
 // The vertical field of view (radians) a camera of this aspect gets (tools/gen.py PATCHES: the three callers of the
 // perspective matrix that load a camera's). One made for the screen (its 16:9 aspect replaced with g_render_aspect)
 // gets the FOV factor and, on a picture narrower than 16:9 (16:10), the height that keeps 16:9's width (Vert+): more
@@ -751,6 +879,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_LANGUAGE "Invalid menu language."
 #define ERR_UPDATES "Invalid update setting."
 #define ERR_DRAW "Draw distance must be 0-10 (0: no limit)."
+#define ERR_HDR "Invalid HDR setting."
 #define ERR_KEYS "Invalid keybind."
 #define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
 #define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
@@ -782,6 +911,25 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
+    ON_OFF("Graphics", "FixKerning", fix_kerning, false),
+    ON_OFF("Graphics", "BoldText", bold_text, false),
+    ON_OFF("HDR", "HDR", hdr, false),
+    {"HDR", "PeakBrightness", SET_FLOAT, F(hdr_peak), 0, 80.0f, 10000.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "GameBrightness", SET_FLOAT, F(hdr_game), 0, 48.0f, 500.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "UIBrightness", SET_FLOAT, F(hdr_ui), 0, 48.0f, 500.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "ToneMapper", SET_CHOICE, F(hdr_tonemap), 0, 0, 0, "Vanilla|sdr,None|off|untonemapped,RenoDRT|reno|neutwo", NULL, false, ERR_HDR},
+    {"HDR", "GammaCorrection", SET_CHOICE, F(hdr_gamma), 0, 0, 0, "Off|srgb,2.2|22|gamma22,BT.1886|bt1886|2.4|24", NULL, false, ERR_HDR},
+    {"HDR", "Exposure", SET_FLOAT, F(hdr_exposure), 0, 0.0f, 2.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Highlights", SET_FLOAT, F(hdr_highlights), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Shadows", SET_FLOAT, F(hdr_shadows), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Contrast", SET_FLOAT, F(hdr_contrast), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Saturation", SET_FLOAT, F(hdr_saturation), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "HighlightSaturation", SET_FLOAT, F(hdr_highlight_saturation), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Flare", SET_FLOAT, F(hdr_flare), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    {"HDR", "Bloom", SET_FLOAT, F(hdr_bloom), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
+    ON_OFF("HDR", "UnclampedScene", hdr_scene, false),
+    ON_OFF("HDR", "Analysis", hdr_analysis, false),
+    {"HDR", "HDRFormat", SET_CHOICE, F(hdr_format), 0, 0, 0, "Auto,HDR10|pq,scRGB|fp16", NULL, false, ERR_HDR},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "ShowFPS", show_fps, false),
     {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
@@ -789,8 +937,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
     {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
      ERR_MISC},
-    ON_OFF("Performance", "Shadows", shadows, false),
-    ON_OFF("Performance", "Bloom", bloom, false),
+    ON_OFF("Performance", "ShadowsOn", shadows, false),
+    ON_OFF("Performance", "BloomOn", bloom, false),
     {"Performance", "AdrenoFix", SET_CHOICE, F(adreno_fix), 0, 0, 0, "Auto,Off", NULL, true, ERR_MISC},
     ON_OFF("Performance", "ShowStats", show_stats, false),
     ON_OFF("Performance", "LoadingIndicator", loading_indicator, true),  // (ini only: not in the settings menu)
@@ -1389,6 +1537,9 @@ void config_load(void) {
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
     if ((e = getenv("MHGU_RT16"))) g_config.smooth_gradients = atoi(e) != 0;
+    if ((e = getenv("MHGU_FIX_KERNING"))) g_config.fix_kerning = atoi(e) != 0;
+    if ((e = getenv("MHGU_BOLD_TEXT"))) g_config.bold_text = atoi(e) != 0;
+    if ((e = getenv("MHGU_HDR"))) g_config.hdr = atoi(e) != 0;
     if ((e = getenv("MHGU_BACKGROUND_INPUT"))) g_config.background_input = atoi(e) != 0;
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
@@ -1437,6 +1588,10 @@ void config_load(void) {
     if ((e = getenv("MHGU_FSR_ANIMSURF"))) g_config.fsr_animsurf = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_SHARPNESS")) && strtof(e, NULL) >= 0.0f && strtof(e, NULL) <= 1.0f) g_config.fsr_sharpness = strtof(e, NULL);
     if ((e = getenv("MHGU_FSR_REACTIVE")) && strtof(e, NULL) >= 0.0f && strtof(e, NULL) <= 1.0f) g_config.fsr_reactive = strtof(e, NULL);
+    if (g_config.hdr && g_config.fsr) {  // (FSR's input stays 8-bit: the picture would be SDR-bright, nvn/vulkan/hdr.c)
+        LOG("[config] HDR is on: FSR off\n");
+        g_config.fsr = 0;
+    }
 
     int tw = g_config.width, th = g_config.height;  // (Borderless shows the image at the desktop size)
     if (g_config.display_mode == DISPLAY_BORDERLESS) tw = tw < desktop_w ? tw : desktop_w, th = th < desktop_h ? th : desktop_h;

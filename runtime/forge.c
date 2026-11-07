@@ -920,6 +920,28 @@ static int32_t in_sticks[4];
 static bool in_connected;  // (false until the first frame: Forge's state is empty until then)
 static bool touch_down;
 static float touch_x, touch_y;
+static bool mouse_on;  // (the mouse for mods, the port's own calls below: the free pointer is on the picture)
+static float mouse_x, mouse_y, mouse_dx, mouse_dy;
+static uint32_t mouse_buttons;
+
+// A point of the window (mx, my: pixels) on the game's picture, fitted and centred (g_render_aspect): the console's
+// 1280x720 screen, its HUD canvas (g_ui_anchor_aspect wide at most) spanning 0..1279. False off the picture.
+static bool window_to_screen(SDL_Window *w, float mx, float my, float *x, float *y) {
+    int ww = 0, wh = 0;
+    if (!SDL_GetWindowSize(w, &ww, &wh) || ww <= 0 || wh <= 0) return false;
+    float asp = g_render_aspect > 0 ? g_render_aspect : 16.0f / 9.0f;
+    float pw = (float)ww, ph = (float)wh;
+    if (pw / ph > asp) pw = ph * asp;
+    else ph = pw / asp;
+    float u = (mx - ((float)ww - pw) / 2) / pw, v = (my - ((float)wh - ph) / 2) / ph;
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) return false;
+    float anchor = g_ui_anchor_aspect > 0 && g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
+    float canvas = anchor / asp;
+    u = fminf(fmaxf((u - (1 - canvas) / 2) / canvas, 0.0f), 1.0f);
+    *x = fminf(floorf(u * 1280.0f), 1279.0f);
+    *y = fminf(floorf(v * 720.0f), 719.0f);
+    return true;
+}
 
 // The mouse as the touch screen: the left button is a finger while the mouse is free (not captured for the camera,
 // Forge's menu closed), and the pointer must be on the game's picture, which is fitted into the window by its shape
@@ -946,6 +968,18 @@ static bool mouse_touch(float *x, float *y) {
     return true;
 }
 
+// The mouse for mods (runtime/host_input.c keeps it from the events): the pointer while the mouse is free (not captured,
+// Forge's menu closed) and over the game's picture; the movement, unless Forge's menu has the mouse.
+static void mouse_frame(void) {
+    SDL_Window *w = ui_window();
+    HostMouse m;
+    host_input_mouse_take(&m);
+    bool menu = overlay_menu_open();
+    mouse_on = w && m.inside && !menu && !SDL_GetWindowRelativeMouseMode(w) && window_to_screen(w, m.x, m.y, &mouse_x, &mouse_y);
+    mouse_buttons = m.buttons;
+    mouse_dx = menu ? 0.0f : m.dx, mouse_dy = menu ? 0.0f : m.dy;
+}
+
 static void input_frame(void) {
     in_prev = in_now;
     in_now = input_npad_state(in_sticks);
@@ -955,6 +989,7 @@ static void input_frame(void) {
     const bool *k = SDL_GetKeyboardState(&n);
     for (int i = 0; i < 256; i++) keys_now[i] = k && i < n ? k[i] : 0;
     touch_down = mouse_touch(&touch_x, &touch_y);
+    mouse_frame();
 }
 
 static bool key(const uint8_t *s, uint32_t k) { return k < 256 && s[k]; }
@@ -969,6 +1004,26 @@ HLE_FUNC("forge_input_getTouch", f_in_touch) {  // (float *x, float *y): the fir
     if (ARG(1)) STF(ARG(1), touch_y);
     RET(1);
 }
+// The mouse for mods: the port's own calls, not Forge's (a mod made for the console doesn't know them).
+// forge_input_getMouse(float *x, float *y, uint32_t *buttons): the pointer in screen pixels (1280x720, as getTouch's)
+// and the buttons held or pressed since the last frame (1 left, 2 middle, 4 right, 8 / 16 the side buttons). False, and
+// nothing written, while the mouse is captured, Forge's menu is open or the pointer is off the game's picture.
+HLE_FUNC("forge_input_getMouse", f_in_mouse) {
+    if (!mouse_on) { RET(0); return; }
+    if (ARG(0)) STF(ARG(0), mouse_x);
+    if (ARG(1)) STF(ARG(1), mouse_y);
+    if (ARG(2)) ST32(ARG(2), mouse_buttons);
+    RET(1);
+}
+// forge_input_getMouseMove(float *dx, float *dy): how far the mouse moved since the last frame, wherever the movement
+// went (also the hunt camera's): counts while captured, window pixels while free; y down. 0 while Forge's menu is open.
+HLE_FUNC("forge_input_getMouseMove", f_in_mouse_move) {
+    if (ARG(0)) STF(ARG(0), mouse_dx);
+    if (ARG(1)) STF(ARG(1), mouse_dy);
+}
+// forge_input_setMouseFree(bool free): while true the mouse isn't captured (let go if it was; captured again after, if
+// the player had clicked in) and its clicks are only the mod's (getMouse): not a capture, not the game's buttons.
+HLE_FUNC("forge_input_setMouseFree", f_in_mouse_free) { host_input_set_mouse_free((ARG(0) & 0xFF) != 0); }
 static float stick_value(int32_t v) { return fminf(fmaxf(v / 32767.0f, -1.0f), 1.0f); }
 static void stick(Cpu *c, int i) {
     if (ARG(0)) STF(ARG(0), stick_value(in_sticks[i]));
