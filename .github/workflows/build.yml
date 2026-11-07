@@ -53,8 +53,8 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist
-          tar -a -c -f dist/mhgurecomp-windows-x86_64.zip \
-            build/mhgurecomp.exe build/mhgurecomp-updater.exe build/*.dll build/licenses
+          (cd build && zip -qr ../dist/mhgurecomp-windows-x86_64.zip \
+            mhgurecomp.exe mhgurecomp-updater.exe *.dll licenses)
           sha256sum dist/mhgurecomp-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
