@@ -9,7 +9,11 @@
 
 #include "vk.h"
 #include "../astc.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 #include "../bcn.h"
 
 // ================================================================== formats
@@ -228,7 +232,12 @@ void vk_defer_buffer(VkBuffer b, VmaAllocation mem) { defer((Dead){.buf = b, .me
 static bool low_memory_textures(void) {
     static int on = -1;
     if (on < 0) {
+#ifdef _WIN32
+        MEMORYSTATUSEX ms = {.dwLength = sizeof ms};
+        uint64_t ram = GlobalMemoryStatusEx(&ms) ? ms.ullTotalPhys : 0;
+#else
         uint64_t ram = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+#endif
         on = ram < 5ull << 30;
         if (on) LOG("[vk] %llu MB of memory: 3D textures without their largest level\n", (unsigned long long)(ram >> 20));
     }
