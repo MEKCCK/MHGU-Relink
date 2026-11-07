@@ -10,22 +10,31 @@
 <h1>MHGU hub</h1>
 <div class="stats" id="stats"></div>
 <table>
-  <thead><tr><th>Room</th><th>Players</th></tr></thead>
-  <tbody id="rooms"><tr><td colspan="2">loading…</td></tr></tbody>
+  <thead><tr><th>Room</th><th>Players</th><th>Access</th><th>Status</th></tr></thead>
+  <tbody id="rooms"><tr><td colspan="4">loading…</td></tr></tbody>
 </table>
 <p class="hint">This page is your own: replace the files in this directory (<code>-web-dir</code>) freely.
 Data comes from <code>/api/hubs</code>.</p>
 <script>
 const zh = (navigator.language || '').startsWith('zh');
 const T = { room: zh ? '房间' : 'Room', players: zh ? '玩家' : 'Players',
+            access: zh ? '访问' : 'Access', status: zh ? '状态' : 'Status',
+            pub: zh ? '公开' : 'Public', phone: zh ? '仅手机' : 'Phone only', key: zh ? 'Key 房间' : 'Key room',
+            open: zh ? '可加入' : 'open', waiting: zh ? '等待中' : 'waiting',
             none: zh ? '当前没有房间。' : 'No rooms right now.', up: zh ? '运行' : 'up' };
+function access(h) {
+  if (h.access === 'phone') return '📱 ' + T.phone;
+  if (h.access === 'key' || h.locked) return '🔒 ' + T.key;
+  return '🌐 ' + T.pub;
+}
 function tick() {
   fetch('/api/hubs').then(r => r.json()).then(v => {
     document.getElementById('stats').textContent =
       `${v.hubs.length} ${T.room} · ${v.players} ${T.players} · ${T.up} ${Math.floor(v.uptime / 60)}m`;
     const rows = v.hubs.map((h, i) =>
-      `<tr><td>${T.room} ${i + 1}</td><td>${h.players}</td></tr>`).join('');
-    document.getElementById('rooms').innerHTML = rows || `<tr><td colspan="2">${T.none}</td></tr>`;
+      `<tr><td>${T.room} ${i + 1}</td><td>${h.players}</td><td>${access(h)}</td>` +
+      `<td>${h.players > 1 ? T.open : T.waiting}</td></tr>`).join('');
+    document.getElementById('rooms').innerHTML = rows || `<tr><td colspan="4">${T.none}</td></tr>`;
   }).catch(() => {});
 }
 tick(); setInterval(tick, 5000);
