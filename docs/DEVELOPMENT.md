@@ -97,3 +97,13 @@ cd packaging/arch && makepkg -f
 ```
 
 Arch 包的 `pkgver` 要跟 `VERSION` 一致。PKG/APK 都不包含游戏代码。
+
+## GitHub Actions
+
+`.github/workflows/build.yml` 可手动触发，打 `v*` tag 时也会运行：
+
+- **Linux**：构建 bunded SDL3 / shaderc / FFmpeg 的运行时并上传 tarball；
+- **Windows**：MSYS2 UCRT64 构建 `.exe`，连同 DLL、许可打 zip；
+- **Android**：Windows runner 上构建 NDK 依赖、`libmain.so` 和 **debug 签名** APK（可直接安装测试）。
+
+工作流不上传 keystore，也不生成正式签名 APK；正式发布仍在本机用持久化 key 签名。CI 只作为三平台编译验证和未签名/调试产物，日常开发优先用本机构建。
