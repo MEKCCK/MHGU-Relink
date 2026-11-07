@@ -478,6 +478,10 @@ static void context_init(const char *font_path, float font_size) {
     // The font built into the library is always there and has the CJK glyphs: no dependence on the
     // device's system fonts (their CJK faces differ, and a face index can make the load fail).
     cjk = nullptr;
+#elif defined(_WIN32)
+    // Windows ships .ttc collections whose face indices differ (msyh.ttc has no face 2): use the built-in
+    // font instead of risking an ImGui assertion. MHGU_FONT can still name a font explicitly.
+    if (!cjk || !*cjk) cjk = nullptr;
 #else
     if (!cjk || !*cjk)
         for (int i = 0; ui_fonts[i]; i++)
@@ -493,10 +497,9 @@ static void context_init(const char *font_path, float font_size) {
         if (font) font_path = cjk;
     }
     cfg.OversampleH = cfg.OversampleV = 1;
-#ifdef __ANDROID__
     if (!font) {
-        // No font on the device: the one built in. Its bytes are static (the library's), so the atlas
-        // must not free them. (The Android build embeds native/fonts/JetBrainsMapleMono-Regular.ttf.)
+        // No font on the device/desktop: the one built in. Its bytes are static (the executable's), so the
+        // atlas must not free them. (The desktop Makefile and the Android CMake embed the same font.)
         const size_t n = (size_t)(_binary_font_ttf_end - _binary_font_ttf_start);
         ImFontConfig mem = cfg;
         mem.FontDataOwnedByAtlas = false;
@@ -504,7 +507,6 @@ static void context_init(const char *font_path, float font_size) {
                                               io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
         if (font) font_path = "<built in>";
     }
-#endif
     if (!font && font_path) font = io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg);
     if (!font) io.Fonts->AddFontDefaultVector(&cfg);
     if (font) io.FontDefault = font;

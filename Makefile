@@ -175,7 +175,7 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 # release built before its tag is made.
 VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '\r\n' | grep . || echo unknown)
 
-RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
+RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) $(FONT_OBJ) \
            $(O)/updater/sha256.o $(ICON_RES)
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
@@ -192,6 +192,11 @@ IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI
 MHGU_LINK_INC := crates/mhgu-link-ffi/include
 MHGU_LINK_LIB := $(abspath target/release/libmhgu_link_ffi.a)
 MHGU_XP_LIB   := $(abspath target/release/libmhgu_crossplay.a)
+# The UI font, built into the executable on desktop too (Android's CMake embeds the same file): Latin, CJK and the
+# controller icons, so a Windows machine without a CJK font does not crash in ImGui's font atlas.
+FONT_TTF := $(O)/font.ttf
+FONT_OBJ := $(O)/font.o
+LD ?= ld
 RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -Ithird_party/ffx-api -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
@@ -294,6 +299,13 @@ $(O)/fsr/%.c.o: $(FSR)/%.c
 $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
+
+$(FONT_TTF): native/fonts/JetBrainsMapleMono-Regular.ttf
+	@mkdir -p $(O)
+	cp $< $@
+
+$(FONT_OBJ): $(FONT_TTF)
+	cd $(O) && $(LD) -r -b binary font.ttf -o font.o
 
 $(EXE): $(RT_OBJ) $(O)/rt/touch.o $(O)/rt/perfstats.o $(AV_DEPS) $(abspath target/release/libmhgu_link_ffi.a) $(abspath target/release/libmhgu_crossplay.a)
 	@mkdir -p $(dir $@)
@@ -409,10 +421,13 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
+LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(B)/licenses/JetBrainsMapleMono-OFL.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
               $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
 licenses: $(LICENSE_TXT)
 $(B)/licenses/%.txt: %
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(B)/licenses/JetBrainsMapleMono-OFL.txt: native/fonts/OFL.txt
 	@mkdir -p $(dir $@)
 	cp $< $@
 $(B)/licenses/FFmpeg.txt: $(FFMPEG_DIR)/.built

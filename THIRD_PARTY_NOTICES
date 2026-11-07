@@ -18,6 +18,9 @@ below.
   github.com/FireBurn/FSR-Vulkan): MIT License, see third_party/fsr-vulkan/LICENSE.txt, NOTICE.md and UPSTREAM.md
   (the files changed against AMD's originals are listed there).
 - VulkanMemoryAllocator (header-only, compiled into the executable): MIT License.
+- JetBrains Maple Mono (native/fonts/JetBrainsMapleMono-Regular.ttf, embedded in the desktop executables and the
+  Android library): SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono Project Authors, 2022 The Maple Mono
+  Project Authors and 2025 Space Time; the full license is in native/fonts/OFL.txt and in build/licenses.
 - RenoDX (github.com/clshortfuse/renodx, by ShortFuse / Carlos Lopez Jr., with its Monster Hunter Generations
   Ultimate mod by souperman9): the native HDR output (runtime/nvn/vulkan/hdr.c) ports its colour grading, tone mapper
   and gamma correction to GLSL and follows its mod's approach. MIT License.

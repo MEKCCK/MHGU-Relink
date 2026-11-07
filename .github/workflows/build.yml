@@ -25,7 +25,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            make git diffutils python curl xz tar zip nasm
+            make git diffutils python curl xz tar zip nasm binutils
             mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-shaderc
