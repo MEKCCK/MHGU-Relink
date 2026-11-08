@@ -210,10 +210,12 @@ fn on_join(host: &mut Host<UdpSocket>, srv: &mut Srv, peer: PeerID, d: &[u8], lo
         game_id: 0,
         host: host_member,
     });
+    // Yuzu v1 order (the room client's state machine: RoomInformation, then JoinSuccess; a
+    // success before any room information is "Joining without RoomInformation" and fails).
+    broadcast_info(host, srv);
     let mut ok = vec![M_JOIN_SUCCESS];
     ok.extend_from_slice(&ip);
     send_to(host, peer, &ok);
-    broadcast_info(host, srv);
 }
 
 fn on_game_info(host: &mut Host<UdpSocket>, srv: &mut Srv, peer: PeerID, d: &[u8]) {

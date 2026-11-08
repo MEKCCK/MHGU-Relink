@@ -94,12 +94,13 @@ impl Client {
 
     fn join(&mut self, nick: &str) {
         self.send(&Client::join_request(nick));
+        // The room client (yuzu v1) wants RoomInformation first, then JoinSuccess.
+        self.pump_until(Duration::from_secs(3), |d| d.first() == Some(&M_ROOM_INFO))
+            .expect("RoomInformation first");
         let ok = self.pump_until(Duration::from_secs(3), |d| d.first() == Some(&M_JOIN_SUCCESS))
             .expect("JoinSuccess");
         assert!(ok.len() >= 5, "JoinSuccess carries the assigned IPv4");
         self.ip.copy_from_slice(&ok[1..5]);
-        self.pump_until(Duration::from_secs(3), |d| d.first() == Some(&M_ROOM_INFO))
-            .expect("RoomInformation after the join");
     }
 }
 
