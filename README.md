@@ -58,7 +58,8 @@ bash native/build_native.sh arm64-v8a
 cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew assembleRelease
 ```
 
-公开 APK 不含 `libmhgugame.so`；`-Pwithgame` 只用于自测。详见 [docs/android.md](docs/android.md)。
+Android APK 不包含游戏代码。安装后请在所选游戏文件夹中提供与 APK 版本匹配的 `libmhgugame.so` 和
+`libmhgugame.id`。详见 [docs/android.md](docs/android.md)。
 
 ## 联机
 

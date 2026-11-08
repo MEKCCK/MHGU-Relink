@@ -56,8 +56,8 @@ cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew assembleRelease
 ```
 
 Android native 构建、桌面构建和 `tools/build_game.py` 都从
-`android/app/src/main/assets/gamelib_id.txt` 读取同一个 `GAMELIB_ID`；APK 用它检查设备上的
-`libmhgugame.id`。需要升级该 ID 时，必须同时重建运行时和配套游戏代码，否则设备会报 `from another version`。
+`android/app/src/main/assets/gamelib_id.txt` 读取同一个 `GAMELIB_ID`；Android 用它检查所选文件夹中的
+`libmhgugame.id`。APK 不包含游戏库或其 ID 文件。需要升级该 ID 时，必须同时重建运行时和配套游戏代码。
 
 ## 联机架构
 

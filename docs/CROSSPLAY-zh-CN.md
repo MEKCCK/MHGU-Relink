@@ -31,10 +31,10 @@ RyuLdn 服务器地址填写 `主机` 或 `主机:端口`，多个地址用逗�
 & "C:/Program Files/Git/bin/bash.exe" ./native/build_native.sh arm64-v8a Release
 $env:JAVA_HOME = "C:/Program Files/Eclipse Adoptium/jdk-17.0.21.9-hotspot"
 $env:ANDROID_HOME = "$env:LOCALAPPDATA/Android/Sdk"
-& ./android/gradlew.bat -p ./android --no-daemon :app:assembleRelease -Pwithgame
+& ./android/gradlew.bat -p ./android --no-daemon :app:assembleRelease
 ```
 
-native 构建会自动运行 cargo build --locked，编译并静态链接 crossplay。结果位于 android/app/build/outputs/apk/release/app-release.apk。-Pwithgame 保留用户自备的内置游戏库；不带该参数则生成不含游戏库的包。
+native 构建会自动运行 cargo build --locked，编译并静态链接 crossplay。APK 不内置游戏代码；结果位于 android/app/build/outputs/apk/release/app-release.apk。首次启动时选择含有 `exefs`、`romfs`、`libmhgugame.so` 和 `libmhgugame.id` 的游戏文件夹。
 
 用户指定的长期签名已放在 android/mhgu.keystore 和 android/keystore.properties；现有 Gradle release 配置直接读取，两个文件均被 Git 忽略。不要将这两个文件或签名备份加入源码发布包。新证书 SHA-256 为 773546B88C066A7D5CB4C951A3D27B5A6968FBFFE2514A0553BFDE396E2F57AD，与参考 APK 一致。
 

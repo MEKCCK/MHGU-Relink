@@ -215,8 +215,10 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {  // (the menus:
     if (i == C_HDPAD) return !menu && config_live_touch_show(TB_DPAD);
     if (i == C_DPAD) return menu && config_live_touch_show(TB_DPAD);
     if (i == C_MZL || i == C_MZR) return menu && config_live_touch_show(show_setting(i));  // (asked for only)
+    if (i == C_MINUS) return menu && config_live_touch_show(TB_MINUS);
     if (i > C_DPAD) return menu;
-    if (menu) return i == C_MENU || i == C_SETTINGS || (i == C_STICK && config_live_touch_show(TB_STICK));
+    if (menu) return (i == C_MENU && config_live_touch_show(TB_PLUS)) || i == C_SETTINGS ||
+                         (i == C_STICK && config_live_touch_show(TB_STICK));
     if (is_ranged(i) ? !ranged : ranged && (i == C_ATTACK || i == C_HEAVY || i == C_LIGHT || i == C_CORNER ||
                                                               i == C_R || i == C_DODGE || i == C_SHEATHE))
         return false;
@@ -1167,7 +1169,14 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
 #endif
     bool visible = s.edit || (!typing && (mode == TOUCH_ON || (mode == TOUCH_AUTO && !pad_connected && screen)));
     s.auto_wait = !s.edit && !typing && mode == TOUCH_AUTO && !pad_connected && !screen;
-    g_visible = visible;
+    bool was_visible = g_visible.exchange(visible);
+    if (was_visible && !visible) {
+        for (Finger &f : s.f)
+            if (f.kind == F_BUTTON || f.kind == F_STICK) f.kind = F_NONE;
+        s.stick_on = false;
+        s.held = 0;
+        for (Pulse &p : s.pulse) p.until = 0;
+    }
     // (hidden, by a controller or by Off: the settings button alone stays, or a phone without a controller had no way
     // back to the menu but clearing the app's data)
     g_gear_only = !visible && !typing && screen;

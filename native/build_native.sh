@@ -74,6 +74,7 @@ cd "$HERE"
 J="$ROOT/android/app/src/main/jniLibs/$ABI"
 mkdir -p "$J"
 mkdir -p "$ROOT/android/app/src/main/assets"
+rm -f "$ROOT/android/app/src/main/assets/libmhgugame.id"
 printf '%s\n' "$GAMELIB_ID" > "$ROOT/android/app/src/main/assets/gamelib_id.txt"  # (GameFolderActivity: which game code fits)
 cp "$OUT/libmain.so" "$OUT/libmhguffmpeg.so" "$ROOT/deps/out/$ABI/sdl3/lib/libSDL3.so" "$J/"
 # (MSYS2 or Linux: the NDK ships both prebuilt trees)
@@ -81,6 +82,7 @@ HTAG=windows-x86_64; [ "$(uname -s)" = Linux ] && HTAG=linux-x86_64
 cp "$NDK/toolchains/llvm/prebuilt/$HTAG/sysroot/usr/lib/$( [ $ABI = arm64-v8a ] && echo aarch64 || echo x86_64)-linux-android/libc++_shared.so" "$J/"
 # (a driver of the player's own: runtime/platform/android_gpu.c; these are found in the app's nativeLibraryDir)
 [ "$ABI" = arm64-v8a ] && cp "$OUT"/adrenotools/src/hook/lib*_hook.so "$OUT/adrenotools/src/hook/libhook_impl.so" "$J/"
-[ -f "$OUT/libmhgugame.so" ] && cp "$OUT/libmhgugame.so" "$J/"
+# Game code stays in the player's selected folder; never stage it for the APK.
+rm -f "$J/libmhgugame.so"
 echo "native $ABI: ok (GAMELIB_ID $GAMELIB_ID)"
 ls -la "$J"
