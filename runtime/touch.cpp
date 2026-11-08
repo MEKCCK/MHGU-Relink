@@ -233,7 +233,7 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {  // (the menus:
     return true;
 }
 bool in_editor(int i, bool in_quest, int profile) {
-    if (i == C_HDPAD) return config_live_touch_show(TB_DPAD);
+    if (i == C_HDPAD) return config_live_touch_controls() != TOUCH_OFF && config_live_touch_show(TB_DPAD);
     if (i == C_LAYOUT) return true;
     if (i == C_MZL || i == C_MZR) return config_live_touch_show(show_setting(i));
     return in_mode(i, false, in_quest, ranged_layout_profile(profile));

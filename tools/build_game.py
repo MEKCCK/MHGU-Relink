@@ -10,7 +10,6 @@ download is Google's Android NDK (the compiler, about 1.8 GB, kept in ~/.mhgu-to
 Options: --ndk <path>  an NDK of your own   --jobs <n>  compile with n jobs   --keep  keep the work folder
 """
 import argparse
-import hashlib
 import os
 import platform
 import shutil
@@ -28,9 +27,6 @@ NDK_RELEASE = 'r27'
 NDK_REVISION = '27.0.12077973'
 API = 29
 BUILD_ID = bytes.fromhex('FB08F1D20FD1204F')  # version 1.4.0's main
-ID_FILES = ['tools/gen.py', 'tools/lifter.py', 'tools/neon.py', 'tools/nso.py', 'tools/gamelib_entry.c',
-            'runtime/hle/hle_symbols.txt', 'runtime/cpu.h', 'runtime/vfp.h', 'runtime/neon_rt.h', 'runtime/gamelib.h']
-ID_FLAGS = 'android-arm64-v8a -O2 -nossp -fno-strict-aliasing -ffp-contract=off -fno-math-errno'
 # (exactly native/CMakeLists.txt's for this library, with the NDK's own)
 CFLAGS = ['-DANDROID', '-fdata-sections', '-ffunction-sections', '-funwind-tables', '-no-canonical-prefixes', '-DNDEBUG',
           '-fPIC', '-O2', '-fno-strict-aliasing', '-ffp-contract=off', '-fno-math-errno', '-fvisibility=hidden',
@@ -47,12 +43,12 @@ def fail(text):
 
 
 def gamelib_id():
-    h = hashlib.sha256()
-    for name in ID_FILES:
-        with open(os.path.join(ROOT, name), 'rb') as f:
-            h.update(f.read().replace(b'\r', b''))
-    h.update((ID_FLAGS + '\n').encode())
-    return h.hexdigest()[:16]
+    path = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'gamelib_id.txt')
+    with open(path, encoding='ascii') as f:
+        game_id = f.read().strip()
+    if len(game_id) != 16 or any(char not in '0123456789abcdef' for char in game_id):
+        fail(f'invalid GameLib ID in {path}')
+    return game_id
 
 
 def check_game(game):
