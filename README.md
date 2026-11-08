@@ -26,7 +26,7 @@ Ryujinx / suyu 模拟器互通。
 | 路径 | 内容 |
 |---|---|
 | `runtime/` | 共享 C 运行时：guest 内核/`svc`、HLE、NVN→Vulkan、音频、媒体库、设置菜单、`net/ldn.c` |
-| `tools/` | 游戏翻译器（`gen.py`、`lifter.py`、`neon.py`、`nso.py`）、`build_game.py` |
+| `tools/` | 游戏翻译器（`gen.py`、`lifter.py`、`neon.py`、`nso.py`）、`build_game.py`（Android）、`build_game_windows.py`（Windows DLL） |
 | `crates/mhgu-link*` | Rust 联机核心：协议、link 客户端、C FFI、hub 服务器 |
 | `crates/mhgu-crossplay` | RyuLdn 客户端/服务器、suyu 房间客户端/服务器、混合 hub、C FFI |
 | `crates/mhgu-hub` | 互联网 hub 服务器 + 无依赖 Web UI |
@@ -41,19 +41,23 @@ Ryujinx / suyu 模拟器互通。
 # 1) Rust 库
 cargo build --release -p mhgu-link-ffi -p mhgu-crossplay
 
-# 2) 运行时（GEN=翻译产物，GAME=含 exefs/ 与 romfs/ 的目录）
+# 2) 游戏代码 + 运行时（GEN=翻译产物，GAME=含 exefs/ 与 romfs/ 的目录）
+make gen GAME=<dump>
 make -j12 GEN=<gen> GAME=<dump> FFMPEG=system
+# 产物：build/mhgugame.so（Windows：build/mhgugame.dll）、obj/gamelib.id
 
-# 3) 运行
+# 3) 把游戏库放到程序旁边，然后运行
+cp build/mhgugame.so build/        # Windows：复制 build/mhgugame.dll
 cd build && ./mhgurecomp <游戏目录>
 ```
 
-生成游戏代码与完整依赖说明见 [docs/pc.md](docs/pc.md)。
+生成游戏代码、`.so` / `.dll` / `.id` 的区别与 Windows 单独编译工具见 [docs/pc.md](docs/pc.md#生成游戏代码so--dll--id)。
 
 ## 快速开始（Android）
 
 ```sh
 python3 tools/build_game.py <含 exefs/ 与 romfs/ 的目录>
+# 输出 <目录>/libmhgugame.so + <目录>/libmhgugame.id（arm64-v8a）
 bash native/build_native.sh arm64-v8a
 cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew assembleRelease
 ```

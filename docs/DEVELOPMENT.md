@@ -9,7 +9,7 @@
 |---|---|
 | `runtime/` | C 运行时：guest 内核/`svc`、HLE、NVN→Vulkan、音频、媒体库、设置菜单 |
 | `runtime/net/ldn.c` | `nn::ldn` 的 HLE；按 `Crossplay` 模式转给 Rust 模块 |
-| `tools/` | `gen.py`（函数发现/代码生成）、`lifter.py`（A32/VFP）、`neon.py`、`nso.py`、`build_game.py` |
+| `tools/` | `gen.py`（函数发现/代码生成）、`lifter.py`（A32/VFP）、`neon.py`、`nso.py`、`build_game.py`（Android）、`build_game_windows.py`（Windows DLL） |
 | `crates/mhgu-protocol` | MHGS/MHGR/MHGL/MHGD 线格式、`VPacket`、`NetworkInfo` |
 | `crates/mhgu-link` / `-ffi` | 局域网/互联网 link 客户端与 C 库 |
 | `crates/mhgu-hub` | 互联网 hub 服务器 + Web UI |
@@ -38,6 +38,17 @@ make -j12 GEN=generated GAME=<dump> FFMPEG=system
 
 `make` 把运行时和游戏库放进 `build/`；`GEN` 默认 `generated/`。可用 `SDL3=system SHADERC=system
 FFMPEG=system` 链接系统库。
+
+产物和命名（容易混淆）：
+
+| 平台 | 库 | ID |
+|---|---|---|
+| Linux | `build/mhgugame.so`，x86-64，无 `lib` 前缀 | `obj/gamelib.id` |
+| Windows | `build/mhgugame.dll`，x86-64 | `obj/gamelib.id` |
+| Android | `libmhgugame.so`，arm64-v8a | `libmhgugame.id` |
+
+Linux 的 `mhgugame.so` 和 Android 的 `libmhgugame.so` 只是名字相近，ABI 完全不同；不能拿 Android 的库
+当 PC 库。独立 Windows DLL 工具是 `tools/build_game_windows.py`，它也会在游戏目录写 `mhgugame.id`。
 
 ### Android
 

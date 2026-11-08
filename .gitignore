@@ -54,3 +54,12 @@ packaging/*/*.pkg.tar.zst
 
 # downloaded by the build (FFmpeg source tarball)
 /third_party/ffmpeg/
+
+# game code made from a dump: build it locally, never commit it
+/mhgugame.so
+/mhgugame.dll
+/mhgugame.id
+/mhgugame-windows.dll
+/mhgurecomp-windows-*.zip
+/MHGU-Relink-*.7z
+/MHGU-GameCode-Builder.zip

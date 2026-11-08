@@ -27,7 +27,8 @@ mhgu-recomp /path/to/MHGU-1.4
 ```
 
 启动器会依次查找 `$HOME/game/MHGU-1.4`、`$HOME/game/MHGU` 等常见目录；也可以设 `MHGU_GAME_DIR`。
-游戏目录必须包含 `exefs/`、`romfs/`，以及 **x86-64** 的 `libmhgugame.so`（Android 的 ARM 库不能用于 PC）。
+游戏目录必须包含 `exefs/`、`romfs/`，以及 **x86-64 的 `mhgugame.so`**（启动器也接受旧名
+`libmhgugame.so`，但它必须是 PC 的 x86-64 构建；Android 的 ARM `libmhgugame.so` 不能用于 PC）。
 
 状态、设置、缓存默认在 `$XDG_DATA_HOME/MHGURecomp`（通常是 `~/.local/share/MHGURecomp`）：
 
@@ -38,6 +39,68 @@ mhgu-recomp /path/to/MHGU-1.4
 | 日志 | `log.txt` |
 | 模组 / 金手指 | `mods/`、`cheats/` |
 | 着色器缓存 | `cache/` |
+
+## 生成游戏代码（`.so` / `.dll` / `.id`）
+
+游戏代码不在发布包内。它由玩家自己的 `exefs` 翻译并编译成宿主库；PC 运行时的库名与位置如下：
+
+| 平台 | 游戏库 | ID 文件 | 运行时从哪里加载 |
+|---|---|---|---|
+| Linux | `build/mhgugame.so`（x86-64） | `obj/gamelib.id` | `mhgurecomp` 同目录，或游戏目录（启动器自动设置） |
+| Windows | `build/mhgugame.dll`（x86-64） | `obj/gamelib.id`；独立工具写 `mhgugame.id` | `mhgurecomp.exe` 同目录的 `mhgugame.dll` |
+| Android | 游戏目录的 `libmhgugame.so`（arm64-v8a） | 游戏目录的 `libmhgugame.id` | APK 选中的游戏目录 |
+
+注意：Linux 的 `mhgugame.so` 和 Android 的 `libmhgugame.so` 只差一个 `lib` 前缀，但前者是 x86-64，
+后者是 arm64-v8a，**不能互换，也不能只按文件名判断**。启动器同时接受 `mhgugame.so` 和旧的
+`libmhgugame.so` 作为 Linux 库，但文件必须是 PC 构建。
+
+`gamelib.id`（Android 叫 `libmhgugame.id`）是 16 位十六进制字符串，等于编译进库里的 `GAMELIB_ID`。这个值由
+`android/app/src/main/assets/gamelib_id.txt` 固定，Makefile、Android 构建和 `build_game_windows.py` 都读它；
+运行时/APK 启动时会比较它：不一致就报 `was built for another version`，必须用匹配的 ID 重新生成库。
+库本身已经包含这个 ID；`.id` 文件是给启动器、打包和排查用的。
+
+### Linux（PC）
+
+```sh
+make gen GAME=/path/to/MHGU-1.4
+make -j12 GAME=/path/to/MHGU-1.4 FFMPEG=system
+# build/mhgugame.so 和 obj/gamelib.id
+```
+
+把 `build/mhgugame.so` 复制到 `build/mhgurecomp` 旁边再运行；只编译运行时不会自动生成游戏代码。
+
+### Windows（PC）
+
+官方方式是在 MSYS2 里执行同一套 Makefile：
+
+```sh
+make gen GAME=E:/path/to/MHGU-1.4
+make -j12 PLATFORM=windows GAME=E:/path/to/MHGU-1.4
+# build/mhgugame.dll 和 obj/gamelib.id
+```
+
+需要 MSYS2 clang/lld 以及 SDL3、shaderc、FFmpeg、Vulkan 头。`mhgugame.dll` 必须由**同一份源码和同一套
+Windows 编译参数**生成；换一台机器只复制 DLL 而不复制匹配的 `mhgurecomp.exe`，启动时会被 ID 检查拒绝。
+Windows 下没有单独的 `.id` 加载逻辑，ID 已经嵌在 DLL 里。
+
+如果只想让玩家自己生成 DLL，用打包的独立工具（见 `tools/build_game_windows.py`）：
+
+```sh
+py tools/build_game_windows.py --exe windows/mhgurecomp.exe <含 exefs/romfs 的目录>
+# 输出 <目录>/mhgugame.dll 和 <目录>/mhgugame.id
+```
+
+工具会读取 `mhgurecomp.exe` 内嵌的 `GAMELIB_ID`（没有 `--exe` 时读共享 ID 文件）并写入 DLL；游戏文件不会被
+上传或打包。拿到别人的构建时，用 `--exe` 指向那一份 `mhgurecomp.exe`，不要只按版本号猜 ID。
+
+### Android
+
+```sh
+python3 tools/build_game.py <含 exefs/ 与 romfs/ 的目录>
+# 输出 <目录>/libmhgugame.so 和 <目录>/libmhgugame.id
+```
+
+APK 不自带游戏代码；`libmhgugame.so` / `.id` 必须与当前 APK 的 `gamelib_id.txt` 一致。
 
 ## 从源码构建
 
@@ -108,8 +171,8 @@ F1 设置菜单，Alt+Enter / F11 全屏，F7 切换 MSAA，F12 截图。手柄�
 
 | 问题 | 处理 |
 |---|---|
-| `libmhgugame.so: cannot open shared object file` | 游戏目录里放 PC x86-64 库，不要用 Android ARM 库 |
-| `libmhgugame.so is from another version` | 用当前仓库的 `make gen` / 工具重新生成游戏代码 |
+| `mhgugame.so: cannot open shared object file` | 游戏目录里放 PC x86-64 的 `mhgugame.so`，不要用 Android 的 ARM `libmhgugame.so` |
+| `mhgugame.so is from another version` | 用当前仓库的 `make gen` / 工具重新生成游戏代码 |
 | 找不到游戏文件 | 传入的目录必须直接包含 `exefs/` 与 `romfs/` |
 | 启动黑屏 / 崩溃 | 查看 `log.txt`；确认 Vulkan 驱动与游戏文件完整 |
 | hub 连不上 | 检查网络页提示；自建服务器需可达端口 |
