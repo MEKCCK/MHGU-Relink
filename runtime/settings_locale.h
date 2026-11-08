@@ -19,6 +19,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Misc", "Varios", "其他"},
         {"Menu Options", "Opciones del menú", "菜单选项"},
         {"Mods", "Mods", "模组"},
+        {"Close Forge", "Cerrar Forge", "关闭 Forge"},
         {"Cheats", "Trucos", "作弊"},
         {"No cheats found in the cheats folder", "No hay trucos en la carpeta cheats", "作弊文件夹里没有找到作弊文件"},
         {"Always on", "Siempre activo", "始终开启"},

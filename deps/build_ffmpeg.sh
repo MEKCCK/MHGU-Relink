@@ -34,10 +34,14 @@ cd "$BUILD"
   --extra-cflags="-ffile-prefix-map=$(cygpath -m "$HERE/src/ffmpeg")=ffmpeg" \
   $( [ $ARCH = x86_64 ] && echo --disable-x86asm ) > configure.log 2>&1 || { tail -30 configure.log; tail -40 ffbuild/config.log; exit 1; }
 sed -i 's|^#define FFMPEG_CONFIGURATION .*|#define FFMPEG_CONFIGURATION ""|' config.h  # (no paths of this machine in the library)
-# (make de Windows: rutas E:/ en vez de /e/)
-sed -i "s|/e/|E:/|g" Makefile ffbuild/config.mak
+# (Windows make needs drive-qualified paths rather than MSYS paths.)
+DRIVE=$(cygpath -m "$HERE" | cut -d: -f1)
+DRIVE_LOWER=$(printf "%s" "$DRIVE" | tr "[:upper:]" "[:lower:]")
+sed -i "s|/$DRIVE_LOWER/|$DRIVE:/|g" Makefile ffbuild/config.mak
 export TMPDIR="$(cygpath -m "$TMPDIR")" TMP="$(cygpath -m "$TMPDIR")" TEMP="$(cygpath -m "$TMPDIR")"
-make -j12 install > build.log 2>&1 || { tail -40 build.log; exit 1; }
+make -j12 > build.log 2>&1 || { tail -40 build.log; exit 1; }
+mkdir -p "$OUT/lib"
+for l in libavformat libavcodec libavutil; do cp "$BUILD/$l/$l.a" "$OUT/lib/"; done
 # (la instalación de headers falla con el make de Windows: se copian)
 for l in libavutil libavcodec libavformat; do
   mkdir -p "$OUT/include/$l"; cp "$HERE/src/ffmpeg/$l/"*.h "$OUT/include/$l/"; cp "$BUILD/$l/"*.h "$OUT/include/$l/" 2>/dev/null || true

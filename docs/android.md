@@ -41,7 +41,7 @@ python3 tools/build_game.py /path/to/MHGU
 ```
 
 脚本会读取你自己的文件，把 `exefs` 翻译并编译成 ARM64 的 `libmhgugame.so` 和 `libmhgugame.id`，放回同一
-文件夹。首次运行会下载 Android NDK r27（约 1.8 GB，缓存在 `~/.mhgu-tool`）；可用 `--ndk <路径>` 指定已有 NDK。
+文件夹。APK 不内置这两个文件，首次启动时会从你选择的游戏文件夹加载。首次运行会下载 Android NDK r27（约 1.8 GB，缓存在 `~/.mhgu-tool`）；可用 `--ndk <路径>` 指定已有 NDK。
 生成过程约几分钟，完成后不要分享这两个文件。
 
 ## 第三步：安装 APK
@@ -49,7 +49,7 @@ python3 tools/build_game.py /path/to/MHGU
 1. 把整个 `MHGU/` 文件夹复制到手机（数据线、SD 卡均可），**不要**放进 `Android/data`。
 2. 安装 APK。首次需要允许浏览器/文件管理器安装应用。
 3. 打开 **MHGU Relink**，点 **Give permission and choose folder**，允许文件访问。
-4. 选择包含 `exefs/`、`romfs/`、`libmhgugame.so`、`libmhgugame.id` 的 `MHGU` 文件夹，点 **Use this folder**。
+4. 选择包含 `exefs/`、`romfs/`、`libmhgugame.so` 和 `libmhgugame.id` 的 `MHGU` 文件夹，点 **Use this folder**。
 5. 校验通过后游戏启动。
 
 游戏只读取该文件夹；存档、设置、日志在 `Android/data/com.mhgu.recomp/files`。换游戏文件夹：

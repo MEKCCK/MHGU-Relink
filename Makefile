@@ -152,12 +152,9 @@ UPDATER  := $(B)/mhgurecomp-updater
 UPD_LDFLAGS := $(LINKER) $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
 endif
 
-# GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
-GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
-                runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
-GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
-# GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match:
-# neither make nor the game notices stale game code, GAMELIB_ID hashes the sources above and not what they generated.
+# GAMELIB_ID: shared by runtime and generated game code; keep it in sync with the Android app asset.
+GAMELIB_ID := $(strip $(file < android/app/src/main/assets/gamelib_id.txt))
+# GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match.
 # (Line endings ignored: Windows and WSL builds share one generated/.)
 GEN_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py runtime/hle/hle_symbols.txt
 GEN_ID    = $(shell cat $(GEN_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)

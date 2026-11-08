@@ -66,9 +66,9 @@ public class GameFolderActivity extends Activity {
     private File rejectedFile() { return new File(home(), "game_folder_bad.txt"); }
     private File ownLib() { return new File(getFilesDir(), "game/libmhgugame.so"); }
 
-    /** The game code at hand: the player's, or in the APK (a build of one's own, -Pwithgame). */
+    /** The player's game code, copied from the selected folder into app-private storage. */
     private boolean haveLib() {
-        return ownLib().exists() || new File(getApplicationInfo().nativeLibraryDir, "libmhgugame.so").exists();
+        return ownLib().exists();
     }
 
     /** Which game code this version of the app runs with (native/build_native.sh). */
@@ -238,15 +238,15 @@ public class GameFolderActivity extends Activity {
         TextView notes = text(tr(
                   "• exefs: the one from the 1.4.0 update.\n"
                   + "• romfs: the base game's, with the 1.4.0 update already applied over it.\n"
-                  + "• If this app does not include game code, also provide matching libmhgugame.so and libmhgugame.id files.\n"
+                  + "• Also provide compatible libmhgugame.so and libmhgugame.id files in that folder.\n"
                   + "• Keep exefs and romfs in the same folder, about 12 GB. Choose that folder.",
                   "• exefs: el de la actualización 1.4.0.\n"
                   + "• romfs: el del juego base, con la actualización 1.4.0 ya aplicada encima.\n"
-                  + "• Si la app no incluye el código del juego, proporciona también libmhgugame.so y libmhgugame.id compatibles.\n"
+                  + "• Incluye también libmhgugame.so y libmhgugame.id compatibles en esa carpeta.\n"
                   + "• exefs y romfs juntos en la misma carpeta, unos 12 GB. Elige esa carpeta.",
                   "• exefs：使用 1.4.0 更新中的文件。\n"
                   + "• romfs：使用已合并 1.4.0 更新的游戏本体文件。\n"
-                  + "• 若应用未内置游戏代码，还需提供匹配的 libmhgugame.so 和 libmhgugame.id 文件。\n"
+                  + "• 同一文件夹还需放入与此应用版本匹配的 libmhgugame.so 和 libmhgugame.id。\n"
                   + "• 将 exefs 和 romfs 放在同一文件夹内，约 12 GB，然后选择该文件夹。"), 14, CREAM, false);
         notes.setPadding(0, dp(6), 0, 0);
         notes.setLineSpacing(dp(2), 1);
@@ -569,16 +569,15 @@ public class GameFolderActivity extends Activity {
             return tr("romfs is incomplete: it has " + files + " files where there should be 35,531. Use the base game with the 1.4.0 update applied.",
                       "romfs está incompleto: tiene " + files + " archivos y deberían ser 35.531. Usa el juego base con la actualización 1.4.0 ya aplicada.",
                       "romfs 不完整：当前有 " + files + " 个文件，完整版本应有 35,531 个。请使用已合并 1.4.0 更新的游戏本体文件。");
-        boolean bundled = new File(getApplicationInfo().nativeLibraryDir, "libmhgugame.so").exists();
         File lib = new File(dir, "libmhgugame.so");
-        if (!lib.canRead() && !bundled)
-            return tr("Game code is missing from this installation. Reinstall the complete app package.",
-                      "Falta el código del juego en esta instalación. Reinstala el paquete completo de la app.",
-                      "当前安装缺少游戏代码，请重新安装完整安装包。");
-        if (!bundled && !wantedId().equals(idBeside(dir)))
-            return tr("The game code does not match this app version. Reinstall the complete app package.",
-                      "El código del juego no corresponde a esta versión de la app. Reinstala el paquete completo.",
-                      "游戏代码与当前版本不匹配，请重新安装完整安装包。");
+        if (!lib.canRead())
+            return tr("libmhgugame.so is missing from the selected folder.",
+                      "Falta libmhgugame.so en la carpeta elegida.",
+                      "所选文件夹中缺少 libmhgugame.so。");
+        if (!wantedId().equals(idBeside(dir)))
+            return tr("The game code does not match this app version. Rebuild it for this version and select the folder again.",
+                      "El código del juego no corresponde a esta versión. Genéralo para esta versión y vuelve a elegir la carpeta.",
+                      "游戏代码与当前应用版本不匹配，请按此版本重新生成后再选择文件夹。");
         if (!new File(romfs, "nativeNX/system/app_shader/AppShaderPackage.mfx").exists())
             return tr("nativeNX/system/app_shader/AppShaderPackage.mfx is missing from romfs. Use the base game with the 1.4.0 update applied.",
                       "En romfs falta nativeNX/system/app_shader/AppShaderPackage.mfx. Usa el juego base con la actualización 1.4.0 ya aplicada.",
@@ -598,9 +597,8 @@ public class GameFolderActivity extends Activity {
 
     /** The game code into the app's private folder, read-only: Android runs nothing from shared storage. */
     private void keepLib(File dir) throws java.io.IOException {
-        if (new File(getApplicationInfo().nativeLibraryDir, "libmhgugame.so").exists()) return;
         File from = new File(dir, "libmhgugame.so");
-        if (!from.canRead()) return;  // (a build with it in the APK)
+        if (!from.canRead()) return;
         File to = ownLib(), tmp = new File(to.getParentFile(), "libmhgugame.tmp");
         to.getParentFile().mkdirs();
         tmp.delete();

@@ -55,9 +55,9 @@ bash native/build_native.sh arm64-v8a
 cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew assembleRelease
 ```
 
-`build_native.sh` 会计算 `GAMELIB_ID`（工具、HLE 符号、CPU/NEON 头与编译参数），写入
-`android/app/src/main/assets/gamelib_id.txt`，APK 用它检查设备上的 `libmhgugame.id`。任何会改变这些输入的提交都必须
-重新生成游戏代码，否则设备会报 `from another version`。
+Android native 构建、桌面构建和 `tools/build_game.py` 都从
+`android/app/src/main/assets/gamelib_id.txt` 读取同一个 `GAMELIB_ID`；Android 用它检查所选文件夹中的
+`libmhgugame.id`。APK 不包含游戏库或其 ID 文件。需要升级该 ID 时，必须同时重建运行时和配套游戏代码。
 
 ## 联机架构
 

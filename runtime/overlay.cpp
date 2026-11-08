@@ -911,8 +911,10 @@ void overlay_frame(void *cpu) {
     // Cancel in the Forge window closes it when there is nothing else in it to cancel (an item being edited, a popup,
     // a child window): as of before this frame's NewFrame, which acts on Cancel
     ImGuiContext &g = *ImGui::GetCurrentContext();
-    bool forge_idle = g_forge_open && g.ActiveId == 0 && g.OpenPopupStack.Size == 0 && g.NavWindow &&
-                      g.NavWindow == g.NavWindow->RootWindow && !strcmp(g.NavWindow->Name, "forge");
+    ImGuiWindow *nav = g.NavWindow;
+    bool forge_idle = g_forge_open && g.ActiveId == 0 && g.OpenPopupStack.Size == 0 && nav &&
+                      !strcmp(nav->RootWindow->Name, "forge") &&
+                      (nav == nav->RootWindow || nav->ChildId == nav->RootWindow->GetID("##forge_contents"));
     bool under = g_forge_over;  // (the settings wait under Forge's menu: neither drawn nor given input)
     if (!under) settings_panel_before_frame(g_settings_open);
     ImGui::NewFrame();
@@ -929,10 +931,17 @@ void overlay_frame(void *cpu) {
     }
     if (g_forge_open) {
         bool keep = true;
-        if (forge_idle && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) keep = false;
+        if (ImGui::IsKeyPressed(ImGuiKey_AppBack, false) ||
+            (forge_idle && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) ||
+                            ImGui::IsKeyPressed(ImGuiKey_Escape, false)))) keep = false;
         ImGui::SetNextWindowPos(ImVec2(40 * scale, 40 * scale), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420 * scale, 360 * scale), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("forge", &keep)) {
+#ifdef __ANDROID__
+            // Keep a finger-sized exit visible even when a plugin's settings scroll.
+            if (ImGui::Button(settings_text(config_language(), "Close Forge"), ImVec2(-FLT_MIN, 48 * scale))) keep = false;
+            ImGui::BeginChild("##forge_contents");
+#endif
             if (ImGui::CollapsingHeader("About Forge")) {
                 ImGui::Text("Version: %s", "1.5.1");
                 ImGui::SeparatorText("Developers");
@@ -952,6 +961,9 @@ void overlay_frame(void *cpu) {
                 for (int i = 0; i < n; i++) ImGui::BulletText("%s", names[i]);
             }
             if (ImGui::CollapsingHeader("Plugin UI")) forge_imgui_run(cpu, FORGE_IMGUI_RENDER);
+#ifdef __ANDROID__
+            ImGui::EndChild();
+#endif
         }
         ImGui::End();
         if (!keep) set_open(false);

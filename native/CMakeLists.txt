@@ -122,7 +122,7 @@ if(EXISTS ${GEN}/main)
   file(GLOB GEN_SRC ${GEN}/main/*.c ${GEN}/sdk/*.c)
   add_library(mhgugame SHARED ${GEN_SRC} ${S}/tools/gamelib_entry.c)
   target_include_directories(mhgugame PRIVATE ${S}/runtime)
-  # (exactly the Makefile's GENFLAGS, but for this CPU; the same string goes into GAMELIB_ID)
+  # Match the game code compile flags; GAMELIB_ID is shared through the Android asset.
   target_compile_options(mhgugame PRIVATE -O2 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type
     -Wno-unused-label -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden ${GENARCH} -w
     -fno-stack-protector -U_FORTIFY_SOURCE -g0 -fno-plt)  # (the NDK adds stack checks and debug info: not for this code)
