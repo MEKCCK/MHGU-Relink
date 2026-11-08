@@ -39,7 +39,12 @@ Citra + MHXX ──(Citra room v4 / UDS)──▶ XXGU-Gateway ──(Yuzu room 
   Citra 接入端口（默认 `8888`）。
 - 本作玩家 `Crossplay = 多人房间`，`RoomServer` 填同一地址，房间名一致（默认 `MHGU`）。
 - 网关是独立 GPL-2.0-or-later 程序，仅作为外部进程运行；不要把它的源码复制进本仓库的 MIT 模块。
-  它需要 Windows + MinGW 构建，且依赖仓库外的 Yuzu/Citra 源码快照，无法直接从其源码仓库在 Linux 上构建。
+  上游官方构建是 Windows GUI/CLI；本部署使用 POSIX 移植的 CLI（无 GUI），由 GPL 子树的 `Makefile` 用
+  g++/zstd 构建。生产二进制不链接 Yuzu 源码；上游测试程序才需要 `room.cpp` 等快照。
+- 公共测试服务器已内置该网关：`UDP 8888`（网关，监听 `0.0.0.0`）→ `127.0.0.1:24872`（`mhgu-roomsrv`）。
+  Citra 的多人直连填 `114.66.25.224:8888`；本作玩家 `Crossplay = 多人房间`、`RoomServer =
+  114.66.25.224:24872`，两边密码都留空。systemd 单元 `xxgu-gateway.service`，源码在服务器
+  `/opt/xxgu-gateway/src`。
 - 该网关 README 自述的验收范围有限（长时间稳定性、断线重连、任务加载/换区/结算未完整覆盖）；本仓库的
   兼容性由上述回归测试保证到房间协议层，不等于跨游戏实机联机验收。
 
