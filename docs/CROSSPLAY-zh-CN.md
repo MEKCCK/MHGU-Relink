@@ -45,6 +45,9 @@ Citra + MHXX ──(Citra room v4 / UDS)──▶ XXGU-Gateway ──(Yuzu room 
   Citra 的多人直连填 `114.66.25.224:8888`；本作玩家 `Crossplay = 多人房间`、`RoomServer =
   114.66.25.224:24872`，两边密码都留空。systemd 单元 `xxgu-gateway.service`，源码在服务器
   `/opt/xxgu-gateway/src`。
+- POSIX 端口已按 **suyu v0.0.4** 的房间线格式对齐（本仓库的房间与客户端源自 suyu 家族）：
+  `Protocol` 枚举 `TCP=3 / UDP=4` 且按不透明字节透传、`Domain INET=1`、JoinSuccess 先到也能完成入厅、
+  1.4.0 重编译端的厅广告标记 `0x20=0` 可接受。网关的 yuzu 默认值不再作为校验依据。
 - 该网关 README 自述的验收范围有限（长时间稳定性、断线重连、任务加载/换区/结算未完整覆盖）；本仓库的
   兼容性由上述回归测试保证到房间协议层，不等于跨游戏实机联机验收。
 
