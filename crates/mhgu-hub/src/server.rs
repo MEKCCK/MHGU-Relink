@@ -62,6 +62,11 @@ impl DirStat {
 struct Pair {
     secret: [u64; 2],
     addr: Mutex<[Option<SocketAddr>; 2]>,
+    /// Each end asked for the other's address (its consent to show its own); a game too old to ask stays
+    /// on the relay.
+    direct: Mutex<[bool; 2]>,
+    /// The pair's direct key, given to both ends with the address; direct datagrams carry it.
+    dkey: u64,
     lim: TokenBucket,
     /// The hub it serves, and the player's address (for the admin page).
     hub: u64,
@@ -514,18 +519,23 @@ fn list(c: &mut TcpStream, shared: &Arc<Mutex<Shared>>, link_proto: u16, room: [
         (v, s.live.list_max)
     };
     let free = |info: &NetInfo| info[proto::NI_NODE_COUNT] < info[proto::NI_NODE_MAX];
+    // 0 room and no passcode, 1 room and a passcode, 2 full, 3 full with a passcode
+    let rank = |info: &NetInfo| {
+        let r = if free(info) { 0 } else { 2 };
+        r + u8::from(proto::passcoded(info))
+    };
 
-    // More hubs than one answer holds: a random choice, those with a free place first, so each
-    // search (the game's Retry) can show others.
+    // More hubs than one answer holds: a random choice, by rank (so passcoded hubs only take the places
+    // open hubs with room leave), so each search (the game's Retry) can show others.
     if es.len() > list_max {
         shuffle(&mut es);
-        es.sort_by_key(|e| !free(&e.1));
+        es.sort_by_key(|e| rank(&e.1));
         es.truncate(list_max);
     }
     es.sort_by(|a, b| {
-        let (fa, fb) = (free(&a.1), free(&b.1));
-        if fa != fb {
-            return fb.cmp(&fa); // free first
+        let (ra, rb) = (rank(&a.1), rank(&b.1));
+        if ra != rb {
+            return ra.cmp(&rb); // free and open first
         }
         let (ca, cb) = (a.1[proto::NI_NODE_COUNT], b.1[proto::NI_NODE_COUNT]);
         if ca != cb {
@@ -804,11 +814,18 @@ fn join(
         }
         pair_id = cand;
         let bandwidth = s.live.bandwidth;
+        // The direct key is the pair's own: never 0 (a link treats 0 as "no key yet").
+        let mut dkey = rand64();
+        while dkey == 0 {
+            dkey = rand64();
+        }
         s.pairs.insert(
             pair_id,
             Arc::new(Pair {
                 secret,
                 addr: Mutex::new([None, None]),
+                direct: Mutex::new([false, false]),
+                dkey,
                 lim: TokenBucket::new(bandwidth, bandwidth),
                 hub: id,
                 player: c.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default(),
@@ -952,11 +969,46 @@ fn serve_udp(udp: Arc<UdpSocket>, shared: Arc<Mutex<Shared>>) {
             Some(s) => s,
             None => continue,
         };
-        let to = {
+        // Direct UDP (hole punching): a datagram of exactly PEER_MSG_SIZE whose payload starts with MHGQ
+        // asks for the other end's public address; it is never relayed.
+        let query = n == proto::PEER_MSG_SIZE
+            && buf[proto::UDP_HEADER..proto::UDP_HEADER + 4] == proto::PEER_QUERY;
+        let (to, both) = {
             let mut addr = pair.addr.lock().unwrap();
             addr[side] = Some(from); // NAT may change it: the latest wins
-            addr[1 - side]
+            let mut direct = pair.direct.lock().unwrap();
+            if query {
+                direct[side] = true; // this end may now see the other's address
+            }
+            (addr[1 - side], direct[0] && direct[1])
         };
+        if query {
+            // The answer goes to the asker only once both ends asked; a game that never asks (Direct =
+            // Off, an older version, an older server) stays on the relay. Never bigger than the query.
+            if both {
+                if let Some(to) = to {
+                    // (a v4 client on a v6 socket arrives as a mapped address)
+                    let ip4 = match to.ip() {
+                        IpAddr::V4(ip) => Some(ip),
+                        IpAddr::V6(ip) => ip.to_ipv4_mapped(),
+                    };
+                    if let Some(ip) = ip4 {
+                        if pair.lim.take(n as f64) {
+                            let mut a = Vec::with_capacity(proto::PEER_MSG_SIZE);
+                            a.extend_from_slice(&proto::PEER_ANSWER);
+                            a.extend_from_slice(&id.to_le_bytes());
+                            a.extend_from_slice(&secret.to_le_bytes());
+                            a.extend_from_slice(&ip.octets());
+                            a.extend_from_slice(&to.port().to_be_bytes());
+                            a.extend_from_slice(&[0, 0]);
+                            a.extend_from_slice(&pair.dkey.to_le_bytes());
+                            let _ = udp.send_to(&a, from);
+                        }
+                    }
+                }
+            }
+            continue; // (the query is not data: an older server would pass it on and the other end ignores it)
+        }
         // An empty datagram only tells where its sender is.
         if n > proto::UDP_HEADER && to.is_some() && pair.lim.take(n as f64) {
             let _ = udp.send_to(&buf[proto::UDP_HEADER..n], to.unwrap());

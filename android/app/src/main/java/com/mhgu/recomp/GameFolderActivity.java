@@ -42,7 +42,8 @@ import java.util.List;
  */
 public class GameFolderActivity extends Activity {
     static final String EXTRA_CHANGE = "change";
-    private static final int PICK = 1, READ = 2;
+    static final String EXTRA_PICK_FOLDER = "pick_folder";  // (FilesFolderActivity: solo elige una carpeta y la devuelve)
+    private static final int PICK = 1, READ = 2, FILES_PICK = 3;
     private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
     private static final int ALERT = Color.rgb(255, 150, 120);
@@ -50,7 +51,7 @@ public class GameFolderActivity extends Activity {
     private static final byte[] BUILD_ID = {(byte) 0xfb, 0x08, (byte) 0xf1, (byte) 0xd2, 0x0f, (byte) 0xd1, 0x20, 0x4f};
 
     private int language;
-    private boolean change, waitingAccess;
+    private boolean change, waitingAccess, pickFolder, startupChecked;
     private TextView status;
     private Button pick;
 
@@ -103,6 +104,19 @@ public class GameFolderActivity extends Activity {
         declareGame();
         language = RecompLanguage.from(this);
         change = getIntent().getBooleanExtra(EXTRA_CHANGE, false);
+        pickFolder = getIntent().getBooleanExtra(EXTRA_PICK_FOLDER, false);
+        if (pickFolder) {  // (FilesFolderActivity: Android's picker and the permission, then the folder back to it)
+            buildPickFolder();
+            return;
+        }
+        if (!change && !startupChecked) {  // (antes de arrancar el juego: la carpeta de archivos se pregunta una vez)
+            startupChecked = true;
+            if (showFilesStartup()) return;
+        }
+        begin();
+    }
+
+    private void begin() {
         boolean rejected = rejectedFile().exists();
         File chosen = saved(), own = new File(home(), "data");
         if (!change && !rejected && haveLib() && (looksRight(chosen) || (chosen == null && looksRight(own)))) {
@@ -123,6 +137,112 @@ public class GameFolderActivity extends Activity {
                          "El juego perdió el permiso para leer la carpeta. Vuelve a darlo.",
                          "游戏已失去读取文件夹的权限，请重新授权。"));
         }
+    }
+
+    /**
+     * La carpeta de archivos al arrancar: una elegida que no se puede usar se dice (elegirla otra vez, o usar la propia
+     * esta vez) en vez de usar la propia en silencio; y en el primer arranque (o tras reinstalar, que borra el puntero)
+     * se pregunta dónde van los archivos. true: hay un diálogo; su botón sigue con begin() o con el selector.
+     */
+    private boolean showFilesStartup() {
+        String problem = FilesFolder.problem(this);
+        if (problem != null) {
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle(tr("Files folder", "Carpeta de archivos", "文件文件夹"))
+                    .setMessage(problem + "\n\n" + tr("Choose it again (Android asks for \"All files access\" again if it's off), or use the app's own folder this time: your files in the chosen folder are then not used until you choose it again. (If it's gone for good, the settings' Menu Options tab can forget it.)",
+                            "Elígela otra vez (Android vuelve a pedir \"Acceso a todos los archivos\" si está desactivado), o usa la carpeta propia de la app esta vez: tus archivos de la carpeta elegida no se usarán hasta que la elijas de nuevo. (Si desapareció del todo, la pestaña Opciones del menú puede olvidarla.)",
+                            "请重新选择它（如果权限已关闭，Android 会再次请求“所有文件访问权限”），或本次使用应用自己的文件夹：在你再次选择它之前，所选文件夹中的文件不会被使用。（如果它已永久消失，可在设置中忘记它。）"))
+                    .setCancelable(false)
+                    .setPositiveButton(tr("Choose it again", "Elegirla otra vez", "重新选择"), (d, w) -> pickFilesFolder())
+                    .setNeutralButton(tr("Use the app's folder", "Usar la carpeta de la app", "使用应用文件夹"), (d, w) -> {
+                        FilesFolder.asked(this, true);
+                        begin();
+                    })
+                    .setNegativeButton(tr("Quit", "Salir", "退出"), (d, w) -> finishAffinity())
+                    .show();
+            return true;
+        }
+        if (!FilesFolder.chosenPath(this).isEmpty() || FilesFolder.asked(this) || Build.VERSION.SDK_INT < 30)
+            return false;  // (ya hay una carpeta en uso, o ya se preguntó; Android 11 en adelante: elegir necesita ese acceso)
+        boolean had = new File(FilesFolder.get(this), "mhgurecomp.ini").isFile();
+        String text = (had
+                ? tr("The app keeps its files (settings, save, mods, cheats, screenshots, log.txt) in its own folder, in Android/data, which this device's file managers can't open. It can copy them into a folder you choose and keep them there instead.",
+                     "La app guarda sus archivos (ajustes, partida, mods, trucos, capturas, log.txt) en su carpeta propia, en Android/data, que los gestores de archivos del dispositivo no pueden abrir. Puede copiarlos a una carpeta que elijas y guardarlos allí.",
+                     "应用把自己的文件（设置、存档、模组、金手指、截图、log.txt）保存在 Android/data 中，本设备的文件管理器无法打开。应用可以把它们复制到你选择的文件夹中并在那里保存。")
+                : tr("Where should the app keep its files (settings, save, mods, cheats, screenshots, log.txt)? Its own folder is in Android/data, which this device's file managers can't open.",
+                     "¿Dónde debe guardar la app sus archivos (ajustes, partida, mods, trucos, capturas, log.txt)? Su carpeta propia está en Android/data, que los gestores de archivos del dispositivo no pueden abrir.",
+                     "应用应该把文件（设置、存档、模组、金手指、截图、log.txt）保存在哪里？它自己的文件夹位于 Android/data，本设备的文件管理器无法打开。"))
+                + " " + tr("In a folder you choose (a new MHGU folder in the device's storage, say) you can open them, back them up and put mods in them yourself.",
+                           "En una carpeta que elijas (por ejemplo una carpeta MHGU nueva en el almacenamiento) puedes abrirlos, hacer copias y poner mods tú mismo.",
+                           "在你选择的文件夹中（例如设备存储中的新 MHGU 文件夹），你可以自行打开、备份它们并放入模组。")
+                + (had ? "" : " " + tr("If you chose one before reinstalling the app, choose it again: what's in it is used.",
+                                       "Si elegiste una antes de reinstalar la app, elígela otra vez: se usa lo que hay en ella.",
+                                       "如果重装前选过一个，请再次选择它：其中的内容会被使用。"))
+                + "\n\n" + tr("You can change this later in the settings' Menu Options tab.",
+                              "Puedes cambiarlo después en la pestaña Opciones del menú.",
+                              "之后可在设置的“菜单选项”中更改。");
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(tr("Files folder", "Carpeta de archivos", "文件文件夹"))
+                .setMessage(text)
+                .setCancelable(false)
+                .setPositiveButton(tr("Choose a folder", "Elegir una carpeta", "选择文件夹"), (d, w) -> pickFilesFolder())
+                .setNegativeButton(tr("The app's own folder", "La carpeta de la app", "应用自己的文件夹"), (d, w) -> {
+                    FilesFolder.asked(this, true);
+                    begin();
+                })
+                .show();
+        return true;
+    }
+
+    private void pickFilesFolder() {
+        Intent intent = new Intent(this, FilesFolderActivity.class);
+        intent.putExtra(FilesFolderActivity.EXTRA_MODE, FilesFolderActivity.MODE_CHOOSE);
+        intent.putExtra(FilesFolderActivity.EXTRA_RETURN, true);
+        intent.putExtra(GameActivity.EXTRA_LANGUAGE, language);
+        startActivityForResult(intent, FILES_PICK);
+    }
+
+    /** La pantalla del selector cuando solo se elige la carpeta de archivos (FilesFolderActivity). */
+    private void buildPickFolder() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER);
+        page.setPadding(dp(24), dp(16), dp(24), dp(16));
+        page.setBackgroundColor(WINE);
+        page.addView(text(tr("FILES FOLDER", "CARPETA DE ARCHIVOS", "文件文件夹"), 20, GOLD, true));
+        TextView intro = text(tr("Choose the folder for the app's files (settings, save, mods, cheats, screenshots, log.txt). "
+                        + "The app copies its files there; the game files are not copied.",
+                "Elige la carpeta para los archivos de la app (ajustes, partida, mods, trucos, capturas, log.txt). La app copia "
+                        + "allí sus archivos; los del juego no se copian.",
+                "选择应用文件（设置、存档、模组、金手指、截图、log.txt）的文件夹。应用会把文件复制到那里；游戏文件不会被复制。"),
+                14, CREAM, false);
+        intro.setGravity(Gravity.CENTER);
+        intro.setPadding(0, dp(10), 0, dp(10));
+        page.addView(intro);
+        status = text("", 14, GOLD, false);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(0, dp(6), 0, dp(6));
+        page.addView(status);
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        pick = button("", true);
+        pick.setOnClickListener(v -> choose());
+        row.addView(pick, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(46)));
+        Button cancel = button(tr("Cancel", "Cancelar", "取消"), false);
+        cancel.setOnClickListener(v -> finish());
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(120), dp(46));
+        size.setMargins(dp(8), 0, 0, 0);
+        row.addView(cancel, size);
+        page.addView(row);
+        setContentView(page);
+        pick.requestFocus();
+        refreshButton();
+    }
+
+    private void acceptPickedFolder(File dir) {
+        setResult(RESULT_OK, new Intent().putExtra(FilesFolderActivity.EXTRA_PATH, dir.getAbsolutePath()));
+        finish();
     }
 
     /** Samsung ignora la categoría del manifiesto: cuenta la que fija quien instaló la app (Android solo se lo permite a él). */
@@ -310,9 +430,13 @@ public class GameFolderActivity extends Activity {
         }
         waitingAccess = true;
         status.setTextColor(GOLD);
-        status.setText(tr("Turn on access to all files and come back. The game only reads that folder: it changes nothing.",
-                          "Activa el acceso a todos los archivos y vuelve. El juego solo lee esa carpeta: no cambia nada.",
-                          "请开启“所有文件访问权限”后返回。游戏只读取该文件夹，不会修改其中的内容。"));
+        status.setText(pickFolder
+                ? tr("Turn on access to all files and come back. The app copies its files into the folder you choose.",
+                     "Activa el acceso a todos los archivos y vuelve. La app copia sus archivos en la carpeta que elijas.",
+                     "请开启“所有文件访问权限”后返回。应用会把文件复制到你选择的文件夹。")
+                : tr("Turn on access to all files and come back. The game only reads that folder: it changes nothing.",
+                     "Activa el acceso a todos los archivos y vuelve. El juego solo lee esa carpeta: no cambia nada.",
+                     "请开启“所有文件访问权限”后返回。游戏只读取该文件夹，不会修改其中的内容。"));
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getPackageName())));
         } catch (ActivityNotFoundException e) {
@@ -481,6 +605,15 @@ public class GameFolderActivity extends Activity {
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
+        if (code == FILES_PICK) {
+            if (result == RESULT_OK) {
+                FilesFolder.asked(this, true);
+                begin();
+            } else if (!showFilesStartup()) {
+                begin();  // (cancelado: se vuelve a preguntar, como el primer arranque)
+            }
+            return;
+        }
         if (code != PICK || result != RESULT_OK || data == null || data.getData() == null) return;
         File dir = pathOf(data.getData());
         if (dir == null) {
@@ -513,6 +646,7 @@ public class GameFolderActivity extends Activity {
 
     // ---- is it the right thing? (a background thread: the walk over romfs takes seconds)
     private void verify(File picked) {
+        if (pickFolder) { acceptPickedFolder(picked); return; }  // (no es el juego: solo se elige la carpeta de archivos)
         pick.setEnabled(false);
         status.setTextColor(GOLD);
         status.setText(tr("Checking the files...", "Comprobando los archivos...", "正在检查游戏文件……"));

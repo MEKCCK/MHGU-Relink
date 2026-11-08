@@ -52,8 +52,7 @@ public class SaveImportActivity extends Activity {
     private Button main, leave;
 
     static File home(Context c) {
-        File f = c.getExternalFilesDir(null);
-        return f != null ? f : c.getFilesDir();
+        return FilesFolder.get(c);  // (la carpeta de archivos elegida, o la propia de la app)
     }
     private static File importDir(Context c) { return new File(home(c), "save_import"); }
     private File tmpFile() { return new File(importDir(this), "system.tmp"); }

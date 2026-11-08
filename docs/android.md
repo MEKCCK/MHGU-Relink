@@ -52,8 +52,25 @@ python3 tools/build_game.py /path/to/MHGU
 4. 选择包含 `exefs/`、`romfs/`、`libmhgugame.so` 和 `libmhgugame.id` 的 `MHGU` 文件夹，点 **Use this folder**。
 5. 校验通过后游戏启动。
 
-游戏只读取该文件夹；存档、设置、日志在 `Android/data/com.mhgu.recomp/files`。换游戏文件夹：
+游戏只读取该文件夹；存档、设置、日志默认在 `Android/data/com.mhgu.recomp/files`。换游戏文件夹：
 齿轮 → **Menu Options** → **Game folder**。
+
+## 应用文件文件夹
+
+`Android/data` 在 Android 11 及以后无法用手机上的文件管理器打开，所以应用可以把**自己的文件**（设置
+`mhgurecomp.ini`、存档、模组、金手指、截图、`log.txt`）放到你选择的文件夹里：
+
+- 首次启动（以及重装后，重装会忘记这个选择）会询问文件放在哪里；也可以稍后在
+  齿轮 → **Menu Options** → **Files folder** 里选择。重装后再次选择以前用过的文件夹即可继续使用其中的文件。
+- 选择后应用会把文件复制过去（已存在的文件保留；如果那里的文件比应用里的旧，例如在另一个文件夹玩过之后
+  切回来，会先询问是否替换，被替换的文件保留为 `.bak`），在 `files-folder.txt`（应用自己的文件夹中）记下
+  路径，然后关闭；重新打开即可。游戏文件（`data/`）不会被复制，仍在原位置使用；着色器缓存会重新生成。
+- 应用需要 Android 的“所有文件访问权限”才能读写该文件夹；选择时系统会请求它。此功能需要 Android 11
+  或更新；Android 10 及更早仍使用应用自己的文件夹。
+- **Use the app's folder** 把文件复制回应用自己的文件夹，并关闭应用；所选文件夹中的文件保持原样。
+- 如果所选文件夹在启动时不可用（权限关闭、文件夹被移动或删除、U 盘/SD 卡不在），启动时会说明，并让你
+  重新选择或本次使用应用自己的文件夹；如果它已永久消失，可在同一设置页忘记它。
+- `log.txt` 会写在该文件夹里；**Share log** 也从那里读取。
 
 ## 存档
 
@@ -62,7 +79,8 @@ python3 tools/build_game.py /path/to/MHGU
 1. 找到存档文件 `system`（Ryujinx：右键游戏 → Open User Save Directory；yuzu：Open Save Data Location）。
 2. 复制到手机（如下载目录）。
 3. 游戏内：齿轮 → **Menu Options** → **Import save**，选择该文件。游戏会重启；旧存档备份在
-   `Android/data/com.mhgu.recomp/files/MHGURecomp/save_backups`。
+   `Android/data/com.mhgu.recomp/files/MHGURecomp/save_backups`（如果选了应用文件文件夹，则在其中的
+   `MHGURecomp/save_backups`）。
 
 ### 导出
 

@@ -17,6 +17,34 @@ RyuLdn 服务器地址填写 `主机` 或 `主机:端口`，多个地址用逗�
 
 运行本机服务器供互联网玩家连接时，对方必须能访问本机相应端口，可使用端口转发或共同的 VPN 网络。跨平台集会所会关闭重编译版专属的小怪同步和 HP 缩放；普通重编译版集会所保留原有行为。
 
+### 与 3DS《怪物猎人XX》联机（第三方网关）
+
+`mhgu-roomsrv`（或游戏内“运行多人房间服务器”）就是 Yuzu/suyu 系 v1 房间服务器，其 JoinRequest、
+RoomInformation、SetGameInfo、ProxyPacket（zstd blob 原样转发）与 LdnPacket 的字节布局与独立网关
+[XXGU-Gateway](https://github.com/caaaaaaaaaaaat/MHXX-GU-Gateway) 的 `room-client` 相同；
+`crates/mhgu-crossplay/tests/gateway_room_interop.rs` 用该布局做回归，防止两端协议漂移。
+
+拓扑：
+
+```
+Citra + MHXX ──(Citra room v4 / UDS)──▶ XXGU-Gateway ──(Yuzu room v1)──▶ mhgu-roomsrv
+                                                                              ▲
+                                                          MHGU-Relink 玩家 ───┘
+                                                          （Crossplay = 多人房间）
+```
+
+配置要点：
+
+- 网关填我们的房间地址（`127.0.0.1:24872`，或公网服务器 `IP:24872`）与房间密码；Citra 玩家连网关的
+  Citra 接入端口（默认 `8888`）。
+- 本作玩家 `Crossplay = 多人房间`，`RoomServer` 填同一地址，房间名一致（默认 `MHGU`）。
+- 网关是独立 GPL-2.0-or-later 程序，仅作为外部进程运行；不要把它的源码复制进本仓库的 MIT 模块。
+  它需要 Windows + MinGW 构建，且依赖仓库外的 Yuzu/Citra 源码快照，无法直接从其源码仓库在 Linux 上构建。
+- 该网关 README 自述的验收范围有限（长时间稳定性、断线重连、任务加载/换区/结算未完整覆盖）；本仓库的
+  兼容性由上述回归测试保证到房间协议层，不等于跨游戏实机联机验收。
+
+
+
 联机库、JNI/游戏运行时和配置均从当前源码重新构建。目标游戏库 ID 必须与当前运行时一致；每次更新工具或运行时后重新生成，不使用参考 APK 中的游戏库或游戏 ID。网络代码参考 MEKCCK/MHGU-Relink，固定版本为 `a3fbb0155f8b64a5bedf6fde272a920059ad91e3`。MIT 及 Rust 依赖许可证随 APK 的 `assets/licenses/` 提供。
 
 配置持久化、输入校验、运行时配置快照及中文标签已通过主机回归。安装包构建和签名记录请以本次交付的验证记录为准；主机回归不代表已完成手机与模拟器之间的实机联机测试。

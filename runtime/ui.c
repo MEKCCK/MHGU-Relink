@@ -55,7 +55,7 @@ void ui_request_save_import(void) { SDL_SetAtomicInt(&requested_action, 5); }
 void ui_request_share_log(void) { SDL_SetAtomicInt(&requested_action, 6); }
 void ui_request_save_export(void) { SDL_SetAtomicInt(&requested_action, 7); }
 void ui_request_gpu_driver(void) { SDL_SetAtomicInt(&requested_action, 8); }
-void ui_request_import(int kind) { SDL_SetAtomicInt(&requested_action, 9 + kind); }  // (0 cheats, 1 a mod, 2 DLC)
+void ui_request_import(int kind) { SDL_SetAtomicInt(&requested_action, 9 + kind); }  // (0 cheats, 1 a mod, 2 DLC, 3 the files folder, 4 the app's folder again)
 static void activity_call_language(const char *method) {
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
@@ -419,6 +419,8 @@ int ui_run(void) {
         if (action == 9) activity_call_language("importCheats");
         if (action == 10) activity_call_language("importMod");
         if (action == 11) activity_call_language("importDlc");
+        if (action == 12) activity_call_language("chooseFilesFolder");
+        if (action == 13) activity_call_language("useAppFilesFolder");
         static float screen_for = -1;  // (the screen's refresh rate follows the FPS limit: GameActivity.setFrameCap)
         float fps_now = config_live_fps();
         if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);

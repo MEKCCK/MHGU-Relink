@@ -111,6 +111,12 @@
             android:screenOrientation="sensorLandscape"
             android:exported="false" />
 
+        <!-- Opciones del menú: la carpeta de archivos de la app (FilesFolderActivity) -->
+        <activity android:name=".FilesFolderActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false" />
+
         <activity android:name=".SaveExportActivity"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"

@@ -95,6 +95,8 @@ typedef struct {
     int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
+    int ldn_direct;           // [Multiplayer] Direct: in an internet hub, game packets go straight between the players when
+                              // their routers let them (hole punching; they see each other's IP address), else through the server
     int crossplay;            // [Multiplayer] Crossplay: XP_OFF, XP_RYU (Ryujinx LDN server) or XP_ROOM (suyu rooms)
     char ryu_servers[256];    // [Multiplayer] RyuServers: RyuLdn servers (host[:port], comma separated)
     int ryu_host;             // [Multiplayer] RyuHost: run the RyuLdn server in this process when hosting
@@ -242,6 +244,7 @@ bool config_validate(const Config *config, char *error, size_t error_size);
 // Immutable boot settings stay in g_config. These getters are atomic live values.
 void config_runtime_init(const Config *effective); // After environment/Auto resolution at startup.
 float config_live_fps(void);
+void config_set_live_fps(float fps);
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
 float config_live_draw_distance(void);
@@ -282,6 +285,7 @@ float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
 int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
 int config_live_ldn_port(void);         // [Multiplayer] Port as saved now: counts from the next hub hosted or search
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
+int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit (hle/urgentcredit.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)

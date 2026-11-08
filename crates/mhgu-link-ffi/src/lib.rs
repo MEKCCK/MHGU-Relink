@@ -7,13 +7,13 @@
 //! the host is 169.254.0.1 in a /16, so its broadcast is 169.254.255.255.
 
 use std::collections::VecDeque;
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, c_int, CStr};
 use std::io::{self, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use mhgu_link::scan;
 use mhgu_link::Lobby;
@@ -52,6 +52,309 @@ struct Peer {
     udp_rx: std::time::Instant,
     /// Through a hub server: the relay pair and our secret for its datagrams (`MHGR`).
     relay: Option<(u32, u64)>,
+    /// Direct UDP past the server (hole punching), when the link is relayed.
+    direct: DirectState,
+}
+
+// ---- direct UDP past the hub server (hole punching) ---------------------------------------------
+
+/// [Multiplayer] Direct for the next link: 0 keeps every game packet on the relay.
+static DIRECT: AtomicBool = AtomicBool::new(true);
+
+/// Without two-way proof of the direct path for this long, game packets go back to the relay
+/// (direct hellos every second: three lost in a row).
+const DIRECT_SILENCE: Duration = Duration::from_millis(3500);
+/// Direct hellos every second once the path works.
+const DIRECT_HELLO: Duration = Duration::from_secs(1);
+/// Direct hello answers in a row needed to come back to direct after a fall (no flapping).
+const DIRECT_REUP: u32 = 3;
+/// Punches / hellos every 200 ms this long after the address came, then every 2 s.
+const PUNCH_FAST: Duration = Duration::from_secs(15);
+const PUNCH_EVERY: Duration = Duration::from_millis(200);
+const PUNCH_SLOW: Duration = Duration::from_secs(2);
+/// Queries every second this long after the link came up or direct fell, then every 15 s.
+const QUERY_FAST: Duration = Duration::from_secs(30);
+const QUERY_EVERY: Duration = Duration::from_secs(1);
+const QUERY_SLOW: Duration = Duration::from_secs(15);
+
+/// The direct state of one relayed link (ldn.c's `p_*` fields).
+#[derive(Clone, Copy)]
+struct DirectState {
+    /// The ini option when the link came up, and the link is relayed.
+    ok: bool,
+    /// The other end's public address (from the server), and the pair's direct key (0: none yet).
+    peer: Option<SocketAddr>,
+    dkey: u64,
+    /// Direct datagrams get through both ways: game packets go that way.
+    up: bool,
+    /// Last proof that the direct path works both ways.
+    rx: Instant,
+    /// Station: direct hello answers in a row (DIRECT_REUP after a fall); whether direct ever worked.
+    good: u32,
+    ever: bool,
+    /// When the link came up / direct fell, and the query and punch schedules.
+    born: Instant,
+    q_since: Instant,
+    p_since: Instant,
+    next_query: Instant,
+    next_punch: Instant,
+    /// The logs that say why a pair has no direct path, once each.
+    noanswer_said: bool,
+    nopunch_said: bool,
+}
+
+impl DirectState {
+    fn new(ok: bool) -> DirectState {
+        let now = Instant::now();
+        DirectState {
+            ok,
+            peer: None,
+            dkey: 0,
+            up: false,
+            rx: now,
+            good: 0,
+            ever: false,
+            born: now,
+            q_since: now,
+            p_since: now,
+            next_query: now,
+            next_punch: now,
+            noanswer_said: false,
+            nopunch_said: false,
+        }
+    }
+
+    fn known(&self) -> bool {
+        self.peer.is_some()
+    }
+
+    /// Game packets may go straight to the other end.
+    fn usable(&self, now: Instant) -> bool {
+        self.up && now.duration_since(self.rx) < DIRECT_SILENCE
+    }
+
+    /// MHGU_LDN_BLOCK_DIRECT=<s>[-<t>] (testing the fallback): direct datagrams are ignored from s
+    /// seconds after a link came up on (0: always), until t seconds if given (a passing outage).
+    fn blocked(&self) -> bool {
+        let Some((from, to)) = block_window() else { return false };
+        let t = self.born.elapsed();
+        t >= from && to.map_or(true, |to| t < to)
+    }
+
+    /// The server's answer (already checked by the caller): the other end's address and key.
+    fn answer(&mut self, addr: SocketAddr, dkey: u64, now: Instant, who: &str) -> bool {
+        if !self.ok {
+            return false;
+        }
+        self.dkey = dkey;
+        if let Some(old) = self.peer {
+            if old == addr {
+                return true; // (the schedule keeps running: a repeated answer is no new address)
+            }
+            eprintln!("[link] {who}: the other end's address changed (a network change?)");
+        }
+        let first = self.peer.is_none();
+        self.peer = Some(addr); // (never logged: the other player's address)
+        self.p_since = now;
+        self.next_punch = now;
+        if first {
+            eprintln!("[link] {who}: the hub server gave the other end's address, trying a direct connection");
+        }
+        true
+    }
+
+    /// A datagram straight from the other end: from its address as the server gave it (the port may
+    /// differ: the latest wins), unless direct datagrams are blocked for the test.
+    fn direct_from(&mut self, from: SocketAddr) -> bool {
+        let Some(peer) = self.peer else { return false };
+        if from.ip() != peer.ip() || self.blocked() {
+            return false;
+        }
+        self.peer = Some(from);
+        true
+    }
+
+    /// Back to the relay after DIRECT_SILENCE without proof the path works both ways; asks and
+    /// punches fast again for a while.
+    fn check_silence(&mut self, now: Instant, who: &str) -> bool {
+        if !self.up || now.duration_since(self.rx) <= DIRECT_SILENCE {
+            return false;
+        }
+        self.up = false;
+        self.good = 0;
+        self.p_since = now;
+        self.q_since = now;
+        self.next_query = now;
+        self.nopunch_said = false;
+        eprintln!(
+            "[link] {who}: the direct connection went quiet ({:.1} s without proof it works both ways): game packets go through the hub server again",
+            now.duration_since(self.rx).as_secs_f64()
+        );
+        true
+    }
+
+    /// The `MHGQ` query to send to the server, when it is due; also says why there is no direct
+    /// connection when it can tell.
+    fn query(&mut self, now: Instant, pair: u32, secret: u64, who: &str) -> Option<Vec<u8>> {
+        if !self.ok || self.up {
+            return None;
+        }
+        if !self.known() && !self.noanswer_said && now.duration_since(self.born) > QUERY_FAST {
+            self.noanswer_said = true;
+            eprintln!(
+                "[link] {who}: no direct connection: the other end does not offer one (its Direct = Off, an older version, or an older hub server); game packets stay on the hub server"
+            );
+        }
+        if self.known() && !self.nopunch_said && now.duration_since(self.p_since) > PUNCH_FAST {
+            self.nopunch_said = true;
+            eprintln!(
+                "[link] {who}: no direct connection after {} s of trying (a router that gives each destination its own port, as symmetric / carrier-grade NAT, or a firewall): game packets stay on the hub server, still trying every 2 s",
+                PUNCH_FAST.as_secs()
+            );
+        }
+        if now < self.next_query {
+            return None;
+        }
+        self.next_query = now
+            + if now.duration_since(self.q_since) < QUERY_FAST {
+                QUERY_EVERY
+            } else {
+                QUERY_SLOW
+            };
+        let mut d = Vec::with_capacity(proto::PEER_MSG_SIZE);
+        d.extend_from_slice(&relay_prefix(pair, secret));
+        d.extend_from_slice(&proto::PEER_QUERY);
+        d.extend_from_slice(&[0u8; 12]);
+        Some(d)
+    }
+}
+
+fn block_window() -> Option<(Duration, Option<Duration>)> {
+    static WINDOW: LazyLock<Option<(Duration, Option<Duration>)>> = LazyLock::new(|| {
+        let e = std::env::var("MHGU_LDN_BLOCK_DIRECT").ok()?;
+        if e.is_empty() {
+            return None;
+        }
+        let (a, b) = match e.split_once('-') {
+            Some((a, b)) => (a, Some(b)),
+            None => (e.as_str(), None),
+        };
+        let secs = |s: &str| s.trim().parse::<u64>().unwrap_or(0);
+        let from = Duration::from_secs(secs(a));
+        let to = b.map(|b| Duration::from_secs(secs(b)));
+        eprintln!(
+            "[link] MHGU_LDN_BLOCK_DIRECT: direct datagrams ignored after {} s of a link",
+            from.as_secs()
+        );
+        Some((from, to))
+    });
+    *WINDOW
+}
+
+/// The server's answer, checked against the pair and our secret: the other end's address and the
+/// pair's direct key.
+fn peer_answer_bytes(b: &[u8], pair: u32, secret: u64) -> Option<(SocketAddr, u64)> {
+    if b.len() != proto::PEER_MSG_SIZE || b[..4] != proto::PEER_ANSWER {
+        return None;
+    }
+    if u32::from_le_bytes(b[4..8].try_into().ok()?) != pair
+        || u64::from_le_bytes(b[8..16].try_into().ok()?) != secret
+    {
+        return None;
+    }
+    let ip = Ipv4Addr::new(b[16], b[17], b[18], b[19]);
+    let port = u16::from_be_bytes([b[20], b[21]]);
+    let dkey = u64::from_le_bytes(b[24..32].try_into().ok()?);
+    Some((SocketAddr::new(IpAddr::V4(ip), port), dkey))
+}
+
+/// A monotonic clock for hello echoes (only a difference matters).
+fn now_ns() -> u64 {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    START.elapsed().as_nanos() as u64
+}
+
+fn rtt_enabled() -> bool {
+    static ON: LazyLock<bool> = LazyLock::new(|| {
+        std::env::var("MHGU_LDN_RTT").ok().and_then(|e| e.trim().parse::<i64>().ok()).is_some_and(|v| v > 0)
+    });
+    *ON
+}
+
+/// One path's round trips, logged every 10 s under MHGU_LDN_RTT.
+#[derive(Default, Clone, Copy)]
+struct Rtt {
+    n: u64,
+    sum: f64,
+    min: f64,
+    max: f64,
+}
+
+impl Rtt {
+    fn add(&mut self, ms: f64) {
+        self.n += 1;
+        self.sum += ms;
+        if self.n == 1 || ms < self.min {
+            self.min = ms;
+        }
+        if self.n == 1 || ms > self.max {
+            self.max = ms;
+        }
+    }
+
+    fn text(&self) -> String {
+        format!("{:.1}/{:.1}/{:.1} ms min/avg/max ({} hellos)", self.min, self.sum / self.n as f64, self.max, self.n)
+    }
+}
+
+/// The round trip a hello's echoed clock shows, if MHGU_LDN_RTT is on and the echo is sane.
+fn rtt_of(stamp: &[u8]) -> Option<f64> {
+    if !rtt_enabled() || stamp.len() < 8 {
+        return None;
+    }
+    let t0 = u64::from_ne_bytes(stamp[..8].try_into().ok()?);
+    let now = now_ns();
+    if t0 > now || now - t0 > 10_000_000_000 {
+        return None;
+    }
+    Some((now - t0) as f64 / 1e6)
+}
+
+/// The host's direct timers: ask the server, punch, and fall back after silence (ldn.c's host loop).
+fn host_direct_timers(udp: &UdpSocket) {
+    let now = Instant::now();
+    let mut sends: Vec<(SocketAddr, Vec<u8>)> = Vec::new();
+    with(|st| {
+        for p in st.peers.iter_mut() {
+            if !p.direct.ok {
+                continue;
+            }
+            let who = format!("peer {}", Ipv4Addr::from(p.ip));
+            p.direct.check_silence(now, &who);
+            if let (Some((pair, secret)), Some(server)) = (p.relay, p.udp) {
+                if let Some(q) = p.direct.query(now, pair, secret, &who) {
+                    sends.push((server, q));
+                }
+            }
+            if p.direct.known() && !p.direct.up && now >= p.direct.next_punch {
+                p.direct.next_punch = now
+                    + if now.duration_since(p.direct.p_since) < PUNCH_FAST {
+                        PUNCH_EVERY
+                    } else {
+                        PUNCH_SLOW
+                    };
+                if let (Some(addr), Some((pair, _))) = (p.direct.peer, p.relay) {
+                    let mut d = Vec::with_capacity(proto::DIRECT_HEADER + proto::LINK_UDP_HDR);
+                    d.extend_from_slice(&relay_prefix(pair, p.direct.dkey));
+                    d.extend_from_slice(&mhgu_link::udp::datagram_flags(p.token, proto::U_PUNCH, 0, &[]));
+                    sends.push((addr, d));
+                }
+            }
+        }
+    });
+    for (to, d) in sends {
+        let _ = udp.send_to(&d, to);
+    }
 }
 
 struct State {
@@ -92,6 +395,8 @@ struct State {
     udp_rx: std::time::Instant,
     /// Through a hub server (station side): the relay pair and our secret.
     relay: Option<(u32, u64)>,
+    /// Direct UDP past the server (hole punching), when the link is relayed.
+    direct: DirectState,
     /// The id the hub server gave this host's listing (0: not listed); ldn.c skips it in a LAN/server scan.
     own_hub: u64,
 }
@@ -103,6 +408,14 @@ static LCV: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 #[no_mangle]
 pub extern "C" fn mhgu_ldn_set_lcv(lcv: u16) {
     LCV.store(lcv, Ordering::Relaxed);
+}
+
+/// `[Multiplayer] Direct`: in an internet hub, ask the server for the other ends' addresses and send
+/// game packets straight to them when the routers let them (hole punching), else through the relay.
+/// Set before hosting or joining; 0 keeps every packet on the relay.
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_set_direct(on: c_int) {
+    DIRECT.store(on != 0, Ordering::Relaxed);
 }
 
 static DELIVER_PACKET: Mutex<Option<DeliverPacket>> = Mutex::new(None);
@@ -137,6 +450,7 @@ impl State {
             udp_up: false,
             udp_rx: std::time::Instant::now(),
             relay: None,
+            direct: DirectState::new(false),
             own_hub: 0,
         }
     }
@@ -365,77 +679,153 @@ pub extern "C" fn mhgu_ldn_host(
         with(|st| st.udp = Some(Arc::clone(&udp)));
         let stop_udp = Arc::clone(&stop);
         let handle = std::thread::spawn(move || {
-            let _ = udp.set_read_timeout(Some(Duration::from_millis(200)));
-            let mut buf = [0u8; 16 + proto::LINK_UDP_MAX_PAYLOAD];
+            let _ = udp.set_read_timeout(Some(Duration::from_millis(100)));
+            let mut buf = vec![0u8; proto::UDP_MAX + 1];
             while !stop_udp.load(Ordering::Relaxed) {
+                // Query, punch and fall back while no datagram is waiting.
+                host_direct_timers(&udp);
                 let (n, from) = match udp.recv_from(&mut buf) {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
-                // Through a hub server the datagram starts with MHGR + pair + secret.
+                // Straight from a station (hole punched): MHGR + pair + the pair's direct key.
                 let mut dg: &[u8] = &buf[..n];
-                if dg.len() >= 16 && &dg[..4] == b"MHGR" {
-                    let pair = u32::from_le_bytes(dg[4..8].try_into().unwrap());
-                    let secret = u64::from_le_bytes(dg[8..16].try_into().unwrap());
-                    let _ = secret;
-                    with(|st| {
-                        if let Some(p) = st.peers.iter_mut().find(|p| p.relay.map(|r| r.0) == Some(pair)) {
-                            p.udp = Some(from);
-                            p.udp_rx = std::time::Instant::now();
-                        }
+                let mut direct_peer: Option<usize> = None;
+                if n >= proto::DIRECT_HEADER && buf[..4] == proto::UDP_MAGIC {
+                    let pair = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+                    let dkey = u64::from_le_bytes(buf[8..16].try_into().unwrap());
+                    direct_peer = with(|st| {
+                        st.peers.iter().position(|p| {
+                            p.relay.map(|r| r.0) == Some(pair)
+                                && p.direct.dkey != 0
+                                && p.direct.dkey == dkey
+                                && p.udp != Some(from)
+                        })
                     });
-                    dg = &dg[16..];
+                    match direct_peer {
+                        Some(_) => dg = &buf[proto::DIRECT_HEADER..n],
+                        None => continue, // (anything else on the port: dropped)
+                    }
                 }
-                if let Some((token, kind, payload)) = mhgu_link::udp::parse(dg) {
+                if let Some((token, kind, flags, payload)) = mhgu_link::udp::parse_flags(dg) {
+                    // The station whose datagram this is.
+                    let idx = with(|st| st.peers.iter().position(|p| p.token == token));
+                    let Some(idx) = idx else { continue };
+                    if direct_peer.is_some() && direct_peer != Some(idx) {
+                        continue;
+                    }
+                    let now = Instant::now();
+                    let relayed = with(|st| st.peers[idx].relay.is_some());
+                    let peer_udp = with(|st| st.peers[idx].udp);
+                    if relayed && peer_udp != Some(from) {
+                        // Straight from the station: only with our prefix and its address.
+                        if direct_peer.is_none() || !with(|st| st.peers[idx].direct.direct_from(from)) {
+                            continue;
+                        }
+                        match kind {
+                            proto::U_HELLO => {
+                                let up = flags & proto::UF_DIRECT_OK != 0;
+                                let (changed, ip) = with(|st| {
+                                    let p = &mut st.peers[idx];
+                                    p.direct.rx = now;
+                                    let changed = p.direct.up != up;
+                                    p.direct.up = up;
+                                    (changed, p.ip)
+                                });
+                                if changed {
+                                    eprintln!(
+                                        "[link] peer {}: {}",
+                                        Ipv4Addr::from(ip),
+                                        if up {
+                                            "direct connection up: game packets go straight to the player"
+                                        } else {
+                                            "the player gets no direct datagrams: game packets go through the hub server"
+                                        }
+                                    );
+                                }
+                                let echo = &payload[..payload.len().min(8)];
+                                let (pair, dkey) = with(|st| {
+                                    let p = &st.peers[idx];
+                                    (p.relay.map(|r| r.0).unwrap_or(0), p.direct.dkey)
+                                });
+                                let mut a = Vec::with_capacity(proto::DIRECT_HEADER + proto::LINK_UDP_HDR + echo.len());
+                                a.extend_from_slice(&relay_prefix(pair, dkey));
+                                a.extend_from_slice(&mhgu_link::udp::datagram_flags(token, proto::U_HELLO_ACK, 0, echo));
+                                let _ = udp.send_to(&a, from);
+                            }
+                            proto::U_DATA if payload.len() >= proto::VPACKET_SIZE => {
+                                if let Some(mut v) = MhguVPacket::parse(payload) {
+                                    let data = payload[proto::VPACKET_SIZE..].to_vec();
+                                    let (up, ip) = with(|st| {
+                                        let p = &mut st.peers[idx];
+                                        p.direct.rx = now;
+                                        let up = p.direct.up;
+                                        p.direct.up = true;
+                                        (up, p.ip)
+                                    });
+                                    if !up {
+                                        eprintln!(
+                                            "[link] peer {}: direct connection up: game packets go straight to the player",
+                                            Ipv4Addr::from(ip)
+                                        );
+                                    }
+                                    v.src_ip = ip;
+                                    relay_from_udp(idx, &v, &data);
+                                    with(|st| st.packets.push_back((v, data)));
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    // Through the hub server (or a LAN): the address it came from is where to answer.
+                    with(|st| {
+                        let p = &mut st.peers[idx];
+                        p.udp = Some(from);
+                        p.udp_rx = now;
+                    });
                     match kind {
                         proto::U_HELLO => {
-                            // The station found our UDP path: remember it and answer, then its game
-                            // packets come as datagrams (`U_DATA`).
-                            let known = with(|st| {
-                                match st.peers.iter_mut().find(|p| p.token == token) {
-                                    Some(p) => {
-                                        p.udp = Some(from);
-                                        p.udp_rx = std::time::Instant::now();
-                                        true
-                                    }
-                                    None => false,
+                            let echo = &payload[..payload.len().min(8)];
+                            let inner = mhgu_link::udp::datagram_flags(token, proto::U_HELLO_ACK, 0, echo);
+                            let d = match with(|st| st.peers[idx].relay) {
+                                Some((pair, secret)) => {
+                                    let mut d = Vec::with_capacity(proto::UDP_HEADER + inner.len());
+                                    d.extend_from_slice(&relay_prefix(pair, secret));
+                                    d.extend_from_slice(&inner);
+                                    d
                                 }
-                            });
-                            if std::env::var_os("MHGU_TRACE_LINK").is_some() {
-                                eprintln!("[link] udp hello token={token:#x} known={known} (tokens: {:?})",
-                                    with(|st| st.peers.iter().map(|p| p.token).collect::<Vec<_>>()));
-                            }
-                            let ack = mhgu_link::udp::datagram(token, proto::U_HELLO_ACK, &[]);
-                            let _ = udp.send_to(&ack, from);
-                            if std::env::var_os("MHGU_TRACE_LINK").is_some() {
-                                eprintln!("[link] udp hello {token:#x} from {from}: acked");
-                            }
+                                None => inner,
+                            };
+                            let _ = udp.send_to(&d, from);
                         }
-                        proto::U_HELLO => eprintln!("[link] guest udp: host HELLO ({} B)", payload.len()),
-                    proto::U_HELLO_ACK => eprintln!("[link] guest udp: HELLO_ACK"),
-                    proto::U_DATA if payload.len() >= proto::VPACKET_SIZE => {
+                        proto::U_DATA if payload.len() >= proto::VPACKET_SIZE => {
                             if let Some(v) = MhguVPacket::parse(payload) {
                                 let data = payload[proto::VPACKET_SIZE..].to_vec();
-                                with(|st| {
-                                    if let Some(p) = st.peers.iter_mut().find(|p| p.udp == Some(from) || p.token == token) {
-                                        p.udp_rx = std::time::Instant::now();
-                                    }
-                                });
-                                if std::env::var_os("MHGU_TRACE_LINK").is_some() {
-                                    use std::sync::atomic::{AtomicU64, Ordering};
-                                    static N: AtomicU64 = AtomicU64::new(0);
-                                    let n = N.fetch_add(1, Ordering::Relaxed);
-                                    if n < 5 || n % 500 == 0 {
-                                        eprintln!("[link] udp rx #{} from {} {} bytes", n, from, data.len());
-                                    }
-                                }
-                                // Relay to the other players and hand it to this game.
-                                relay_from_udp(from, &v, &data);
+                                relay_from_udp(idx, &v, &data);
                                 with(|st| st.packets.push_back((v, data)));
                             }
                         }
                         _ => {}
                     }
+                    continue;
+                }
+                // The hub server's answer: a station's public address (and the pair's direct key).
+                if n == proto::PEER_MSG_SIZE && buf[..4] == proto::PEER_ANSWER {
+                    let now = Instant::now();
+                    with(|st| {
+                        for p in st.peers.iter_mut() {
+                            let Some((pair, secret)) = p.relay else { continue };
+                            if p.udp != Some(from) {
+                                continue;
+                            }
+                            if let Some((addr, dkey)) = peer_answer_bytes(&buf[..n], pair, secret) {
+                                let who = format!("peer {}", Ipv4Addr::from(p.ip));
+                                p.direct.answer(addr, dkey, now, &who);
+                                break;
+                            }
+                        }
+                    });
                     continue;
                 }
                 let info = with(|st| st.info.clone());
@@ -510,6 +900,9 @@ fn serve_peer_relay(stream: TcpStream, relay: Option<(u32, u64)>) {
         return;
     }
 
+    // Through the hub server the accepted socket comes from the server; its address is where the
+    // station's relayed datagrams will come from (ldn.c's `l->uaddr = acc.from`).
+    let peer_addr = hello_stream.peer_addr().ok();
     // The WELCOME must already show this peer's node: the joining client checks that the entry at the
     // WELCOME's node index is marked connected in the NetworkInfo it is handed.
     let (node, info, writer) = {
@@ -528,12 +921,16 @@ fn serve_peer_relay(stream: TcpStream, relay: Option<(u32, u64)>) {
             hello: hello.clone(),
             ip,
             token: 0, // set with the WELCOME below
-            udp: None,
-            udp_rx: std::time::Instant::now(),
+            udp: if relay.is_some() { peer_addr } else { None },
+            // (not "up" until a datagram from there arrives; but a relayed link knows the server already)
+            udp_rx: std::time::Instant::now()
+                .checked_sub(Duration::from_secs(15))
+                .unwrap_or_else(std::time::Instant::now),
             relay,
+            direct: DirectState::new(relay.is_some() && DIRECT.load(Ordering::Relaxed)),
         });
         let (own_ip, own_mac, own_name, own_lcv) = (st.own_ip, st.mac, st.name.clone(), st.lcv);
-        let peers: Vec<Peer> = st.peers.iter().map(|p| Peer { stream: Arc::clone(&p.stream), hello: p.hello.clone(), ip: p.ip, token: p.token, udp: p.udp, udp_rx: p.udp_rx, relay: p.relay }).collect();
+        let peers: Vec<Peer> = st.peers.iter().map(|p| Peer { stream: Arc::clone(&p.stream), hello: p.hello.clone(), ip: p.ip, token: p.token, udp: p.udp, udp_rx: p.udp_rx, relay: p.relay, direct: p.direct }).collect();
         rebuild_nodes(&mut st.info, own_ip, &own_mac, &own_name, own_lcv, &peers);
         (node, st.info.clone(), writer)
     };
@@ -613,7 +1010,7 @@ fn serve_peer_relay(stream: TcpStream, relay: Option<(u32, u64)>) {
         if let Some(st) = g.as_mut() {
             st.peers.retain(|p| !Arc::ptr_eq(&p.stream, &stream));
             let (own_ip, own_mac, own_name, own_lcv) = (st.own_ip, st.mac, st.name.clone(), st.lcv);
-            let peers: Vec<Peer> = st.peers.iter().map(|p| Peer { stream: Arc::clone(&p.stream), hello: p.hello.clone(), ip: p.ip, token: p.token, udp: p.udp, udp_rx: p.udp_rx, relay: p.relay }).collect();
+            let peers: Vec<Peer> = st.peers.iter().map(|p| Peer { stream: Arc::clone(&p.stream), hello: p.hello.clone(), ip: p.ip, token: p.token, udp: p.udp, udp_rx: p.udp_rx, relay: p.relay, direct: p.direct }).collect();
             rebuild_nodes(&mut st.info, own_ip, &own_mac, &own_name, own_lcv, &peers);
         }
     }
@@ -666,30 +1063,60 @@ fn relay_packet(from: &Arc<Mutex<TcpStream>>, v: &MhguVPacket, data: &[u8]) {
     }
 }
 
-/// Relays a datagram received on the host's UDP socket to the other players.
-fn relay_from_udp(from: SocketAddr, v: &MhguVPacket, data: &[u8]) {
+/// Relays a datagram received on the host's UDP socket (`sender`: the peer it came from) to the other
+/// players, straight to those with a working direct path and through the server for the rest.
+fn relay_from_udp(sender: usize, v: &MhguVPacket, data: &[u8]) {
     let body = [&v.to_bytes()[..], data].concat();
     let udp = with(|st| st.udp.clone());
-    let now = std::time::Instant::now();
-    let peers: Vec<(Arc<Mutex<TcpStream>>, Option<SocketAddr>, u32, bool, Option<(u32, u64)>)> = with(|st| {
+    let now = Instant::now();
+    struct Target {
+        stream: Arc<Mutex<TcpStream>>,
+        token: u32,
+        relay: Option<(u32, u64)>,
+        relay_addr: Option<SocketAddr>,
+        direct: Option<(u32, u64, SocketAddr)>,
+    }
+    let peers: Vec<Target> = with(|st| {
         st.peers
             .iter()
-            .filter(|p| p.udp != Some(from))
-            .map(|p| (Arc::clone(&p.stream), p.udp, p.token, now.duration_since(p.udp_rx) < Duration::from_secs(15), p.relay))
+            .enumerate()
+            .filter(|(i, _)| *i != sender)
+            .map(|(_, p)| Target {
+                stream: Arc::clone(&p.stream),
+                token: p.token,
+                relay: p.relay,
+                relay_addr: p.udp.filter(|_| now.duration_since(p.udp_rx) < Duration::from_secs(15)),
+                direct: match (p.direct.usable(now), p.direct.peer, p.relay) {
+                    (true, Some(addr), Some((pair, _))) if p.direct.dkey != 0 => {
+                        Some((pair, p.direct.dkey, addr))
+                    }
+                    _ => None,
+                },
+            })
             .collect()
     });
-    for (stream, addr, token, up, relay) in peers {
-        if let (Some(udp), Some(addr), true) = (&udp, addr, up) {
-            let inner = mhgu_link::udp::datagram(token, proto::U_DATA, &body);
-            let d = match relay {
-                Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &inner].concat(),
-                None => inner,
-            };
-            let _ = udp.send_to(&d, addr);
+    for t in peers {
+        let inner = mhgu_link::udp::datagram(t.token, proto::U_DATA, &body);
+        let (d, to) = if let Some((pair, dkey, addr)) = t.direct {
+            ([&relay_prefix(pair, dkey)[..], &inner[..]].concat(), addr)
+        } else if let (Some(addr), Some(relay)) = (t.relay_addr, t.relay) {
+            ([&relay_prefix(relay.0, relay.1)[..], &inner[..]].concat(), addr)
+        } else if t.relay.is_none() && t.relay_addr.is_some() {
+            (inner, t.relay_addr.unwrap())
+        } else {
+            let mut s = t.stream.lock().unwrap();
+            let _ = write_frame(&mut s, proto::F_PACKET, &[&body]);
             continue;
+        };
+        match &udp {
+            Some(udp) => {
+                let _ = udp.send_to(&d, to);
+            }
+            None => {
+                let mut s = t.stream.lock().unwrap();
+                let _ = write_frame(&mut s, proto::F_PACKET, &[&body]);
+            }
         }
-        let mut s = stream.lock().unwrap();
-        let _ = write_frame(&mut s, proto::F_PACKET, &[&body]);
     }
 }
 
@@ -724,65 +1151,221 @@ pub struct MhguScanEntry {
 
 /// A station's `MHGD` datagrams: a hello every 500 ms until the host answers, then every 2 s (which
 /// keeps NAT mappings open). Through a hub server the datagram carries the `MHGR` prefix, and the
-/// server passes it on to the host (`ldn.c` `relay_prefix`).
+/// server passes it on to the host (`ldn.c` `relay_prefix`). In a relayed link the station also asks
+/// the server for the host's public address and, once it has it, sends direct hellos and punches
+/// straight to it (the relay stays as the fallback).
 fn station_udp_start(peer: SocketAddr, token: u32, relay: Option<(u32, u64)>, stop: Arc<AtomicBool>) {
     let Ok(u) = UdpSocket::bind(("0.0.0.0", 0)).map(Arc::new) else { return };
-    let _ = u.connect(peer);
-    let _ = u.set_read_timeout(Some(Duration::from_millis(200)));
+    // Not connected: direct datagrams go to the other player, relayed ones to the server's port.
+    let _ = u.set_read_timeout(Some(Duration::from_millis(100)));
     with(|st| {
         st.token = token;
         st.host_addr = Some(peer);
         st.usock = Some(Arc::clone(&u));
         st.udp_up = false;
         st.relay = relay;
+        st.direct = DirectState::new(relay.is_some() && DIRECT.load(Ordering::Relaxed));
     });
     let handle = std::thread::spawn(move || {
-        let mut next = std::time::Instant::now();
-        let mut buf = [0u8; 32 + proto::LINK_UDP_MAX_PAYLOAD];
+        let mut next_hello = Instant::now();
+        let mut next_dhello = Instant::now();
+        let mut rtt = [Rtt::default(); 2]; // [0] relay / LAN, [1] direct
+        let mut next_rtt = Instant::now() + Duration::from_secs(10);
+        let mut buf = vec![0u8; proto::UDP_MAX + 1];
         while !stop.load(Ordering::Relaxed) {
-            let now = std::time::Instant::now();
-            let up = with(|st| st.udp_up);
-            if now >= next {
-                let d = mhgu_link::udp::datagram(token, proto::U_HELLO, &[]);
+            let now = Instant::now();
+            // Relay hellos keep the NAT mapping and the fallback path ready, also while direct works.
+            if now >= next_hello {
+                let up = with(|st| st.udp_up);
+                let payload = now_ns().to_ne_bytes();
+                let d = mhgu_link::udp::datagram_flags(token, proto::U_HELLO, 0, &payload);
                 let d = match relay {
-                    Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &d].concat(),
+                    Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &d[..]].concat(),
                     None => d,
                 };
-                let _ = u.send(&d);
-                next = now + if up { Duration::from_secs(2) } else { Duration::from_millis(500) };
+                let _ = u.send_to(&d, peer);
+                next_hello = now
+                    + if up {
+                        if rtt_enabled() {
+                            Duration::from_millis(250)
+                        } else {
+                            Duration::from_secs(2)
+                        }
+                    } else {
+                        Duration::from_millis(500)
+                    };
             }
-            let n = match u.recv(&mut buf) {
-                Ok(n) => n,
+            // Direct UDP past the server: ask, punch / say hello, fall back after silence.
+            let mut query = None;
+            let mut direct_hello = None;
+            with(|st| {
+                let pair = st.relay;
+                let d = &mut st.direct;
+                if !d.ok {
+                    return;
+                }
+                if d.check_silence(now, "station") {
+                    next_dhello = now;
+                }
+                if let Some((pair, secret)) = pair {
+                    if let Some(q) = d.query(now, pair, secret, "station") {
+                        query = Some(q);
+                    }
+                }
+                if d.known() && now >= next_dhello {
+                    let flags = if d.up { proto::UF_DIRECT_OK } else { 0 };
+                    next_dhello = now
+                        + if d.up {
+                            if rtt_enabled() {
+                                Duration::from_millis(250)
+                            } else {
+                                DIRECT_HELLO
+                            }
+                        } else if now.duration_since(d.p_since) < PUNCH_FAST {
+                            PUNCH_EVERY
+                        } else {
+                            PUNCH_SLOW
+                        };
+                    if let (Some(addr), Some((pair, _))) = (d.peer, pair) {
+                        let payload = now_ns().to_ne_bytes();
+                        let mut hello = Vec::with_capacity(proto::DIRECT_HEADER + proto::LINK_UDP_HDR + 8);
+                        hello.extend_from_slice(&relay_prefix(pair, d.dkey));
+                        hello.extend_from_slice(&mhgu_link::udp::datagram_flags(token, proto::U_HELLO, flags, &payload));
+                        direct_hello = Some((addr, hello));
+                    }
+                }
+            });
+            if let Some(q) = query {
+                let _ = u.send_to(&q, peer);
+            }
+            if let Some((addr, d)) = direct_hello {
+                let _ = u.send_to(&d, addr);
+            }
+            if now >= next_rtt {
+                next_rtt = now + Duration::from_secs(10);
+                if rtt[0].n > 0 || rtt[1].n > 0 {
+                    eprintln!("[link] rtt: relay {}; direct {}", rtt[0].text(), rtt[1].text());
+                    rtt = [Rtt::default(); 2];
+                }
+            }
+            if with(|st| st.udp_up) && with(|st| now.duration_since(st.udp_rx) > Duration::from_secs(15)) {
+                with(|st| st.udp_up = false);
+                eprintln!("[link] nothing by UDP from the host for 15 s: game packets go by TCP");
+            }
+            let (n, from) = match u.recv_from(&mut buf) {
+                Ok(v) => v,
                 Err(_) => continue,
             };
+            let relayed = relay.is_some();
+            let mut direct = false;
             let mut dg: &[u8] = &buf[..n];
-            if dg.len() >= 16 && &dg[..4] == b"MHGR" {
-                dg = &dg[16..]; // (the server passed it on from the host)
+            if from != peer {
+                // Straight from the host: its pair id and the pair's direct key, else dropped.
+                let dkey = with(|st| st.direct.dkey);
+                if !relayed || dkey == 0 || n < proto::DIRECT_HEADER || buf[..4] != proto::UDP_MAGIC {
+                    continue;
+                }
+                let pair_in = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+                let key_in = u64::from_le_bytes(buf[8..16].try_into().unwrap());
+                if relay.map(|r| r.0) != Some(pair_in)
+                    || key_in != dkey
+                    || !with(|st| st.direct.direct_from(from))
+                {
+                    continue;
+                }
+                direct = true;
+                dg = &buf[proto::DIRECT_HEADER..n];
+            } else if relayed {
+                // The server answered our query: the host's public address (and the pair's key).
+                if let Some((addr, dkey)) =
+                    relay.and_then(|(pair, secret)| peer_answer_bytes(dg, pair, secret))
+                {
+                    with(|st| {
+                        let now = Instant::now();
+                        st.direct.answer(addr, dkey, now, "station");
+                    });
+                    next_dhello = now;
+                    continue;
+                }
             }
-            if let Some((_t, kind, payload)) = mhgu_link::udp::parse(dg) {
+            let Some((datagram_token, kind, _flags, payload)) = mhgu_link::udp::parse_flags(dg) else {
+                continue;
+            };
+            if datagram_token != token {
+                continue;
+            }
+            if direct {
                 match kind {
-                    proto::U_HELLO_ACK => with(|st| {
-                        st.udp_up = true;
-                        st.udp_rx = std::time::Instant::now();
-                    }),
-                    proto::U_HELLO => eprintln!("[link] guest udp: host HELLO ({} B)", payload.len()),
-                    proto::U_HELLO_ACK => eprintln!("[link] guest udp: HELLO_ACK"),
+                    proto::U_HELLO_ACK => {
+                        if let Some(ms) = rtt_of(payload) {
+                            rtt[1].add(ms);
+                        }
+                        let (became, had) = with(|st| {
+                            let d = &mut st.direct;
+                            let had = d.ever;
+                            d.rx = now;
+                            if d.up {
+                                return (false, had);
+                            }
+                            d.good += 1;
+                            let need = if d.ever { DIRECT_REUP } else { 1 };
+                            if d.good >= need {
+                                d.up = true;
+                                d.ever = true;
+                                (true, had)
+                            } else {
+                                (false, had)
+                            }
+                        });
+                        if became {
+                            eprintln!(
+                                "[link] direct connection to the host {}: game packets go straight to it, not through the hub server",
+                                if had { "back" } else { "up" }
+                            );
+                            next_dhello = now;
+                        }
+                    }
+                    proto::U_PUNCH => {
+                        if !with(|st| st.direct.up) {
+                            next_dhello = now; // (the host's way is open: say hello now)
+                        }
+                    }
                     proto::U_DATA if payload.len() >= proto::VPACKET_SIZE => {
                         if let Some(v) = MhguVPacket::parse(payload) {
                             let data = payload[proto::VPACKET_SIZE..].to_vec();
-                            let k = GUEST_RX.fetch_add(1, AtomicOrdering::Relaxed);
-                            if k < 5 {
-                                eprintln!("[link] guest udp rx: {:08x} -> {:08x} {}:{} proto {} ({} B)",
-                                    v.src_ip, v.dst_ip, v.src_port, v.dst_port, v.proto, data.len());
-                            }
-                            with(|st| {
-                                st.udp_rx = std::time::Instant::now();
-                                st.packets.push_back((v, data));
-                            });
+                            with(|st| st.packets.push_back((v, data)));
                         }
                     }
                     _ => {}
                 }
+                continue;
+            }
+            with(|st| st.udp_rx = now);
+            match kind {
+                proto::U_HELLO_ACK => {
+                    if let Some(ms) = rtt_of(payload) {
+                        rtt[0].add(ms);
+                    }
+                    if !with(|st| st.udp_up) {
+                        with(|st| st.udp_up = true);
+                        eprintln!(
+                            "[link] UDP to the host works: game packets go by UDP{}",
+                            if relayed { " through the hub server" } else { "" }
+                        );
+                    }
+                }
+                proto::U_DATA if payload.len() >= proto::VPACKET_SIZE => {
+                    if let Some(v) = MhguVPacket::parse(payload) {
+                        let data = payload[proto::VPACKET_SIZE..].to_vec();
+                        let k = GUEST_RX.fetch_add(1, AtomicOrdering::Relaxed);
+                        if k < 5 {
+                            eprintln!("[link] guest udp rx: {:08x} -> {:08x} {}:{} proto {} ({} B)",
+                                v.src_ip, v.dst_ip, v.src_port, v.dst_port, v.proto, data.len());
+                        }
+                        with(|st| st.packets.push_back((v, data)));
+                    }
+                }
+                _ => {}
             }
         }
     });
@@ -1185,6 +1768,8 @@ pub extern "C" fn mhgu_ldn_leave() {
                 st.udp = None;
                 st.usock = None;
                 st.udp_up = false;
+                st.relay = None;
+                st.direct = DirectState::new(false);
                 st.packets.clear();
                 st.aux.clear();
                 let a = st.accept_thread.take();
@@ -1318,13 +1903,25 @@ pub extern "C" fn mhgu_ldn_send(p: *const MhguVPacket, data: *const u8, len: u32
         unsafe { std::slice::from_raw_parts(data, len as usize) }.to_vec()
     };
     let frame = [&v.to_bytes()[..], &body].concat();
-    let station_udp = with(|st| {
-        if st.writer.is_some() {
-            let fresh = std::time::Instant::now().duration_since(st.udp_rx) < Duration::from_secs(15);
-            st.usock.clone().filter(|_| st.udp_up && fresh).map(|u| (u, st.token, st.relay))
-        } else {
-            None
+    // The station sends straight to the host once the direct path works, else through the relay.
+    let station_udp: Option<(Arc<UdpSocket>, u32, Option<(u32, u64)>, SocketAddr)> = with(|st| {
+        if st.writer.is_none() {
+            return None;
         }
+        let now = Instant::now();
+        let sock = st.usock.clone()?;
+        if st.direct.usable(now) && st.direct.dkey != 0 {
+            if let (Some(addr), Some((pair, _))) = (st.direct.peer, st.relay) {
+                return Some((sock, st.token, Some((pair, st.direct.dkey)), addr));
+            }
+        }
+        let fresh = now.duration_since(st.udp_rx) < Duration::from_secs(15);
+        if st.udp_up && fresh {
+            if let Some(server) = st.host_addr {
+                return Some((sock, st.token, st.relay, server));
+            }
+        }
+        None
     });
     let sent = GUEST_TX.fetch_add(1, AtomicOrdering::Relaxed);
     if sent < 5 {
@@ -1333,13 +1930,13 @@ pub extern "C" fn mhgu_ldn_send(p: *const MhguVPacket, data: *const u8, len: u32
             v.src_ip, v.dst_ip, v.src_port, v.dst_port, v.proto, body.len()
         );
     }
-    if let Some((u, token, relay)) = station_udp {
-        let d = mhgu_link::udp::datagram(token, proto::U_DATA, &frame);
-        let d = match relay {
-            Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &d].concat(),
-            None => d,
+    if let Some((u, token, key, to)) = station_udp {
+        let inner = mhgu_link::udp::datagram(token, proto::U_DATA, &frame);
+        let d = match key {
+            Some((pair, key)) => [&relay_prefix(pair, key)[..], &inner].concat(),
+            None => inner,
         };
-        let _ = u.send(&d);
+        let _ = u.send_to(&d, to);
         return;
     }
     if let Some(w) = with(|st| st.writer.clone()) {
@@ -1350,10 +1947,21 @@ pub extern "C" fn mhgu_ldn_send(p: *const MhguVPacket, data: *const u8, len: u32
     // Per peer: its `MHGD` datagram path when it is up, else the TCP link.
     let udp = with(|st| st.udp.clone());
     let now = std::time::Instant::now();
-    let peers: Vec<(Arc<Mutex<TcpStream>>, Option<SocketAddr>, u32, bool, Option<(u32, u64)>)> = with(|st| {
+    // Per peer: the direct path when it works, else its `MHGD` datagram path when it is up, else TCP.
+    let peers: Vec<(Arc<Mutex<TcpStream>>, Option<SocketAddr>, u32, bool, Option<(u32, u64)>, Option<(u32, u64, SocketAddr)>)> = with(|st| {
         st.peers
             .iter()
-            .map(|p| (Arc::clone(&p.stream), p.udp, p.token, now.duration_since(p.udp_rx) < Duration::from_secs(15), p.relay))
+            .map(|p| (
+                Arc::clone(&p.stream),
+                p.udp,
+                p.token,
+                now.duration_since(p.udp_rx) < Duration::from_secs(15),
+                p.relay,
+                match (p.direct.usable(now), p.direct.peer, p.relay) {
+                    (true, Some(addr), Some((pair, _))) if p.direct.dkey != 0 => Some((pair, p.direct.dkey, addr)),
+                    _ => None,
+                },
+            ))
             .collect()
     });
     if std::env::var_os("MHGU_TRACE_LINK").is_some() {
@@ -1365,13 +1973,20 @@ pub extern "C" fn mhgu_ldn_send(p: *const MhguVPacket, data: *const u8, len: u32
             eprintln!("[link] host tx #{} to {} peer(s) ({} by udp), {} bytes", n, peers.len(), udp_up, frame.len());
         }
     }
-    for (stream, addr, token, up, relay) in peers {
-        if let (Some(udp), Some(addr), true) = (&udp, addr, up) {
-            let inner = mhgu_link::udp::datagram(token, proto::U_DATA, &frame);
+    for (stream, addr, token, up, relay, direct) in peers {
+        let inner = mhgu_link::udp::datagram(token, proto::U_DATA, &frame);
+        let send = if let Some((pair, dkey, addr)) = direct {
+            Some(([&relay_prefix(pair, dkey)[..], &inner[..]].concat(), addr))
+        } else if let (Some(addr), true) = (addr, up) {
             let d = match relay {
-                Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &inner].concat(),
+                Some((pair, secret)) => [&relay_prefix(pair, secret)[..], &inner[..]].concat(),
                 None => inner,
             };
+            Some((d, addr))
+        } else {
+            None
+        };
+        if let (Some(udp), Some((d, addr))) = (&udp, send) {
             let _ = udp.send_to(&d, addr);
             if std::env::var_os("MHGU_TRACE_LINK").is_some() {
                 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1419,5 +2034,89 @@ pub extern "C" fn mhgu_ldn_poll() {
         for d in &aux {
             f(d.as_ptr(), d.len() as u32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The query is the relay prefix + `MHGQ` + 12 zero bytes; never bigger than the server's answer.
+    #[test]
+    fn peer_query_layout() {
+        let mut d = DirectState::new(true);
+        let now = Instant::now();
+        let q = d.query(now, 0x1122_3344, 0x5566_7788_99AA_BBCC, "test").expect("query due");
+        assert_eq!(q.len(), proto::PEER_MSG_SIZE);
+        assert_eq!(&q[..4], &proto::UDP_MAGIC);
+        assert_eq!(u32::from_le_bytes(q[4..8].try_into().unwrap()), 0x1122_3344);
+        assert_eq!(u64::from_le_bytes(q[8..16].try_into().unwrap()), 0x5566_7788_99AA_BBCC);
+        assert_eq!(&q[16..20], &proto::PEER_QUERY);
+        assert_eq!(&q[20..32], &[0u8; 12]);
+        // A direct key is only known after the server answered.
+        assert_eq!(d.dkey, 0);
+        assert!(!d.known());
+    }
+
+    /// The answer: `MHGP`, pair, the asker's secret, IPv4, port (big endian), 2 zero bytes, key.
+    #[test]
+    fn peer_answer_layout() {
+        let pair = 0x0102_0304u32;
+        let secret = 0x0506_0708_090A_0B0Cu64;
+        let dkey = 0x1112_1314_1516_1718u64;
+        let mut a = Vec::new();
+        a.extend_from_slice(&proto::PEER_ANSWER);
+        a.extend_from_slice(&pair.to_le_bytes());
+        a.extend_from_slice(&secret.to_le_bytes());
+        a.extend_from_slice(&[192, 168, 1, 7]);
+        a.extend_from_slice(&54321u16.to_be_bytes());
+        a.extend_from_slice(&[0, 0]);
+        a.extend_from_slice(&dkey.to_le_bytes());
+        let (addr, key) = peer_answer_bytes(&a, pair, secret).expect("answer");
+        assert_eq!(addr, "192.168.1.7:54321".parse().unwrap());
+        assert_eq!(key, dkey);
+        // Another pair or secret, or a query-sized short message, is not our answer.
+        assert!(peer_answer_bytes(&a, pair + 1, secret).is_none());
+        assert!(peer_answer_bytes(&a, pair, secret ^ 1).is_none());
+        assert!(peer_answer_bytes(&a[..a.len() - 1], pair, secret).is_none());
+        assert!(peer_answer_bytes(&proto::PEER_QUERY, pair, secret).is_none());
+    }
+
+    /// Direct datagrams need the address the server gave (the port may change: the latest wins), and
+    /// there is no direct path at all before the answer.
+    #[test]
+    fn direct_datagrams_need_the_peer_address() {
+        let mut d = DirectState::new(true);
+        let a: SocketAddr = "203.0.113.9:40000".parse().unwrap();
+        let other: SocketAddr = "203.0.113.10:40000".parse().unwrap();
+        assert!(!d.direct_from(a), "accepted before the server answered");
+        assert!(d.answer(a, 7, Instant::now(), "test"));
+        assert_eq!(d.dkey, 7);
+        assert!(d.direct_from(a));
+        assert!(d.peer == Some(a));
+        assert!(!d.direct_from(other), "accepted from another address");
+        let moved: SocketAddr = "203.0.113.9:50000".parse().unwrap();
+        assert!(d.direct_from(moved));
+        assert_eq!(d.peer, Some(moved), "the latest port wins");
+        // A repeated answer for the same address updates the key but restarts no schedule.
+        let t = Instant::now();
+        let mut rep = DirectState::new(true);
+        assert!(rep.answer(a, 1, t, "test"));
+        let since = rep.p_since;
+        assert!(rep.answer(a, 2, t + Duration::from_secs(5), "test"));
+        assert_eq!(rep.dkey, 2);
+        assert_eq!(rep.p_since, since);
+        // Direct = Off: the answer is not taken at all.
+        let mut off = DirectState::new(false);
+        assert!(!off.answer(a, 9, Instant::now(), "test"));
+        assert!(!off.direct_from(a));
+    }
+
+    #[test]
+    fn set_direct_is_stored() {
+        mhgu_ldn_set_direct(0);
+        assert!(!DIRECT.load(Ordering::Relaxed));
+        mhgu_ldn_set_direct(1);
+        assert!(DIRECT.load(Ordering::Relaxed));
     }
 }

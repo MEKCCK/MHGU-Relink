@@ -15,8 +15,7 @@ final class RecompLanguage {
         int selected = activity.getIntent().getIntExtra(GameActivity.EXTRA_LANGUAGE, -1);
         if (selected >= 0 && selected <= 2) return selected;
         // The launcher has no language extra; use the same saved setting as the native menu.
-        File home = activity.getExternalFilesDir(null);
-        if (home == null) home = activity.getFilesDir();
+        File home = FilesFolder.get(activity);
         try (BufferedReader in = new BufferedReader(new InputStreamReader(
                 new FileInputStream(new File(home, "mhgurecomp.ini")), "UTF-8"))) {
             String line;

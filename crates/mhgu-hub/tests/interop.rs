@@ -382,3 +382,85 @@ fn live_min_proto_closes_old_hubs() {
     send(&mut c, proto::T_LIST, &[&header(2, 0)[..]]);
     assert_eq!(err_code(&expect(&mut c, proto::T_ERROR)), proto::ERR_VERSION);
 }
+
+/// Direct UDP (hole punching): each end learns the other's public address only after both asked;
+/// queries are never relayed, and the answer carries a per-pair direct key (ported from the Go
+/// server's TestPeerAddress).
+#[test]
+fn peer_address_only_after_both_ask() {
+    let ts = start(|_| {});
+    let (mut hc, id) = host(&ts, 0, 1);
+    let mut pc = dial(&ts);
+    let h = header(2, 0);
+    send(&mut pc, proto::T_JOIN, &[&h[..], &id.to_le_bytes()]);
+    let ticket = expect(&mut hc, proto::T_INCOMING);
+    let mut ac = dial(&ts);
+    send(&mut ac, proto::T_ATTACH, &[&h[..], &ticket]);
+    let hs = expect(&mut ac, proto::T_SPLICED);
+    let ps = expect(&mut pc, proto::T_SPLICED);
+    let (pair, hsec, psec) = (&ps[..4], &hs[4..12], &ps[4..12]);
+
+    let ua = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), ts.addr.port());
+    let hu = UdpSocket::bind("127.0.0.1:0").unwrap();
+    hu.connect(ua).unwrap();
+    let pu = UdpSocket::bind("127.0.0.1:0").unwrap();
+    pu.connect(ua).unwrap();
+    let query = |secret: &[u8]| dgram(pair, secret, &[&proto::PEER_QUERY[..], &[0u8; 12]].concat());
+    let mut b = vec![0u8; 64];
+
+    // The player asks, the host has not: no answer, and the query is not passed on as data.
+    pu.send(&query(psec)).unwrap();
+    pu.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(pu.recv(&mut b).is_err(), "answer with one-sided consent");
+    hu.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(hu.recv(&mut b).is_err(), "query relayed as data");
+
+    // A forged secret gets no answer either (and does not count as consent).
+    pu.send(&query(&[0u8; 8])).unwrap();
+    pu.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(pu.recv(&mut b).is_err(), "answer to a forged query");
+
+    // Now the host asks: both consented, so each gets the other's address and the same direct key.
+    hu.send(&query(hsec)).unwrap();
+    hu.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let n = hu.recv(&mut b).unwrap();
+    assert_eq!(n, proto::PEER_MSG_SIZE);
+    assert_eq!(&b[..4], &proto::PEER_ANSWER);
+    assert_eq!(&b[4..8], pair);
+    assert_eq!(&b[8..16], hsec);
+    let pu_addr = pu.local_addr().unwrap();
+    assert_eq!(&b[16..20], &pu_addr.ip().to_string().parse::<Ipv4Addr>().unwrap().octets());
+    assert_eq!(u16::from_be_bytes([b[20], b[21]]), pu_addr.port());
+    assert_eq!(&b[22..24], &[0, 0]);
+    let hkey: [u8; 8] = b[24..32].try_into().unwrap();
+    assert_ne!(hkey, [0u8; 8], "no direct key");
+    assert_ne!(&hkey[..], hsec);
+    assert_ne!(&hkey[..], psec);
+
+    // The answer to the player, for the same pair and key.
+    pu.send(&query(psec)).unwrap();
+    pu.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let n = pu.recv(&mut b).unwrap();
+    assert_eq!(n, proto::PEER_MSG_SIZE);
+    assert_eq!(&b[..4], &proto::PEER_ANSWER);
+    assert_eq!(&b[4..8], pair);
+    assert_eq!(&b[8..16], psec);
+    let hu_addr = hu.local_addr().unwrap();
+    assert_eq!(&b[16..20], &[127, 0, 0, 1]);
+    assert_eq!(u16::from_be_bytes([b[20], b[21]]), hu_addr.port());
+    assert_eq!(&b[24..32], &hkey[..]);
+
+    // Queries are not data: the host got neither one.
+    hu.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(hu.recv(&mut b).is_err(), "query relayed after consent");
+
+    // An older, short query (24 bytes) is passed on as data, as an older server would, and answered
+    // by nothing.
+    let short = dgram(pair, psec, &[&proto::PEER_QUERY[..], &[0u8; 4]].concat());
+    pu.send(&short).unwrap();
+    pu.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(pu.recv(&mut b).is_err(), "answer to a short query");
+    hu.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let n = hu.recv(&mut b).unwrap();
+    assert_eq!(&b[..n], &[&proto::PEER_QUERY[..], &[0u8; 4]].concat()[..]);
+}

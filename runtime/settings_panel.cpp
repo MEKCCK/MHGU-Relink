@@ -1,4 +1,5 @@
 #include "settings_panel.h"
+#include "android_files.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "settings_locale.h"
@@ -503,6 +504,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
+        a.ldn_direct != b.ldn_direct ||
         strcmp(a.ryu_servers, b.ryu_servers) || strcmp(a.ryu_password, b.ryu_password) ||
         strcmp(a.room_server, b.room_server) ||
         strcmp(a.room_name, b.room_name) || strcmp(a.room_password, b.room_password) ||
@@ -982,6 +984,7 @@ void reset_section() {
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
+        c.ldn_direct = f.ldn_direct;
         c.crossplay = f.crossplay;
         SDL_strlcpy(c.ryu_servers, f.ryu_servers, sizeof c.ryu_servers);
         c.ryu_host = f.ryu_host;
@@ -1540,6 +1543,8 @@ std::vector<Row> main_rows() {
              ini("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
+        add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
+        r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
         add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
                    [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
         r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn), suyu rooms, or both (a mixed hub).");
@@ -1667,6 +1672,16 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
 #endif
 #ifdef __ANDROID__
+        header(r, "files.header", tr("App files"));
+        {
+            const char *files = android_files_folder(), *problem = android_files_folder_problem();
+            action(r, "files.folder", tr("Files folder"), []() { ui_request_import(3); });
+            r.back().value = *files ? files : *problem ? tr("App folder (chosen folder not usable)") : tr("App folder (default)");
+            r.back().help = std::string(tr("Keeps the app's files (settings, save, mods, cheats, screenshots, log.txt) in a folder you choose, so you can open them with this device's file managers: the app's own folder, in Android/data, can't be opened by them. The app copies its files there (it asks before replacing older files already there) and closes; start it again. The game files are used where they are. Android asks for \"All files access\".")) +
+                            (*problem ? std::string("\n\n") + problem : std::string());
+            action(r, "files.folder.reset", tr("Use the app's folder"), []() { ui_request_import(4); }, *files != 0 || *problem != 0);
+            r.back().help = tr("Keeps the app's files in its own folder again: they are copied back (it asks before replacing older files already there) and the app closes. The files in the chosen folder are left where they are.");
+        }
         action(r, "game.folder", tr("Game folder"), []() { ui_request_game_folder(); });
         r.back().help = tr("Where the game's exefs and romfs are read from. A new folder is used the next time the game starts.");
         action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });

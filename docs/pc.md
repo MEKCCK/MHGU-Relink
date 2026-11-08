@@ -10,6 +10,7 @@ Monster Hunter Generations Ultimate（Switch 1.4.0）的静态重编译 PC 版�
 - 支持常见手柄，实验性键鼠
 - 局域网、互联网 hub；Ryujinx / suyu 模拟器 Crossplay（含混合 hub）
 - 模组（romfs / exefs 补丁 / Forge 插件）与金手指
+- 单人游玩时缩短与加载无关的过渡等待（任务出发、离镇、换区），联机时保持原版节奏；`MHGU_NO_FASTLOAD=1` 还原游戏原始计时
 - 自动更新（正式发行版）
 
 ## 需要什么

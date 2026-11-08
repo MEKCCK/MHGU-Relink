@@ -33,6 +33,11 @@ typedef void (*MhguDeliverAux)(const uint8_t *data, uint32_t len);
 /* The callbacks the link delivers through (set once, before hosting or joining). */
 void mhgu_ldn_set_delivery(MhguDeliverPacket packet, MhguDeliverAux aux);
 
+/* [Multiplayer] Direct: in an internet hub, ask the server for the other ends' addresses and send game
+ * packets straight to them when the routers let them (hole punching), else through the relay. Set before
+ * hosting or joining; 0 keeps every packet on the relay. */
+void mhgu_ldn_set_direct(int on);
+
 /* Host: starts the embedded hub on `port` (0: any) and links to it as the first player.
  * `info` is the NetworkInfo blob the game's `nn::ldn` layer handed us; `name` is the player's.
  * The hub's port is returned in `*port_out` (0 on failure). */

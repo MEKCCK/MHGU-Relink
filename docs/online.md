@@ -56,6 +56,15 @@ cd build && ./mhgurecomp <游戏目录>
 - `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并；
 - `-v`：记录 hub、加入与因协议被拒的请求（不记录 IP）。
 
+### Direct（P2P 直连）
+
+`[Multiplayer] Direct`（默认 On，设置菜单“Direct connections”）开启时，互联网 hub 的两端会各自通过中继向
+服务器查询对端公网 UDP 地址（`MHGQ`）。**只有两端都开启**时服务器才回 `MHGP`（含对端的 IP:端口和本对的直连
+密钥），因此 Direct = Off 的一方不会暴露地址。随后双方互发打洞包与直连 hello，路由器允许时游戏包直接 P2P，
+否则继续走 `MHGR` 中继；直连 3.5 s 没有双向存活证明就回退中继并重新查询。协议与旧版兼容：旧客户端从不查询，
+旧服务器会把查询当普通数据转发并被对端忽略。调试：`MHGU_LDN_RTT=1`（路径 RTT/收发包统计）、
+`MHGU_LDN_BLOCK_DIRECT=s[-t]`（模拟对称 NAT）。
+
 
 ### Matchmaking Key（房间）
 

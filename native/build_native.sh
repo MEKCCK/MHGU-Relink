@@ -43,7 +43,8 @@ case $ABI in
   *) echo "build_native.sh: unsupported ABI $ABI"; exit 1 ;;
 esac
 HTAG=windows-x86_64; [ "$(uname -s)" = Linux ] && HTAG=linux-x86_64
-RUST_CC="$NDK/toolchains/llvm/prebuilt/$HTAG/bin/clang.exe"
+EXE=.exe; [ "$(uname -s)" = Linux ] && EXE=
+RUST_CC="$NDK/toolchains/llvm/prebuilt/$HTAG/bin/clang$EXE"
 [ -x "$RUST_CC" ] || { echo "build_native.sh: no NDK clang at $RUST_CC"; exit 1; }
 case $RT in
   aarch64-*) CARGO_LINKER=CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER; CCVAR=CC_aarch64_linux_android; ARVAR=AR_aarch64_linux_android; CFLAGSVAR=CFLAGS_aarch64_linux_android; RUSTFLAGSVAR=CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS ;;

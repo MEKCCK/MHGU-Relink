@@ -27,7 +27,7 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch_cam, live_touch_opacity, live_lock_on = {1},
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
                      live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
-                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_bonus;
+                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_ldn_direct, live_bonus;
 static SDL_AtomicInt live_kerning, live_bold;
 // [HDR]
 static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
@@ -137,6 +137,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || strcmp(c->room_password, saved.room_password)) memcpy(live_crossplay.room_password, c->room_password, sizeof live_crossplay.room_password);
     SDL_UnlockSpinlock(&live_ldn_lock);
     if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
+    if (all || c->ldn_direct != saved.ldn_direct) SDL_SetAtomicInt(&live_ldn_direct, c->ldn_direct);
     if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
 }
@@ -163,6 +164,7 @@ void config_runtime_init(const Config *effective) {
     }
 }
 float config_live_fps(void) { return get_float(&live_fps); }
+void config_set_live_fps(float f) { set_float(&live_fps, f < 30 ? 30 : f > 240 ? 240 : f); }  // (debug: the control file's "fps")
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
@@ -200,6 +202,7 @@ float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
 int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
 int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
+int config_live_ldn_direct(void) { return SDL_GetAtomicInt(&live_ldn_direct); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);

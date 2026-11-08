@@ -1180,6 +1180,7 @@ static bool host_start(void) {
     char name[0x21] = {0};
     memcpy(name, node_at(L.info, 0) + NODE_NAME, 0x20);
     uint16_t bound = 0;
+    mhgu_ldn_set_direct(config_live_ldn_direct());
     if (!mhgu_ldn_host((uint16_t)port, &bound, name, L.info, NETINFO_SIZE)) {
         LOG("[ldn] mhgu-link could not host on port %u (another game instance or another program holds it?)\n",
             (unsigned)port);
@@ -1801,6 +1802,7 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     memcpy(name, user, 0x20);
     // The Rust client does the MHGL handshake and keeps the link; the game reads the network it answered.
     mhgu_ldn_set_lcv(lcv);
+    mhgu_ldn_set_direct(config_live_ldn_direct());
     char key[LOBBY_NAME];
     config_live_ldn(NULL, 0, key, sizeof key);
     if (found[i].hub) {

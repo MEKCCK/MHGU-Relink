@@ -31,8 +31,9 @@ import java.io.OutputStream;
 /**
  * MHGU: la actividad de SDL que arranca el runtime (libmain.so, SDL_main en runtime/main.c).
  *
- * Los archivos del jugador van en la carpeta externa de la app (Android/data/com.mhgu.recomp/files):
- *   data/exefs, data/romfs  la copia propia del juego, si no se eligió otra carpeta (GameFolderActivity)
+ * Los archivos del jugador van en la carpeta externa de la app (Android/data/com.mhgu.recomp/files), o en la que el
+ * jugador elija en Opciones del menú (FilesFolderActivity: ajustes, partida, mods, trucos, capturas y log.txt):
+ *   data/exefs, data/romfs  la copia propia del juego, si no se eligió otra carpeta (GameFolderActivity); no se mueve
  *   mods/, cheats/          como en PC
  *   mhgurecomp.ini, log.txt, cache/, MHGURecomp/save/
  */
@@ -258,6 +259,21 @@ public class GameActivity extends SDLActivity {
     }
     private static android.net.wifi.WifiManager.MulticastLock lanLock;
 
+    /** Ajustes -> Opciones del menú: la carpeta de archivos de la app (runtime/ui.c chooseFilesFolder). */
+    public static void chooseFilesFolder(int language) {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, FilesFolderActivity.class)
+                .putExtra(GameActivity.EXTRA_LANGUAGE, language));
+    }
+
+    /** Ajustes -> Opciones del menú: volver a la carpeta propia de la app (runtime/ui.c useAppFilesFolder). */
+    public static void useAppFilesFolder(int language) {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, FilesFolderActivity.class)
+                .putExtra(FilesFolderActivity.EXTRA_MODE, FilesFolderActivity.MODE_BACK)
+                .putExtra(GameActivity.EXTRA_LANGUAGE, language));
+    }
+
     /** Ajustes -> Carpeta del juego. */
     public static void showGameFolder(int language) {
         SDLActivity activity = mSingleton;
@@ -307,9 +323,10 @@ public class GameActivity extends SDLActivity {
     /** Crea las carpetas del jugador y copia lo que el APK trae para ellas (la lista de pipelines). */
     private void prepareFiles() {
         SaveImportActivity.applyPending(this);  // (before the game: Ajustes -> Importar partida)
-        File home = getExternalFilesDir(null);
-        if (home == null) home = getFilesDir();
-        new File(home, "data").mkdirs();
+        File app = getExternalFilesDir(null);
+        if (app == null) app = getFilesDir();
+        new File(app, "data").mkdirs();  // (los archivos del juego: no se mueven con la carpeta de archivos)
+        File home = FilesFolder.get(this);  // (la elegida por el jugador, o la propia de la app)
         new File(home, "mods").mkdirs();
         new File(home, "cheats").mkdirs();
         copyAsset("pipelines.list", new File(home, "pipelines.list"));

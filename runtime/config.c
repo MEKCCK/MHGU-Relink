@@ -132,6 +132,7 @@
     .ldn_join = "",                                                                                 \
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
+    .ldn_direct = 1,                                                                                \
     .crossplay = XP_OFF,                                                                            \
     .ryu_servers = "",                                                                              \
     .ryu_host = 0,                                                                                  \
@@ -598,6 +599,13 @@ static const char DEFAULT_INI[] =
     "; Default:\n"
     "Key =\n"
     "\n"
+    "; Direct = On: in an internet hub, your game and the host's send their packets straight to each other when both\n"
+    "; routers let them (the hub server helps them find each other), for a lower ping; else they go through the hub\n"
+    "; server. Direct means the other player's game sees your IP address (as on the Switch). Off: always through the hub\n"
+    "; server, nobody sees your address. Both ends need it On for a direct connection.\n"
+    "; Default: On\n"
+    "Direct = On\n"
+    "\n"
     "; Crossplay mode: Off keeps native hubs; Ryujinx uses RyuLdn servers; Room uses suyu-compatible rooms; Mixed bridges both. Use the same MHGU game version (1.4.0). Port-only features such as small-monster synchronization and HP scaling are disabled in crossplay hubs.\n"
     "; Default: Off\n"
     "Crossplay = Off\n"
@@ -1009,6 +1017,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
+    ON_OFF("Multiplayer", "Direct", ldn_direct, false),
     {"Multiplayer", "Crossplay", SET_CHOICE, F(crossplay), 0, 0, 0, "Off,Ryujinx,Room,Mixed", NULL, false, ERR_XP},
     {"Multiplayer", "RyuServers", SET_TEXT, F(ryu_servers), sizeof g_config.ryu_servers, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "RyuHost", ryu_host, false),
@@ -1547,6 +1556,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
+    if ((e = getenv("MHGU_LDN_DIRECT"))) g_config.ldn_direct = atoi(e) != 0;
     static const struct { const char *env, *key; } crossplay_env[] = {
         {"MHGU_CROSSPLAY", "Crossplay"}, {"MHGU_RYU_SERVERS", "RyuServers"},
         {"MHGU_RYU_HOST", "RyuHost"}, {"MHGU_RYU_PORT", "RyuPort"},

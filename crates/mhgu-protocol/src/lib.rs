@@ -33,12 +33,28 @@ pub const UDP_HEADER: usize = 16;
 /// Magic + pair + secret + the game's UDP header + the largest link payload.
 pub const UDP_MAX: usize = UDP_HEADER + 12 + 16 + 8192;
 
+/// Hole punching, step 1: a relayed link asks the hub server for the other end's public UDP address. The
+/// datagram is the usual relay prefix + `MHGQ` + 12 zero bytes (`server.go` `peerQuery`).
+pub const PEER_QUERY: [u8; 4] = *b"MHGQ";
+/// The server's answer, as big as the query: `MHGP`, u32 pair, u64 the asker's secret, IPv4[4], u16 port
+/// (big endian), 2 zero bytes, u64 the pair's direct key (`server.go` `peerAnswer`). No `MHGR` prefix.
+pub const PEER_ANSWER: [u8; 4] = *b"MHGP";
+/// The query and the answer are both this big: the relay prefix + 16; never bigger than the query.
+pub const PEER_MSG_SIZE: usize = UDP_HEADER + 16;
+/// A direct datagram starts like a relayed one (`MHGR` + u32 pair) but carries the pair's direct key
+/// instead of a secret; the `MHGD` datagram follows.
+pub const DIRECT_HEADER: usize = UDP_HEADER;
+
 // NetworkInfo field offsets (mirrors `enum` in ldn.c and the Go constants).
 pub const NI_SSID: usize = 0x26;
 pub const NI_NET_TYPE: usize = 0x4B;
 pub const NI_NODE_MAX: usize = 0x66;
 pub const NI_NODE_COUNT: usize = 0x67;
 pub const NI_ADV_SIZE: usize = 0x26A;
+pub const NI_ADV: usize = 0x26C;
+/// MHGU's advertise data: u16 passcode at 0xC0; 0xFFFF = none, else the 4-digit code in bits 0-14
+/// with bit 15 set when it applies to everyone (clear: everyone but friends).
+pub const ADV_PASSCODE: usize = 0xC0;
 /// The node table in a `NetworkInfo`: `NI_NODES` + `i * NODE_SIZE`.
 pub const NI_NODES: usize = 0x68;
 pub const NODE_SIZE: usize = 0x40;
@@ -90,11 +106,16 @@ pub const F_PACKET: u8 = 5;
 pub const F_DESTROY: u8 = 6;
 pub const F_AUX: u8 = 7;
 
-// `MHGD` datagram kinds and header size (magic + u32 token + u8 kind + pad[3]).
+// `MHGD` datagram kinds and header size (magic + u32 token + u8 kind + u8 flags + pad[2]).
 pub const U_DATA: u8 = 0;
 pub const U_HELLO: u8 = 1;
 pub const U_HELLO_ACK: u8 = 2;
+pub const U_PUNCH: u8 = 3;
 pub const LINK_UDP_HDR: usize = 12;
+/// The header's flags byte (ldn.c's `pad[0]`).
+pub const LINK_UDP_FLAGS: usize = 9;
+/// A direct hello's flags, bit 0: "I receive your direct datagrams".
+pub const UF_DIRECT_OK: u8 = 1;
 
 // `VPacket` (net.h) — fields in host byte order; all supported hosts are little-endian.
 pub const VPACKET_SIZE: usize = 16;
@@ -174,6 +195,17 @@ pub fn info_ok(i: &[u8]) -> bool {
         && count >= 1
         && count <= max
         && (adv as usize) <= ADV_MAX
+}
+
+/// The hub asks a passcode (of everyone, or of everyone but friends: the same here, internet hub players
+/// aren't each other's Switch friends).
+pub fn passcoded(i: &[u8]) -> bool {
+    if i.len() < NI_ADV + ADV_PASSCODE + 2 {
+        return false;
+    }
+    let adv = u16::from_le_bytes([i[NI_ADV_SIZE], i[NI_ADV_SIZE + 1]]) as usize;
+    adv >= ADV_PASSCODE + 2
+        && u16::from_le_bytes([i[NI_ADV + ADV_PASSCODE], i[NI_ADV + ADV_PASSCODE + 1]]) != 0xFFFF
 }
 
 /// A parsed `MHGS` request header.

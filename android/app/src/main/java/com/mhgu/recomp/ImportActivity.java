@@ -62,14 +62,16 @@ public class ImportActivity extends Activity {
     private Dialog browser;
 
     private File home() {
-        File f = getExternalFilesDir(null);
-        return f != null ? f : getFilesDir();
+        return FilesFolder.get(this);  // (la carpeta de archivos elegida, o la propia de la app)
+    }
+    private File appFolder() {
+        return FilesFolder.app(this);  // (game_folder.txt: el puntero, siempre en la carpeta propia)
     }
     private String sub() { return kind == CHEATS ? "cheats" : kind == MOD ? "mods" : "dlc"; }
 
     /** The game's folder (GameFolderActivity's choice), or null. */
     private File gameFolder() {
-        try (FileInputStream in = new FileInputStream(new File(home(), "game_folder.txt"))) {
+        try (FileInputStream in = new FileInputStream(new File(appFolder(), "game_folder.txt"))) {
             byte[] b = new byte[4096];
             int n = in.read(b);
             String path = n > 0 ? new String(b, 0, n, "UTF-8").trim() : "";

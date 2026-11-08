@@ -132,8 +132,7 @@ public class LogShareActivity extends Activity {
         File report = LogProvider.report(this);
         try (OutputStream out = new FileOutputStream(report)) {
             out.write(device().getBytes(StandardCharsets.UTF_8));
-            File home = getExternalFilesDir(null);
-            if (home == null) home = getFilesDir();
+            File home = FilesFolder.get(this);  // (la carpeta de archivos: allí escribe el runtime log.txt)
             append(out, new File(home, "log.txt"), zh ? "本次运行" : "this session");
             append(out, new File(home, "log_prev.txt"), zh ? "上次运行" : "the session before");
         } catch (IOException e) {

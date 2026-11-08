@@ -44,6 +44,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../android_files.h"
 #include "../platform.h"
 
 #ifndef MAP_FIXED_NOREPLACE
@@ -587,6 +588,53 @@ bool plat_exe_path(char *buf, size_t size) {
     return snprintf(buf, size, "%s/mhgurecomp", home) < (int)size;
 }
 
+// ------------------------------------------------------------------ the app's files folder
+// The app's own folder (Android/data/<package>/files): always there, and where files-folder.txt says which folder the
+// app's files are in when the player chose one (android/app: FilesFolder.java reads it too). MHGU_HOME is set by
+// runtime/main.c before this (android_env), from SDL's external storage path.
+static const char *app_folder(void) {
+    static char dir[1024];
+    if (!dir[0]) {
+        const char *home = getenv("MHGU_HOME");
+        snprintf(dir, sizeof dir, "%s", home && *home ? home : ".");
+    }
+    return dir;
+}
+
+static char chosen_note[1200];  // (a chosen files folder that can't be used now: why, for the log and the settings)
+static char home_dir[1024];     // (android_home's answer, once worked out)
+
+// The files folder: the one chosen (files-folder.txt) while the app can write to it ("All files access"), else the
+// app's own.
+const char *android_home(void) {
+    if (home_dir[0]) return home_dir;
+    snprintf(home_dir, sizeof home_dir, "%s", app_folder());
+    chosen_note[0] = 0;
+    char ptr[1100], line[1024] = "";
+    snprintf(ptr, sizeof ptr, "%s/files-folder.txt", app_folder());
+    FILE *f = fopen(ptr, "r");
+    if (f) {
+        if (!fgets(line, sizeof line, f)) line[0] = 0;
+        fclose(f);
+        line[strcspn(line, "\r\n")] = 0;
+    }
+    if (line[0] == '/') {  // (not made here if it's missing: moved or deleted, an empty one would pass for it)
+        struct stat st;
+        int err = 0;
+        if (access(line, W_OK | X_OK) != 0) err = errno;
+        else if (stat(line, &st) != 0) err = errno;
+        else if (!S_ISDIR(st.st_mode)) err = ENOTDIR;
+        if (!err) snprintf(home_dir, sizeof home_dir, "%s", line);
+        else snprintf(chosen_note, sizeof chosen_note, "The app's files folder, %s, can't be used now (%s): \"All files access\" "
+                      "turned off, the folder moved or deleted, or its drive or SD card gone?", line, strerror(err));
+    }
+    return home_dir;
+}
+
+// For the settings' Android tab: the files folder chosen ("" the app's own), and why it isn't used if it isn't
+const char *android_files_folder(void) { return strcmp(android_home(), app_folder()) ? android_home() : ""; }
+const char *android_files_folder_problem(void) { return chosen_note; }
+
 // Started on its own: run in the executable's folder (MHGU_HOME: in that folder instead); with nobody watching stderr (a launcher, a .desktop entry, `&`)
 // the log goes to log.txt and plat_fatal_notice then points the player at it.
 static bool g_own_log;
@@ -615,10 +663,27 @@ static void *log_tee(void *arg) {
 
 void plat_standalone(void) {
     char exe[PATH_MAX];
-    const char *home = getenv("MHGU_HOME");
-    if (home && *home) {
+    const char *app = app_folder();  // (worked out before MHGU_HOME follows the files folder below)
+    const char *own = getenv("MHGU_HOME");
+    const char *home = own && *own ? android_home() : NULL;  // (files-folder.txt: the player's choice, or the app's own)
+    if (home) {
         mkdir(home, 0755);
         if (chdir(home) != 0) { /* the folder we are in will do */ }
+        // The files folder from now on: plat_exe_path (and the settings beside it), the log, and the save
+        setenv("MHGU_HOME", home, 1);
+        setenv("XDG_DATA_HOME", home, 1);
+        // The game files stay where they are. A chosen files folder without data/ of its own uses the app's own (unless
+        // a game folder of the player's is set already: runtime/main.c read game_folder.txt before this).
+        if (!getenv("MHGU_DATA_DIR") && strcmp(home, app) != 0) {
+            char mine[1200], theirs[1200];
+            snprintf(mine, sizeof mine, "%s/data/exefs/main", app);
+            snprintf(theirs, sizeof theirs, "%s/data/exefs/main", home);
+            if (access(mine, R_OK) == 0 && access(theirs, R_OK) != 0) {
+                char data[1100];
+                snprintf(data, sizeof data, "%s/data", app);
+                setenv("MHGU_DATA_DIR", data, 1);
+            }
+        }
     } else if (plat_exe_path(exe, sizeof exe)) {
         char *s = strrchr(exe, '/');
         if (s) { *s = 0; if (chdir(exe) != 0) { /* the folder we are in will do */ } }
@@ -735,8 +800,9 @@ static bool crash_screen(void) {
 void plat_fatal_notice(void) {
     int config_language(void);
     if (!g_own_log) return;
-    const char *msg = settings_text(config_language(), "The game stopped because of an error. The details are in log.txt, "
-                                                       "in Android/data/com.mhgu.recomp/files.");
+    char msg[1400];
+    snprintf(msg, sizeof msg, settings_text(config_language(), "The game stopped because of an error. The details are in "
+             "log.txt, in %s."), android_home());
     if (crash_screen()) {
         fprintf(stderr, "\n*** %s\n", msg);
         usleep(300000);  // (the log's last lines on their way to the file: stderr is a pipe, log_tee)
