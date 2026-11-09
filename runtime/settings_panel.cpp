@@ -13,6 +13,7 @@
 #include "modorder.h"
 #include "net/net.h"
 #include "touch.h"
+#include "textinput.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -466,6 +467,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_sensitivity);
     SAME(touch_controls);
     SAME(touch_hud);
+    SAME(touch_auto_r);
+    SAME(touch_floating);
     SAME(touch_camera);
     SAME(touch_opacity);
     SAME(aspect_ratio);
@@ -968,6 +971,8 @@ void reset_section() {
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.touch_controls = f.touch_controls;
         c.touch_hud = f.touch_hud;
+        c.touch_auto_r = f.touch_auto_r;
+        c.touch_floating = f.touch_floating;
         c.touch_camera = f.touch_camera;
         c.touch_opacity = f.touch_opacity;
         c.touch_vibration = f.touch_vibration;
@@ -1501,6 +1506,10 @@ std::vector<Row> main_rows() {
         add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
                    [](int v) { c.touch_controls = v; }, ini("Controls"));
         add_bool(r, "touch.hud", "Move the HUD for touch", &c.touch_hud, ini("MoveHUD"));
+        add_bool(r, "touch.auto_r", "Full stick automatically holds R", &c.touch_auto_r, ini("AutoR"));
+        r.back().help = tr("Push the movement stick past its rim to hold R while sheathed. Off keeps movement and manual R unchanged.");
+        add_bool(r, "touch.floating", "Floating left stick", &c.touch_floating, ini("FloatingStick"));
+        r.back().help = tr("On: the left stick is hidden until your finger lands, then appears there. Off: it stays at the saved layout position.");
         add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
         r.back().help = tr("The target icon, or a controller's right stick click, keeps the camera on the monster as in the newer games, and bows and bowguns fire at it. Off: the icon turns the camera to it once, as in the original game.");
         action(r, "touch.buttons", tr("Buttons on the screen"), []() { push(View::TouchButtons, "tb.0"); });
@@ -3018,6 +3027,8 @@ void touch_panel(bool *open, const Config &before) {
             dl->AddRectFilled(ImVec2(tx, ty), ImVec2(tx + ts.x, ty + ts.y), fade(k.glow, .3f));
         dl->AddText(ImVec2(tx, ty), k.ink, text.c_str());
         dl->PopClipRect();
+        if (touch_button("###text.field", field, true, &held))
+            textinput_menu_reopen();
         float y = field.Max.y + pad;
         y += error_text(y, left, end - left);
         list_rect = ImRect(left, y, end, bottom);
@@ -3082,6 +3093,7 @@ void touch_panel(bool *open, const Config &before) {
 }
 // What the other threads read of the menu, as its frame ends
 void report(bool *open) {
+    textinput_menu_keyboard(*open && s.view == View::Keyboard);
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
     is_capturing = *open && s.view == View::KeyCapture;
@@ -3157,6 +3169,7 @@ void settings_panel_before_frame(bool open) {
 }
 void settings_panel(bool *open) {
     if (!*open) {
+        textinput_menu_keyboard(false);
         s.editing = false;
         is_dirty = false;
         is_confirming = false;

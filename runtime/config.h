@@ -138,6 +138,8 @@ typedef struct {
     int fill_screen;          // [Display] FillScreen: movies and menu backdrops cover a wider screen (nvn/vulkan/exec.c)
     int touch_controls;       // [Touch] Controls: TOUCH_*, the controls on the screen (runtime/touch.cpp)
     int touch_hud;            // [Touch] MoveHUD: the HUD moves out of the thumbs' way while they show (nvn/vulkan/exec.c)
+    int touch_auto_r;         // [Touch] AutoR: the movement stick past its rim holds R while sheathed
+    int touch_floating;       // [Touch] FloatingStick: start the left stick at the finger's landing point
     float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)
     float touch_opacity;      // [Touch] Opacity: of the controls, 0.2 .. 1
     int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (25..100)
@@ -293,8 +295,11 @@ int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_touch_controls(void);  // [Touch] (runtime/touch.cpp)
 int config_live_touch_hud(void);
+int config_live_touch_auto_r(void);
+int config_live_touch_floating(void);
 int config_live_lock_on(void);
 int config_live_touch_show(int button);        // TB_*
+void config_toggle_touch_dpad(void);           // shared by the hunt and menu layouts
 int config_live_touch_profile(void);
 void config_set_touch_profile(int profile);
 uint32_t config_live_touch_combo(int profile, int index);   // per-layout buttons (config_combo_mask)

@@ -45,6 +45,8 @@ int main(int argc, char **argv) {
     assert(fabsf(c.fov - 1.1f) < 0.001f);
     assert(g_config.width == 900 && fabsf(g_config.fov - 1.6f) < 0.001f);
     assert(c.hp.quests == 2 && c.language == 0 && c.button_icons == 0);
+    assert(c.touch_auto_r == 1 && config_live_touch_auto_r() == 1);
+    assert(c.touch_floating == 0 && config_live_touch_floating() == 0);
     assert(!config_restart_required(&c)); // Raw Auto/Desktop survives environment resolution.
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
     Config volume_only=c; volume_only.volume=35;
@@ -54,10 +56,14 @@ int main(int argc, char **argv) {
     float camera_before=camera_fovy(0.5f,g_render_aspect);
     c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
     c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;
+    c.touch_auto_r = 0;
+    c.touch_floating = 1;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
     assert(config_live_fps()==120 && fabsf(config_live_fov()-1.2f)<0.001f);
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
+    assert(!config_live_touch_auto_r());
+    assert(config_live_touch_floating());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
     assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
     float aspect_was=g_render_aspect; uint32_t size_was[2]={g_render_size[0],g_render_size[1]};
@@ -81,6 +87,8 @@ int main(int argc, char **argv) {
     assert(!strcmp(settings_text(1, "Language"), "Idioma"));
     assert(!strcmp(settings_text(0, "Language"), "Language"));
     assert(!strcmp(settings_text(2, "Language"), "语言"));
+    assert(!strcmp(settings_text(2, "Full stick automatically holds R"), "拉满摇杆自动按 R"));
+    assert(!strcmp(settings_text(2, "D-pad visibility"), "十字键显示／隐藏"));
     assert(!strcmp(settings_text(1, "Duplicate quest ID."), "ID de misión repetido."));
     char *text = read_file(path);
     assert(strstr(text, "; Keep this comment\r\n"));
@@ -95,6 +103,8 @@ int main(int argc, char **argv) {
     assert(strstr(text, "FPS = 120") && strstr(text, "FrameRate = 120"));
     assert(strstr(text, "Volume = 25") && strstr(text, "ConfirmExit = Off"));
     assert(strstr(text, "Language = Spanish") && strstr(text, "ButtonIcons = PlayStation"));
+    assert(strstr(text, "AutoR = Off"));
+    assert(strstr(text, "FloatingStick = On"));
     // Invalid edits must leave both the file and the live audio setting intact.
     Config bad=c;bad.menu_confirm=3;assert(!config_save(&bad,error,sizeof error));
     bad=c;bad.menu_scale=49;assert(!config_save(&bad,error,sizeof error));
@@ -103,6 +113,10 @@ int main(int argc, char **argv) {
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.language = 3;
     assert(!config_save(&bad, error, sizeof error));
+    bad = c; bad.touch_auto_r = 2;
+    assert(!config_save(&bad, error, sizeof error) && !config_live_touch_auto_r());
+    bad = c; bad.touch_floating = 2;
+    assert(!config_save(&bad, error, sizeof error) && config_live_touch_floating());
     bad = c; bad.fov = NAN;
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.ldn_port = 0; assert(!config_save(&bad, error, sizeof error));
@@ -123,6 +137,8 @@ int main(int argc, char **argv) {
     g_config = initial; config_load();
     Config loaded = config_editable();
     assert(loaded.language == 1 && config_language() == 1 && loaded.button_icons == 2);
+    assert(!loaded.touch_auto_r && !config_live_touch_auto_r());
+    assert(loaded.touch_floating && config_live_touch_floating());
     assert(loaded.menu_scale == 170 && loaded.menu_confirm == MENU_CONFIRM_SOUTH);
     assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
     assert(loaded.fps == 120 && loaded.volume == 25 && loaded.hp.quests == 1);
@@ -133,6 +149,8 @@ int main(int argc, char **argv) {
     assert(config_live_fps()==120 && config_live_msaa()==4 && config_live_face_buttons()==FACE_LABEL);
     assert(config_restart_key("RenderResolution") && !config_restart_key("FOV"));
     assert(!config_restart_key("MSAA") && !config_restart_key("VSync") && !config_restart_key("FaceButtons"));
+    assert(!config_restart_key("AutoR"));
+    assert(!config_restart_key("FloatingStick"));
     assert(config_restart_key("framerate") == config_restart_key("FPS") && !config_restart_key("NoSuchKey"));
     // The menu's help: the default ini's comments, wrapped lines joined, the default last (none when empty)
     char help[2048];
@@ -141,6 +159,7 @@ int main(int argc, char **argv) {
     assert(config_help("Server", help, sizeof help) && strstr(help, " and Search Hubs shows") && !strstr(help, "Default"));
     assert(config_help("Key", help, sizeof help) && !strncmp(help, "Matchmaking key:", 16));
     assert(config_help("DrawDistance", help, sizeof help) && strstr(help, "twice as far, 0.5 half") && strstr(help, "\nBetween 0"));
+    assert(config_help("AutoR", help, sizeof help) && strstr(help, "manual R unchanged") && strstr(help, "Default: On"));
     assert(!config_help("NoSuchKey", help, sizeof help));
     // A second save must not append duplicate sections or change resolved Auto settings.
     assert(config_save(&loaded, error, sizeof error));
@@ -170,6 +189,8 @@ int main(int argc, char **argv) {
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);
+    assert(config_defaults().touch_auto_r==1);
+    assert(config_defaults().touch_floating==0);
     fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.fsr_upscaler=FSR_UP_4;  // (FSR 4 is a setting again: runtime/nvn/vulkan/fsr4.c)
@@ -237,6 +258,52 @@ int main(int argc, char **argv) {
     g_config = initial; config_load();
     assert(config_editable().binds[BIND_B][0] == SDL_SCANCODE_F && !config_editable().binds[BIND_B][1]);
     assert(config_editable().binds[BIND_RSTICK][1] == SDL_SCANCODE_RALT);
+    Config touch = config_editable();
+    touch.touch_auto_r = 1;
+    touch.touch_floating = 0;
+    assert(config_save(&touch, error, sizeof error) && config_live_touch_auto_r());
+    int dpad = config_live_touch_show(TB_DPAD);
+    config_toggle_touch_dpad();
+    assert(config_live_touch_show(TB_DPAD) == !dpad && config_editable().touch_show[TB_DPAD] == !dpad);
+    touch = config_editable();
+    assert(config_save(&touch, error, sizeof error) && config_live_touch_show(TB_DPAD) == !dpad);
+    g_config = initial; config_load();
+    assert(config_editable().touch_auto_r && config_live_touch_auto_r());
+    assert(!config_editable().touch_floating && !config_live_touch_floating());
+    assert(config_editable().touch_show[TB_DPAD] == !dpad && config_live_touch_show(TB_DPAD) == !dpad);
+    config_toggle_touch_dpad();
+    assert(config_live_touch_show(TB_DPAD) == dpad && config_editable().touch_show[TB_DPAD] == dpad);
+    // Existing HDR and network settings must survive saves containing the new touch options.
+    Config preserved = config_editable();
+    preserved.hdr = 1; preserved.hdr_format = HDR_FORMAT_HDR10; preserved.hdr_gamma = HDR_GAMMA_24;
+    preserved.hdr_peak = 1200; preserved.hdr_game = 210; preserved.hdr_ui = 180;
+    preserved.hdr_tonemap = HDR_TONEMAP_RENODRT; preserved.hdr_scene = 1;
+    preserved.ldn_direct = 0; preserved.crossplay = XP_MIXED;
+    strcpy(preserved.ryu_servers, "127.0.0.1:30457,localhost:30458");
+    preserved.ryu_host = 1; preserved.ryu_port = 30457; strcpy(preserved.ryu_password, "ryu-test");
+    strcpy(preserved.room_server, "localhost:24873");
+    preserved.room_host = 1; preserved.room_port = 24873;
+    strcpy(preserved.room_name, "roundtrip-room"); strcpy(preserved.room_password, "room-test");
+    assert(config_save(&preserved, error, sizeof error));
+    assert(config_live_hdr() && config_live_hdr_format() == HDR_FORMAT_HDR10 && config_live_hdr_gamma() == HDR_GAMMA_24);
+    assert(config_live_hdr_peak() == 1200 && config_live_hdr_game() == 210 && config_live_hdr_ui() == 180);
+    assert(!config_live_ldn_direct());
+    Config network = {0}; config_live_crossplay(&network);
+    assert(network.crossplay == XP_MIXED && network.ryu_host && network.ryu_port == 30457);
+    assert(!strcmp(network.ryu_servers, preserved.ryu_servers) && !strcmp(network.ryu_password, "ryu-test"));
+    assert(network.room_host && network.room_port == 24873 && !strcmp(network.room_server, "localhost:24873"));
+    assert(!strcmp(network.room_name, "roundtrip-room") && !strcmp(network.room_password, "room-test"));
+    g_config = initial; config_load();
+    Config roundtrip = config_editable();
+    assert(roundtrip.hdr && roundtrip.hdr_format == HDR_FORMAT_HDR10 && roundtrip.hdr_gamma == HDR_GAMMA_24);
+    assert(roundtrip.hdr_peak == 1200 && roundtrip.hdr_game == 210 && roundtrip.hdr_ui == 180);
+    assert(roundtrip.hdr_tonemap == HDR_TONEMAP_RENODRT && roundtrip.hdr_scene);
+    assert(!roundtrip.ldn_direct && !config_live_ldn_direct() && roundtrip.crossplay == XP_MIXED);
+    assert(roundtrip.ryu_host && roundtrip.ryu_port == 30457 && !strcmp(roundtrip.ryu_servers, preserved.ryu_servers));
+    assert(!strcmp(roundtrip.ryu_password, "ryu-test") && roundtrip.room_host && roundtrip.room_port == 24873);
+    assert(!strcmp(roundtrip.room_server, "localhost:24873") && !strcmp(roundtrip.room_name, "roundtrip-room"));
+    assert(!strcmp(roundtrip.room_password, "room-test"));
+    assert(roundtrip.touch_auto_r && !roundtrip.touch_floating && roundtrip.touch_show[TB_DPAD] == dpad);
     remove(path);
     puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish/Chinese, icons, hot settings, keybinds and restart classification.");
     return 0;
