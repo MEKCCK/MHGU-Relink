@@ -17,12 +17,13 @@
 #endif
 
 static Config saved, startup;
+static SDL_AtomicInt live_touch_floating;
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, menu_chord = {1}, show_battery;
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
-                     live_touch, live_touch_profile, live_touch_hud, live_touch_show[TB_COUNT],
+                     live_touch, live_touch_profile, live_touch_hud, live_touch_auto_r = {1}, live_touch_show[TB_COUNT],
                      live_touch_combo[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS], live_touch_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS],
                      live_touch_cam, live_touch_opacity, live_lock_on = {1},
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
@@ -89,6 +90,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->touch_controls != saved.touch_controls) SDL_SetAtomicInt(&live_touch, c->touch_controls);
     if (all || c->touch_hud != saved.touch_hud) SDL_SetAtomicInt(&live_touch_hud, c->touch_hud);
+    if (all || c->touch_auto_r != saved.touch_auto_r) SDL_SetAtomicInt(&live_touch_auto_r, c->touch_auto_r);
+    if (all || c->touch_floating != saved.touch_floating) SDL_SetAtomicInt(&live_touch_floating, c->touch_floating);
     for (int i = 0; i < TB_COUNT; i++) SDL_SetAtomicInt(&live_touch_show[i], c->touch_show[i]);
     for (int profile = 0; profile < TOUCH_LAYOUT_PROFILES; profile++)
         for (int i = 0; i < TOUCH_COMBOS; i++) {
@@ -229,8 +232,15 @@ void config_set_touch_profile(int profile) {
     if (profile >= 0 && profile < TOUCH_LAYOUT_PROFILES) SDL_SetAtomicInt(&live_touch_profile, profile);
 }
 int config_live_touch_hud(void) { return SDL_GetAtomicInt(&live_touch_hud); }
+int config_live_touch_auto_r(void) { return SDL_GetAtomicInt(&live_touch_auto_r); }
+int config_live_touch_floating(void) { return SDL_GetAtomicInt(&live_touch_floating); }
 int config_live_lock_on(void) { return SDL_GetAtomicInt(&live_lock_on); }
 int config_live_touch_show(int button) { return SDL_GetAtomicInt(&live_touch_show[button]); }
+void config_toggle_touch_dpad(void) {
+    int before;
+    do { before = SDL_GetAtomicInt(&live_touch_show[TB_DPAD]); }
+    while (!SDL_CompareAndSwapAtomicInt(&live_touch_show[TB_DPAD], before, !before));
+}
 uint32_t config_live_touch_combo(int profile, int index) {
     if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES || index < 0 || index >= TOUCH_COMBOS) return 0;
     return (uint32_t)SDL_GetAtomicInt(&live_touch_combo[profile][index]);
@@ -298,7 +308,11 @@ void config_live_crossplay(Config *out) {
     SDL_UnlockSpinlock(&live_ldn_lock);
 }
 int config_language(void) { return SDL_GetAtomicInt(&language); }
-Config config_editable(void) { return saved; }
+Config config_editable(void) {
+    Config c = saved;
+    c.touch_show[TB_DPAD] = config_live_touch_show(TB_DPAD);
+    return c;
+}
 float config_audio_gain(void) {
     if (SDL_GetAtomicInt(&mute_in_background) && !SDL_GetAtomicInt(&window_focused)) return 0.0f;
     return SDL_GetAtomicInt(&volume) / 100.0f;
