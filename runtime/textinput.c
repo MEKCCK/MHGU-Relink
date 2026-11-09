@@ -16,7 +16,8 @@
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool g_active;
-static int g_window_on;  // text input on: 0 no, 1 for an entry, 2 for the port's menu (no screen keyboard)
+static int g_window_on;  // 0 off, 1 game entry, 2 menu, 3 menu text editor (screen keyboard)
+static bool g_menu_keyboard, g_menu_reopen;  // settings frame -> host thread
 static char g_text[TEXT_MAX + 4];
 static int g_max_chars, g_event;  // g_event: TI_* waiting for the game's next poll (ENTER / CANCEL win over CHANGED)
 
@@ -134,14 +135,23 @@ bool textinput_event(const SDL_Event *e) {
     return false;
 }
 
+void textinput_menu_keyboard(bool on) { __atomic_store_n(&g_menu_keyboard, on, __ATOMIC_RELAXED); }
+void textinput_menu_reopen(void) { __atomic_store_n(&g_menu_reopen, true, __ATOMIC_RELAXED); }
+
 void textinput_update(void) {
-    int want = textinput_active() ? 1 : overlay_menu_open() ? 2 : 0;  // (Forge's menu takes typed text too)
+    int want = textinput_active() ? 1 : overlay_menu_open() ?
+        (__atomic_load_n(&g_menu_keyboard, __ATOMIC_RELAXED) ? 3 : 2) : 0;
+    bool reopen = __atomic_exchange_n(&g_menu_reopen, false, __ATOMIC_RELAXED);
 #ifdef __ANDROID__
     // (Back hid the screen keyboard and SDL turned text input off by itself: on again for a physical keyboard, the
     // screen keyboard still hidden; a tap brings it back, textinput_tap)
-    if (want == 1 && g_window_on == 1) {
+    if ((want == 1 || want == 3) && g_window_on == want) {
         SDL_Window *w = ui_window();
-        if (w && !SDL_TextInputActive(w) && !SDL_ScreenKeyboardShown(w)) {
+        if (w && want == 3 && reopen && !SDL_ScreenKeyboardShown(w)) {
+            SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "1");
+            SDL_StopTextInput(w);
+            SDL_StartTextInput(w);
+        } else if (w && !SDL_TextInputActive(w) && !SDL_ScreenKeyboardShown(w)) {
             SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
             SDL_StartTextInput(w);
             SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "1");
@@ -153,8 +163,7 @@ void textinput_update(void) {
     if (!w) return;
     if (g_window_on) SDL_StopTextInput(w);
 #ifdef __ANDROID__
-    // (there text input shows the screen keyboard: for the game's entries; the port's menu has its own keyboard view,
-    // a physical keyboard still types into it)
+    // Only a text editor opens the phone's input method; the rest of the menu still accepts physical typing.
     if (want) SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, want == 2 ? "0" : "1");
 #endif
     if (want) SDL_StartTextInput(w);

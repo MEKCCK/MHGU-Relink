@@ -117,6 +117,8 @@
     /* [Touch] */                                                                                   \
     .touch_controls = TOUCH_AUTO,                                                                   \
     .touch_hud = 1,                                                                                 \
+    .touch_auto_r = 1,                                                                              \
+    .touch_floating = 0,                                                                            \
     .touch_camera = 1.0f,                                                                           \
     .touch_opacity = 0.8f,                                                                          \
     .touch_vibration = 1,                                                                           \
@@ -465,6 +467,15 @@ static const char DEFAULT_INI[] =
     "; middle, the Hunter Arts and the target camera to the top right\n"
     "; Default: On\n"
     "MoveHUD = On\n"
+    "\n"
+    "; Hold R when the movement stick is pushed past its rim while the weapon is sheathed\n"
+    "; Turning this off keeps movement and manual R unchanged\n"
+    "; Default: On\n"
+    "AutoR = On\n"
+    "\n"
+    "; Start the left stick where your finger lands; Off keeps the layout's fixed position\n"
+    "; Default: Off\n"
+    "FloatingStick = Off\n"
     "\n"
     "; Which of the game's buttons are on the screen in a hunt. A hunt needs none of those off by default\n"
     "ShowAttacks = On\n"
@@ -962,6 +973,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "LockOn", lock_on, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
     ON_OFF("Touch", "MoveHUD", touch_hud, false),
+    ON_OFF("Touch", "AutoR", touch_auto_r, false),
+    ON_OFF("Touch", "FloatingStick", touch_floating, false),
     ON_OFF("Touch", "ShowAttacks", touch_show[TB_ATTACKS], false),
     ON_OFF("Touch", "ShowDodge", touch_show[TB_DODGE], false),
     ON_OFF("Touch", "ShowGuard", touch_show[TB_GUARD], false),

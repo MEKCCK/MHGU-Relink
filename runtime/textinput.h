@@ -3,6 +3,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 union SDL_Event;
 
 enum { TI_NONE, TI_CHANGED, TI_ENTER, TI_CANCEL };
@@ -20,3 +24,11 @@ void textinput_update(void);                     // each loop pass: the window's
 void textinput_tap(void);                        // (Android) a finger lifted: the screen keyboard back if it was hidden
 void textinput_type(const char *utf8);           // as typed (MHGU_CONTROL "type", paste)
 void textinput_key(int what);                    // TI_ENTER, TI_CANCEL, or TI_NONE for Backspace
+
+// Settings frame thread: publish whether its text editor needs Android's input method.
+void textinput_menu_keyboard(bool on);
+void textinput_menu_reopen(void);  // a tap on the text field after Back hid the keyboard
+
+#ifdef __cplusplus
+}
+#endif
