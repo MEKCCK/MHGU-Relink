@@ -46,7 +46,7 @@ bool jfail(JNIEnv *env) {
     return true;
 }
 
-// com.mhgu.recomp.DeviceStats through the activity's class loader (FindClass from native code sees only the system's
+// com.mhgu.relink.DeviceStats through the activity's class loader (FindClass from native code sees only the system's
 // classes: runtime/ui.c restart_application found the same). A global reference, or NULL.
 jclass device_stats_class(JNIEnv *env) {
     jobject act = (jobject)SDL_GetAndroidActivity();
@@ -58,7 +58,7 @@ jclass device_stats_class(JNIEnv *env) {
     if (!jfail(env) && get_loader) loader = env->CallObjectMethod(act, get_loader);
     if (!jfail(env) && loader) loader_cls = env->FindClass("java/lang/ClassLoader");
     if (!jfail(env) && loader_cls) load = env->GetMethodID(loader_cls, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-    if (!jfail(env) && load) name = env->NewStringUTF("com.mhgu.recomp.DeviceStats");
+    if (!jfail(env) && load) name = env->NewStringUTF("com.mhgu.relink.DeviceStats");
     if (!jfail(env) && name) cls = env->CallObjectMethod(loader, load, name);
     if (!jfail(env) && cls) found = (jclass)env->NewGlobalRef(cls);
     for (jobject o : {cls, (jobject)name, (jobject)loader_cls, loader, (jobject)act_cls, act})
@@ -103,7 +103,7 @@ extern "C" void perfstats_poll(void) {
         jfail(env);
         if (!cls || !m_temp || !m_status || !m_headroom) {
             failed = true;
-            LOG("[perf] com.mhgu.recomp.DeviceStats not usable: no temperature on screen\n");
+            LOG("[perf] com.mhgu.relink.DeviceStats not usable: no temperature on screen\n");
             return;
         }
     }

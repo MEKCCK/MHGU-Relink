@@ -4,7 +4,7 @@ rem build\data\romfs; saves go to %APPDATA%\MHGURecomp\save\). Settings, caches,
 rem (MHGU_HOME), so build\ stays exactly what a game folder needs: copy its contents wherever you play.
 set MHGU_HOME=%~dp0run
 if not exist "%MHGU_HOME%" mkdir "%MHGU_HOME%"
-"%~dp0build\mhgurecomp.exe" 2> "%MHGU_HOME%\log.txt"
+"%~dp0build\mhgu-relink.exe" 2> "%MHGU_HOME%\log.txt"
 if errorlevel 1 (
     echo The game exited with an error. See run\log.txt
     pause

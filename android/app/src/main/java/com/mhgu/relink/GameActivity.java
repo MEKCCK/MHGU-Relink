@@ -1,4 +1,4 @@
-package com.mhgu.recomp;
+package com.mhgu.relink;
 
 import android.app.Dialog;
 import android.content.Intent;
@@ -31,7 +31,7 @@ import java.io.OutputStream;
 /**
  * MHGU: la actividad de SDL que arranca el runtime (libmain.so, SDL_main en runtime/main.c).
  *
- * Los archivos del jugador van en la carpeta externa de la app (Android/data/com.mhgu.recomp/files), o en la que el
+ * Los archivos del jugador van en la carpeta externa de la app (Android/data/com.mhgu.relink/files), o en la que el
  * jugador elija en Opciones del menú (FilesFolderActivity: ajustes, partida, mods, trucos, capturas y log.txt):
  *   data/exefs, data/romfs  la copia propia del juego, si no se eligió otra carpeta (GameFolderActivity); no se mueve
  *   mods/, cheats/          como en PC
@@ -39,7 +39,7 @@ import java.io.OutputStream;
  */
 public class GameActivity extends SDLActivity {
     private static final String TAG = "MHGU";
-    public static final String EXTRA_LANGUAGE = "com.mhgu.recomp.LANGUAGE";
+    public static final String EXTRA_LANGUAGE = "com.mhgu.relink.LANGUAGE";
 
     @Override
     protected String[] getLibraries() {

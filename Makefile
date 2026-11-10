@@ -2,8 +2,8 @@
 # Windows: MSYS2 UCRT64 (clang, lld, make; see README.md). Linux: clang (planned).
 #
 #   make gen GAME=<folder with exefs/ and romfs/>   recompile the game code from your own dump into generated/
-#   make -j4                                        build build/mhgurecomp(.exe) and the game code library, with its
-#                                                   DLLs and the game files (build/data): start build/mhgurecomp.exe
+#   make -j4                                        build build/mhgu-relink(.exe) and the game code library, with its
+#                                                   DLLs and the game files (build/data): start build/mhgu-relink.exe
 # build/ holds only the game folder (what a player copies); the compiler's files go to obj/.
 # The Android app is built from android/ with native/build_native.sh (see docs/android.md).
 UNAME := $(shell uname -s)
@@ -109,26 +109,26 @@ LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include -DMHGU_SDL_BUNDLED) $(if $(
 LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built)
 
 ifeq ($(PLATFORM),windows)
-EXE      := $(B)/mhgurecomp.exe
+EXE      := $(B)/mhgu-relink.exe
 OSFLAGS  := -D_FILE_OFFSET_BITS=64 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_RAND_S -D_POSIX_THREAD_SAFE_FUNCTIONS
 GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
-# the executables' icons (extras/icon/mhgurecomp.rc, mhgurecomp-updater.rc); llvm-windres comes with MSYS2's llvm-tools,
+# the executables' icons (extras/icon/mhgu-relink.rc, mhgu-relink-updater.rc); llvm-windres comes with MSYS2's llvm-tools,
 # which not every setup has: binutils' windres makes them too
 WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windres)
 ICON_RES := $(O)/icon.res.o
 UPD_ICON_RES := $(O)/updater-icon.res.o
 LDFLAGS  := $(LINKER) -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
             -lbcrypt -lntdll -luserenv -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic -lz \
-            -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
+            -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgu-relink.dll.a
 GAMELIB  := $(B)/mhgugame.dll
-GAMELIB_LDFLAGS := -shared $(LINKER) -static-libgcc $(O)/mhgurecomp.dll.a
-UPDATER  := $(B)/mhgurecomp-updater.exe
+GAMELIB_LDFLAGS := -shared $(LINKER) -static-libgcc $(O)/mhgu-relink.dll.a
+UPDATER  := $(B)/mhgu-relink-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
 UPD_LDFLAGS := $(LINKER) -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
 else
-EXE      := $(B)/mhgurecomp
+EXE      := $(B)/mhgu-relink
 OSFLAGS  :=
 GENFLAGS += -fPIC
 RT_SRC   += runtime/platform/linux_glibc.c $(if $(SDL_DEPS),runtime/platform/linux_sdl.c)
@@ -146,7 +146,7 @@ GLIBC_WRAP_FLAGS := $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
 LDFLAGS  += $(GLIBC_WRAP_FLAGS)
 GAMELIB  := $(B)/mhgugame.so
 GAMELIB_LDFLAGS := -shared $(LINKER)
-UPDATER  := $(B)/mhgurecomp-updater
+UPDATER  := $(B)/mhgu-relink-updater
 # (libcurl: opened at run time, updater/http.c; -lm for runtime/platform/linux_glibc.c: SDL_LIBS has it only with
 # the bundled SDL3)
 UPD_LDFLAGS := $(LINKER) $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
@@ -317,10 +317,10 @@ $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
 # (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
-$(ICON_RES): extras/icon/mhgurecomp.rc extras/icon/mhgurecomp.ico
+$(ICON_RES): extras/icon/mhgu-relink.rc extras/icon/mhgu-relink.ico
 	@mkdir -p $(dir $@)
 	$(WINDRES) -I extras/icon -O coff -o $@ $<
-$(UPD_ICON_RES): extras/icon/mhgurecomp-updater.rc extras/icon/mhgurecomp-updater.ico
+$(UPD_ICON_RES): extras/icon/mhgu-relink-updater.rc extras/icon/mhgu-relink-updater.ico
 	@mkdir -p $(dir $@)
 	$(WINDRES) -I extras/icon -O coff -o $@ $<
 
@@ -456,7 +456,7 @@ $(GAMELIB): $(GEN_OBJ) | $(EXE)
 
 PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python) python3)
 
-# The build folder is the game folder: mhgurecomp.exe starts from it on its own (runtime/main.c), with
+# The build folder is the game folder: mhgu-relink.exe starts from it on its own (runtime/main.c), with
 # - bundle (Windows): the MSYS2 DLLs it needs beside it (tools/bundle_dlls.py; not the GPU driver's vulkan-1.dll)
 # - data: the game files from $(GAME) in $(B)/data/exefs and $(B)/data/romfs, once (hard links where the file system
 #   allows them - no second copy on disk, and deleting them leaves $(GAME) alone - else copies).

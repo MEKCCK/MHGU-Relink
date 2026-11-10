@@ -1,4 +1,4 @@
-package com.mhgu.recomp;
+package com.mhgu.relink;
 
 import android.Manifest;
 import android.app.Activity;

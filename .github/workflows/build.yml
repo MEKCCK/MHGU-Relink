@@ -53,10 +53,14 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist
-          (cd build && zip -qr ../dist/mhgurecomp-windows-x86_64.zip \
-            mhgurecomp.exe mhgurecomp-updater.exe *.dll licenses)
-          sha256sum dist/mhgurecomp-windows-x86_64.zip
+          (cd build && zip -qr ../dist/mhgu-relink-windows-x86_64.zip \
+            mhgu-relink.exe mhgu-relink-updater.exe *.dll licenses)
+          sha256sum dist/mhgu-relink-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: mhgurecomp-windows-x86_64
-          path: dist/mhgurecomp-windows-x86_64.zip
+          name: mhgu-relink-windows-x86_64
+          path: dist/mhgu-relink-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mhgu-relink-import-lib
+          path: obj/mhgu-relink.dll.a

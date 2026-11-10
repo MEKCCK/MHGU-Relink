@@ -1,4 +1,4 @@
-package com.mhgu.recomp;
+package com.mhgu.relink;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

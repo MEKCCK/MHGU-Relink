@@ -96,7 +96,7 @@ Rust 测试不需要游戏文件。
 
 - `MHGU_LOG_NET=1`：`ldn`、hub、Crossplay 日志；`=2` 还记录 HLE 调用。
 - `MHGU_LOG_MOVES`、`MHGU_QUICKHUNT`、`MHGU_EMTRACE`、`MHGU_SAMPLE` 等见源码注释。
-- Android：`adb logcat -s MHGU`，或 `Android/data/com.mhgu.recomp/files/log.txt`。
+- Android：`adb logcat -s MHGU`，或 `Android/data/com.mhgu.relink/files/log.txt`。
 - PC：游戏目录/状态目录的 `log.txt`。
 
 ## 发布

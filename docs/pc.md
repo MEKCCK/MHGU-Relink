@@ -23,8 +23,8 @@ Monster Hunter Generations Ultimate（Switch 1.4.0）的静态重编译 PC 版�
 ## 安装（Arch Linux）
 
 ```sh
-sudo pacman -U mhgu-recomp-0.1.6-6-x86_64.pkg.tar.zst
-mhgu-recomp /path/to/MHGU-1.4
+sudo pacman -U mhgu-relink-0.1.6-6-x86_64.pkg.tar.zst
+mhgu-relink /path/to/MHGU-1.4
 ```
 
 启动器会依次查找 `$HOME/game/MHGU-1.4`、`$HOME/game/MHGU` 等常见目录；也可以设 `MHGU_GAME_DIR`。
@@ -47,8 +47,8 @@ mhgu-recomp /path/to/MHGU-1.4
 
 | 平台 | 游戏库 | ID 文件 | 运行时从哪里加载 |
 |---|---|---|---|
-| Linux | `build/mhgugame.so`（x86-64） | `obj/gamelib.id` | `mhgurecomp` 同目录，或游戏目录（启动器自动设置） |
-| Windows | `build/mhgugame.dll`（x86-64） | `obj/gamelib.id`；独立工具写 `mhgugame.id` | `mhgurecomp.exe` 同目录的 `mhgugame.dll` |
+| Linux | `build/mhgugame.so`（x86-64） | `obj/gamelib.id` | `mhgu-relink` 同目录，或游戏目录（启动器自动设置） |
+| Windows | `build/mhgugame.dll`（x86-64） | `obj/gamelib.id`；独立工具写 `mhgugame.id` | `mhgu-relink.exe` 同目录的 `mhgugame.dll` |
 | Android | 游戏目录的 `libmhgugame.so`（arm64-v8a） | 游戏目录的 `libmhgugame.id` | APK 选中的游戏目录 |
 
 注意：Linux 的 `mhgugame.so` 和 Android 的 `libmhgugame.so` 只差一个 `lib` 前缀，但前者是 x86-64，
@@ -68,7 +68,7 @@ make -j12 GAME=/path/to/MHGU-1.4 FFMPEG=system
 # build/mhgugame.so 和 obj/gamelib.id
 ```
 
-把 `build/mhgugame.so` 复制到 `build/mhgurecomp` 旁边再运行；只编译运行时不会自动生成游戏代码。
+把 `build/mhgugame.so` 复制到 `build/mhgu-relink` 旁边再运行；只编译运行时不会自动生成游戏代码。
 
 ### Windows（PC）
 
@@ -81,18 +81,18 @@ make -j12 PLATFORM=windows GAME=E:/path/to/MHGU-1.4
 ```
 
 需要 MSYS2 clang/lld 以及 SDL3、shaderc、FFmpeg、Vulkan 头。`mhgugame.dll` 必须由**同一份源码和同一套
-Windows 编译参数**生成；换一台机器只复制 DLL 而不复制匹配的 `mhgurecomp.exe`，启动时会被 ID 检查拒绝。
+Windows 编译参数**生成；换一台机器只复制 DLL 而不复制匹配的 `mhgu-relink.exe`，启动时会被 ID 检查拒绝。
 Windows 下没有单独的 `.id` 加载逻辑，ID 已经嵌在 DLL 里。
 
 如果只想让玩家自己生成 DLL，用打包的独立工具（见 `tools/build_game_windows.py`）：
 
 ```sh
-py tools/build_game_windows.py --exe windows/mhgurecomp.exe <含 exefs/romfs 的目录>
+py tools/build_game_windows.py --exe windows/mhgu-relink.exe <含 exefs/romfs 的目录>
 # 输出 <目录>/mhgugame.dll 和 <目录>/mhgugame.id
 ```
 
-工具会读取 `mhgurecomp.exe` 内嵌的 `GAMELIB_ID`（没有 `--exe` 时读共享 ID 文件）并写入 DLL；游戏文件不会被
-上传或打包。拿到别人的构建时，用 `--exe` 指向那一份 `mhgurecomp.exe`，不要只按版本号猜 ID。
+工具会读取 `mhgu-relink.exe` 内嵌的 `GAMELIB_ID`（没有 `--exe` 时读共享 ID 文件）并写入 DLL；游戏文件不会被
+上传或打包。拿到别人的构建时，用 `--exe` 指向那一份 `mhgu-relink.exe`，不要只按版本号猜 ID。
 
 ### Android
 
@@ -111,7 +111,7 @@ APK 不自带游戏代码；`libmhgugame.so` / `.id` 必须与当前 APK 的 `ga
 cargo build --release -p mhgu-link-ffi -p mhgu-crossplay
 make gen GAME=/path/to/MHGU-1.4          # 翻译游戏代码到 generated/
 make -j12 GEN=generated GAME=/path/to/MHGU-1.4 FFMPEG=system
-cd build && ./mhgurecomp /path/to/MHGU-1.4
+cd build && ./mhgu-relink /path/to/MHGU-1.4
 ```
 
 常用选项：

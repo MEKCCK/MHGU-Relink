@@ -52,7 +52,7 @@ python3 tools/build_game.py /path/to/MHGU
 4. 选择包含 `exefs/`、`romfs/`、`libmhgugame.so` 和 `libmhgugame.id` 的 `MHGU` 文件夹，点 **Use this folder**。
 5. 校验通过后游戏启动。
 
-游戏只读取该文件夹；存档、设置、日志默认在 `Android/data/com.mhgu.recomp/files`。换游戏文件夹：
+游戏只读取该文件夹；存档、设置、日志默认在 `Android/data/com.mhgu.relink/files`。换游戏文件夹：
 齿轮 → **Menu Options** → **Game folder**。
 
 ## 应用文件文件夹
@@ -79,7 +79,7 @@ python3 tools/build_game.py /path/to/MHGU
 1. 找到存档文件 `system`（Ryujinx：右键游戏 → Open User Save Directory；yuzu：Open Save Data Location）。
 2. 复制到手机（如下载目录）。
 3. 游戏内：齿轮 → **Menu Options** → **Import save**，选择该文件。游戏会重启；旧存档备份在
-   `Android/data/com.mhgu.recomp/files/MHGURecomp/save_backups`（如果选了应用文件文件夹，则在其中的
+   `Android/data/com.mhgu.relink/files/MHGURecomp/save_backups`（如果选了应用文件文件夹，则在其中的
    `MHGURecomp/save_backups`）。
 
 ### 导出
@@ -106,7 +106,7 @@ python3 tools/build_game.py /path/to/MHGU
 蓝牙/USB 手柄通常直接可用，多手柄时按一下想用的那个。三星设备可用 adb 安装以获得 Game Booster：
 
 ```sh
-adb install -r -i com.mhgu.recomp MHGU-0.1.6.apk
+adb install -r -i com.mhgu.relink MHGU-0.1.6.apk
 ```
 
 ## 排错

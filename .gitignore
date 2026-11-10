@@ -60,7 +60,7 @@ packaging/*/*.pkg.tar.zst
 /mhgugame.dll
 /mhgugame.id
 /mhgugame-windows.dll
-/mhgurecomp-windows-*.zip
+/mhgu-relink-windows-*.zip
 /MHGU-Relink-*.7z
 /MHGU-GameCode-Builder.zip
 

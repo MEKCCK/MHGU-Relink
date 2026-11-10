@@ -3,7 +3,7 @@
 #
 #   cmake -DMHGU_SRC=<MHGURecomp> -DDEPS=<deps/out/<abi>> -DGAMELIB_ID=... -DSHADER_ID=... -DMHGU_VERSION=...
 cmake_minimum_required(VERSION 3.22)
-project(mhgurecomp_android C CXX ASM)
+project(mhgu-relink_android C CXX ASM)
 
 set(S ${MHGU_SRC})
 set(CMAKE_C_STANDARD 11)

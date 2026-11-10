@@ -232,7 +232,7 @@ void plat_error_box(const char *msg) { MessageBoxA(NULL, msg, "MHGU Recomp", MB_
 
 void plat_fatal_notice(void) {
     if (g_own_log)
-        plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgurecomp.exe.");
+        plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgu-relink.exe.");
 }
 
 // ---- diagnostics
@@ -262,7 +262,7 @@ void plat_print_backtrace(void) {
         const char *s = rt_host_fn_name(pc, &off);
         if (!s) s = plat_symbol(pc, &off);
         if (s) fprintf(stderr, "  #%-2d %016llx %s+%llx\n", i, (unsigned long long)pc, s, (unsigned long long)off);
-        else fprintf(stderr, "  #%-2d %016llx mhgurecomp+%llx\n", i, (unsigned long long)pc,
+        else fprintf(stderr, "  #%-2d %016llx mhgu-relink+%llx\n", i, (unsigned long long)pc,
                      (unsigned long long)(pc - exe));
     }
 }

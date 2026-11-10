@@ -1,4 +1,4 @@
-// The phone's vibration (Android): its vibrator through com.mhgu.recomp.Haptics (android/app/src/main/java), by JNI
+// The phone's vibration (Android): its vibrator through com.mhgu.relink.Haptics (android/app/src/main/java), by JNI
 // from SDL's main thread.
 //   haptics_tap     the phone's key click when a touch button goes down ([Touch] Vibration)
 //   haptics_rumble  the game's rumble ([Controls] PhoneRumble), with or without a controller: one-shots of RUMBLE_MS
@@ -54,7 +54,7 @@ static jclass find_class(JNIEnv *env) {
     if (!loader || (*env)->ExceptionCheck(env)) return NULL;
     jmethodID load = (*env)->GetMethodID(env, (*env)->GetObjectClass(env, loader), "loadClass",
                                          "(Ljava/lang/String;)Ljava/lang/Class;");
-    jstring name = load ? (*env)->NewStringUTF(env, "com.mhgu.recomp.Haptics") : NULL;
+    jstring name = load ? (*env)->NewStringUTF(env, "com.mhgu.relink.Haptics") : NULL;
     if (!name) return NULL;
     jclass c = (jclass)(*env)->CallObjectMethod(env, loader, load, name);
     return (*env)->ExceptionCheck(env) ? NULL : c;
@@ -79,7 +79,7 @@ static JNIEnv *jni(void) {
     }
     clear_exception(env);
     (*env)->PopLocalFrame(env, NULL);
-    if (!c) LOG("[haptics] com.mhgu.recomp.Haptics not found: the phone does not vibrate\n");
+    if (!c) LOG("[haptics] com.mhgu.relink.Haptics not found: the phone does not vibrate\n");
     else if (!cls) LOG("[haptics] no vibrator\n");
     else LOG("[haptics] vibrator%s\n", caps >= 2 ? ", amplitude control" : " (on / off only)");
     if (!cls) return NULL;

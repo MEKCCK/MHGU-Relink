@@ -61,7 +61,7 @@ body:
     attributes:
       label: Log
       description: |
-        Attach `log.txt` by dragging it into this box. It's next to `mhgurecomp.exe` (on Linux, next to `mhgurecomp`).
+        Attach `log.txt` by dragging it into this box. It's next to `mhgu-relink.exe` (on Linux, next to `mhgu-relink`).
         The game replaces it every time it starts, so copy it right after the problem, before starting the game again.
     validations:
       required: false

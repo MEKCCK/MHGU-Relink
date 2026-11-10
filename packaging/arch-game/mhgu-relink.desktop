@@ -2,6 +2,6 @@
 Type=Application
 Name=MHGU Relink
 Comment=Recompiled runtime (needs your own game folder)
-Exec=mhgu-recomp %f
+Exec=mhgu-relink %f
 Terminal=false
 Categories=Game;

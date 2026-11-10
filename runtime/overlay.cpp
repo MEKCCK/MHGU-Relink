@@ -434,7 +434,7 @@ static void context_init(const char *font_path, float font_size) {
         io.IniFilename = "forge_imgui.ini";  // (window positions; in the game folder, beside mhgurecomp.ini)
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-        io.BackendPlatformName = "mhgurecomp";
+        io.BackendPlatformName = "mhgu-relink";
     }
     ImGuiIO &io = ImGui::GetIO();
     g_font_size = font_size > 0 ? font_size : 12.0f;
@@ -451,9 +451,9 @@ static void context_init(const char *font_path, float font_size) {
     // with the glyph range of our Chinese strings, so switching the language at run time needs no restart.
     static const char *const ui_fonts[] = {
         // on the phone: next to the app's files (drop the .ttf there) or the system's
-        "/data/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
-        "/storage/emulated/0/Android/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
-        "/sdcard/Android/data/com.mhgu.recomp/files/JetBrainsMapleMono-Regular.ttf",
+        "/data/data/com.mhgu.relink/files/JetBrainsMapleMono-Regular.ttf",
+        "/storage/emulated/0/Android/data/com.mhgu.relink/files/JetBrainsMapleMono-Regular.ttf",
+        "/sdcard/Android/data/com.mhgu.relink/files/JetBrainsMapleMono-Regular.ttf",
         "/system/fonts/JetBrainsMapleMono-Regular.ttf",
         // desktop
         "/usr/share/fonts/TTF/JetBrains-Maple-Mono-NF-XX-XX/JetBrainsMapleMono-Regular.ttf",

@@ -4,7 +4,7 @@
 // (`system`), so every character slot sees them. The quests' own files are in the RomFS; the server only said which
 // ones were out, and the item packs and Palicos came from it. That server can't be reached from the port, so the
 // downloads are taken from a save that has them instead: a "donor" `system` file in the bonus folder beside
-// mhgurecomp.exe (bonus\system; with a game folder argument: in the current folder), else in the player's folder
+// mhgu-relink.exe (bonus\system; with a game folder argument: in the current folder), else in the player's folder
 // (%APPDATA%\MHGURecomp\bonus\system); MHGU_BONUS_DIR overrides both.
 //
 // Save file layout (MHGU v1.4.0, 0x4eb8bc bytes): a 0x24-byte header (+0x1c: data size, +0x34/+0x38/+0x3c: the three

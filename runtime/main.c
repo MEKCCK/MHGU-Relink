@@ -29,13 +29,13 @@ const char *g_game_dir = "game";  // folder holding exefs/ and romfs/ (the playe
 
 // where the player puts the game files, for the messages below
 #ifdef __ANDROID__
-#define DATA_FOLDER "Android/data/com.mhgu.recomp/files/data on this device"
+#define DATA_FOLDER "Android/data/com.mhgu.relink/files/data on this device"
 #define DATA_SUB(s) "data/" s
 #elif defined(_WIN32)
-#define DATA_FOLDER "the data folder next to mhgurecomp.exe"
+#define DATA_FOLDER "the data folder next to mhgu-relink.exe"
 #define DATA_SUB(s) "data\\" s
 #else
-#define DATA_FOLDER "the data folder next to mhgurecomp"
+#define DATA_FOLDER "the data folder next to mhgu-relink"
 #define DATA_SUB(s) "data/" s
 #endif
 
@@ -344,7 +344,7 @@ int main(int argc, char **argv) {
             files_rejected();
 #else
             const char *msg = "The game files were not found. Put your own dump's exefs and romfs folders in the data "
-                              "folder next to mhgurecomp.exe (data\\exefs, data\\romfs).";
+                              "folder next to mhgu-relink.exe (data\\exefs, data\\romfs).";
 #endif
             fprintf(stderr, "%s\n", msg);
             plat_error_box(msg);

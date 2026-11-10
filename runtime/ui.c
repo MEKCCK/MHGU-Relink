@@ -207,10 +207,10 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
 }
 #endif
 
-// The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only
-// Linux sets one: extras/icon/mhgurecomp-128.png, built into the program (the path is relative to the repo, where make runs).
+// The window's icon. Windows takes it from the exe (extras/icon/mhgu-relink.rc) and Android from the launcher icon, so only
+// Linux sets one: extras/icon/mhgu-relink-128.png, built into the program (the path is relative to the repo, where make runs).
 #if !defined(_WIN32) && !defined(__ANDROID__)
-__asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
+__asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgu-relink-128.png\"\n"
         ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
 extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
 #include <limits.h>
@@ -221,9 +221,9 @@ extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
 #include "platform.h"
 
 // A Linux executable can't carry an icon for the file manager, so the desktop finds the game through a launcher:
-// $XDG_DATA_HOME/applications/mhgurecomp.desktop (~/.local/share/applications) and the icon beside it in
-// icons/hicolor/128x128/apps/mhgurecomp.png, and a copy as "MHGU Relink.desktop" in the game's folder. Written at each
-// start when missing or out of date (the folder moved), so the app menu starts this copy: mhgurecomp-updater when it is
+// $XDG_DATA_HOME/applications/mhgu-relink.desktop (~/.local/share/applications) and the icon beside it in
+// icons/hicolor/128x128/apps/mhgu-relink.png, and a copy as "MHGU Relink.desktop" in the game's folder. Written at each
+// start when missing or out of date (the folder moved), so the app menu starts this copy: mhgu-relink-updater when it is
 // beside the game (it starts the game, and with Updates = Off only that), else the game. A launcher without the
 // X-MHGURecomp line is the player's own and left alone. The windows' app id is the launcher's name (SDL: the
 // executable's name; the updater sets it), so the taskbar shows the icon too.
@@ -262,10 +262,10 @@ static void install_launcher(void) {
     else return;
     char *slash = strrchr(exe, '/');
     char run[PATH_MAX + 32];
-    snprintf(run, sizeof run, "%.*s/mhgurecomp-updater", (int)(slash - exe), exe);
+    snprintf(run, sizeof run, "%.*s/mhgu-relink-updater", (int)(slash - exe), exe);
     if (access(run, X_OK) != 0) snprintf(run, sizeof run, "%s", exe);
 
-    snprintf(path, sizeof path, "%s/applications/mhgurecomp.desktop", data);
+    snprintf(path, sizeof path, "%s/applications/mhgu-relink.desktop", data);
     FILE *f = fopen(path, "rb");
     if (f) {
         char old[8192];
@@ -276,7 +276,7 @@ static void install_launcher(void) {
     }
     snprintf(dir, sizeof dir, "%s/icons/hicolor/128x128/apps", data);
     mkdirs(dir);
-    snprintf(path, sizeof path, "%s/mhgurecomp.png", dir);
+    snprintf(path, sizeof path, "%s/mhgu-relink.png", dir);
     if (!write_if_changed(path, mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png))) {
         LOG("[ui] no app menu launcher: can't write %s\n", path);
         return;
@@ -287,12 +287,12 @@ static void install_launcher(void) {
     int n = snprintf(entry, sizeof entry,
                      "[Desktop Entry]\nType=Application\nName=MHGU Relink\nComment=Monster Hunter Generations Ultimate, "
                      "recompiled\nExec=\"%s\"\nPath=%.*s\nIcon=%s\nTerminal=false\nCategories=Game;\n"
-                     "StartupWMClass=mhgurecomp\nX-MHGURecomp=true\n",
+                     "StartupWMClass=mhgu-relink\nX-MHGURecomp=true\n",
                      run, (int)(slash - exe), exe, path);
     if (n <= 0 || (size_t)n >= sizeof entry) return;
     snprintf(dir, sizeof dir, "%s/applications", data);
     mkdirs(dir);
-    snprintf(path, sizeof path, "%s/mhgurecomp.desktop", dir);
+    snprintf(path, sizeof path, "%s/mhgu-relink.desktop", dir);
     if (!write_if_changed(path, entry, (size_t)n)) LOG("[ui] no app menu launcher: can't write %s\n", path);
     // The same launcher beside the game, so the folder has something to click with the icon (file managers start an
     // executable .desktop file; a read-only folder just goes without)

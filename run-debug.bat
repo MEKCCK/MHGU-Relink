@@ -6,7 +6,7 @@ set MHGU_SAVE_GLSL=1
 set MHGU_SAMPLER_LOG=1
 set MHGU_HOME=%~dp0run
 if not exist "%MHGU_HOME%" mkdir "%MHGU_HOME%"
-"%~dp0build\mhgurecomp.exe" 2> "%MHGU_HOME%\log_debug.txt"
+"%~dp0build\mhgu-relink.exe" 2> "%MHGU_HOME%\log_debug.txt"
 if errorlevel 1 (
     echo The game exited with an error. See run\log_debug.txt
     pause

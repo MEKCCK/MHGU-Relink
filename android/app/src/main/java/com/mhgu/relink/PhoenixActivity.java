@@ -1,4 +1,4 @@
-package com.mhgu.recomp;
+package com.mhgu.relink;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -17,7 +17,7 @@ import java.io.File;
  * de pipelines de Vulkan: nvn/vulkan/device.c), lo mata si tarda demasiado, lanza la app otra vez y se va.
  */
 public class PhoenixActivity extends Activity {
-    static final String EXTRA_PID = "com.mhgu.recomp.PID";
+    static final String EXTRA_PID = "com.mhgu.relink.PID";
     private static final String TAG = "MHGU";
     // (al menos MIN_WAIT_MS aunque /proc ya no lo muestre; más de MAX_WAIT_MS: se lo mata)
     private static final long MIN_WAIT_MS = 300, MAX_WAIT_MS = 3000, POLL_MS = 50;

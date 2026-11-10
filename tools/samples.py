@@ -6,7 +6,7 @@
 # samples.py <file> wait <t0> <t1> [n] [match] the same for sleeping threads: where they wait (by samples)
 # t0 / t1: seconds from the first record, or Python's time.perf_counter() (both QueryPerformanceCounter: a log
 # timestamped with it lines up). Game functions show as main:<guest address> / sdk:<guest address>, the runtime's by
-# name (nm on mhgurecomp.exe), others as module+offset.
+# name (nm on mhgu-relink.exe), others as module+offset.
 import bisect, os, struct, subprocess, sys
 from collections import defaultdict
 
@@ -20,7 +20,7 @@ for l in open(path + '.map'):
     elif p[0] == 'fn': fns.append((int(p[1], 16), p[2] + ':' + p[3].strip()))
 fns.sort()
 fn_addr = [a for a, _ in fns]
-exe = next(m for m in mods if m[2].lower().endswith('mhgurecomp.exe'))
+exe = next(m for m in mods if m[2].lower().endswith('mhgu-relink.exe'))
 syms = []
 nm = subprocess.run([os.environ.get('NM', 'nm'), '-C', exe[2]], capture_output=True, text=True).stdout
 for l in nm.splitlines():
@@ -40,7 +40,7 @@ def name(a):
             if mn == 'mhgugame.dll':
                 i = bisect.bisect_right(fn_addr, a) - 1
                 r = fns[i][1] if i >= 0 else 'dll?'
-            elif mn == 'mhgurecomp.exe':
+            elif mn == 'mhgu-relink.exe':
                 i = bisect.bisect_right(sym_addr, a - base + img_base) - 1
                 r = syms[i][1] if i >= 0 else 'exe?'
             else:

@@ -31,10 +31,10 @@
 cargo build --release -p mhgu-link-ffi          # → target/release/libmhgu_link_ffi.a
 
 # 2. C 运行时（仓库根目录；GEN 指向你的翻译产物，GAME 指向 exefs/romfs 所在目录）
-make -j12 build/mhgurecomp GEN=<gen 目录> GAME=<dump 目录> FFMPEG=system
+make -j12 build/mhgu-relink GEN=<gen 目录> GAME=<dump 目录> FFMPEG=system
 
 # 3. 运行（游戏目录含 exefs/ 与 romfs/）
-cd build && ./mhgurecomp <游戏目录>
+cd build && ./mhgu-relink <游戏目录>
 ```
 
 依赖：clang/clang++、SDL3、Vulkan、shaderc、FFmpeg（系统库即可，`FFMPEG=system`）。
@@ -135,7 +135,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 ## 说明
 
-早期版本的 Rust 运行时（`mhgu-runtime`/`mhgu-hle`/`mhgu-recomp` 等）已按决定移除；现在保留的 Rust
+早期版本的 Rust 运行时（`mhgu-runtime`/`mhgu-hle`/`mhgu-relink` 等）已按决定移除；现在保留的 Rust
 只有联机模块与 hub 服务器。Android 版在同一个仓库的 `android/` + `native/`（C 运行时 + 同一套 Rust 联机库；见 `docs/android.md`）。
 
 ## Crossplay（Ryujinx / suyu）

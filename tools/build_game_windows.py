@@ -6,16 +6,16 @@ the runtime's tools and compiles the result for the Windows app. Nothing is
 uploaded; only the Python packages lz4/capstone are installed if missing.
 
 It needs a clang that targets x86_64-w64-windows-gnu (MSYS2's clang64 or
-mingw64 toolchain). It also ships the import library for mhgurecomp.exe and
+mingw64 toolchain). It also ships the import library for mhgu-relink.exe and
 returns the DLL next to the game folder's exefs/romfs.
 
     py tools/build_game_windows.py <folder with exefs and romfs>
-    py tools/build_game_windows.py --exe windows/mhgurecomp.exe <folder>
+    py tools/build_game_windows.py --exe windows/mhgu-relink.exe <folder>
     py tools/build_game_windows.py --id 74b0adbd59f007af <folder>
 
 Options:
   --clang PATH   clang.exe to use (default: PATH, then common MSYS2 paths)
-  --exe PATH     mhgurecomp.exe whose GAMELIB_ID the DLL must match
+  --exe PATH     mhgu-relink.exe whose GAMELIB_ID the DLL must match
   --id ID        explicit 16-hex GAMELIB_ID (overrides --exe detection)
   --jobs N       compile jobs (default: CPU count)
   --keep         keep the temporary translation/object folder
@@ -138,7 +138,7 @@ def main():
     ap = argparse.ArgumentParser(description='Build mhgugame.dll from your own exefs.')
     ap.add_argument('game', help='folder containing exefs and romfs')
     ap.add_argument('--clang')
-    ap.add_argument('--exe', help='mhgurecomp.exe to match')
+    ap.add_argument('--exe', help='mhgu-relink.exe to match')
     ap.add_argument('--id', help='explicit GAMELIB_ID (16 hex)')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--keep', action='store_true')
@@ -218,9 +218,9 @@ def main():
                      os.path.join(HERE, 'windows', 'stubs.c'), '-o', stubs])
     if code:
         die('could not compile stubs.c:\n' + out)
-    implib = os.path.join(HERE, 'windows', 'libmhgurecomp.dll.a')
+    implib = os.path.join(HERE, 'windows', 'libmhgu-relink.dll.a')
     if not os.path.isfile(implib):
-        die('missing windows/libmhgurecomp.dll.a in the builder archive')
+        die('missing windows/libmhgu-relink.dll.a in the builder archive')
 
     say('Step 3 of 3: linking mhgugame.dll...')
     outdll = os.path.join(game, 'mhgugame.dll')
@@ -237,7 +237,7 @@ def main():
     size = os.path.getsize(outdll) >> 20
     say(f'\nDone in {(time.time() - t0) / 60:.1f} min: {outdll} ({size} MB).')
     say(f'ID {gid} written to {os.path.join(game, "mhgugame.id")}.')
-    say('Put mhgugame.dll next to mhgurecomp.exe (the app loads it from its own folder).')
+    say('Put mhgugame.dll next to mhgu-relink.exe (the app loads it from its own folder).')
 
 
 if __name__ == '__main__':

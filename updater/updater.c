@@ -27,7 +27,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#define GAME_EXE "mhgurecomp.exe"
+#define GAME_EXE "mhgu-relink.exe"
 #define GAME_LIB "mhgugame.dll"
 #define ASSET_PREFIXES "Windows-"
 #else
@@ -35,7 +35,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#define GAME_EXE "mhgurecomp"
+#define GAME_EXE "mhgu-relink"
 #define GAME_LIB "mhgugame.so"
 #define ASSET_PREFIXES "Linux-,ArchLinux-"  // (ArchLinux-: up to 0.11.4)
 #endif
@@ -320,7 +320,7 @@ static bool install(const Extract *x, char *why, size_t why_size) {
 #ifndef _WIN32
         // (a zip made on Windows has no permissions: the programs and libraries by name)
         const char *base = strrchr(rel, '/') ? strrchr(rel, '/') + 1 : rel;
-        bool program = !strcmp(base, GAME_EXE) || !strcmp(base, "mhgurecomp-updater") || strstr(base, ".so");
+        bool program = !strcmp(base, GAME_EXE) || !strcmp(base, "mhgu-relink-updater") || strstr(base, ".so");
         unsigned m = x->items[i].mode & 0777;
         if (!m || program) m = program ? 0755 : 0644;
         chmod(src, m);
@@ -590,11 +590,11 @@ static int act(int st, int action) {
     return st == ST_FAILED;
 }
 
-// The window's icon: a Palico, the game's is a greatsword. Windows takes it from the exe (extras/icon/mhgurecomp-updater.rc),
-// Linux from extras/icon/mhgurecomp-updater-128.png, built in here (the path is relative to the repo, where make runs).
+// The window's icon: a Palico, the game's is a greatsword. Windows takes it from the exe (extras/icon/mhgu-relink-updater.rc),
+// Linux from extras/icon/mhgu-relink-updater-128.png, built in here (the path is relative to the repo, where make runs).
 #ifndef _WIN32
 __asm__(".pushsection .rodata\n.globl mhgu_updater_icon_png\nmhgu_updater_icon_png:\n"
-        ".incbin \"extras/icon/mhgurecomp-updater-128.png\"\n"
+        ".incbin \"extras/icon/mhgu-relink-updater-128.png\"\n"
         ".globl mhgu_updater_icon_png_end\nmhgu_updater_icon_png_end:\n.popsection");
 extern const unsigned char mhgu_updater_icon_png[], mhgu_updater_icon_png_end[];
 
@@ -614,7 +614,7 @@ static bool run_window(SDL_Thread *th) {
     SDL_Renderer *rd = NULL;
 #ifndef _WIN32
     // (the game's app id, so the window goes with the game's app menu launcher: runtime/ui.c, install_launcher)
-    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgurecomp");
+    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgu-relink");
 #endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) &&
         SDL_CreateWindowAndRenderer("MHGU Recomp updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd)) {

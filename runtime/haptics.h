@@ -1,4 +1,4 @@
-// The phone's vibration (Android: runtime/haptics.c -> com.mhgu.recomp.Haptics by JNI): a click for the touch
+// The phone's vibration (Android: runtime/haptics.c -> com.mhgu.relink.Haptics by JNI): a click for the touch
 // controls' buttons and the game's rumble. Elsewhere these do nothing (a controller rumbles itself: host_input.c).
 #pragma once
 #include <stdint.h>

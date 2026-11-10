@@ -4,10 +4,10 @@
 : "${XDG_DATA_HOME:=$HOME/.local/share}"
 STATE="$XDG_DATA_HOME/MHGURecomp"
 mkdir -p "$STATE"
-if [ -e /usr/lib/mhgu-recomp/pipelines.list ] && [ ! -e "$STATE/pipelines.list" ]; then
-  ln -sf /usr/lib/mhgu-recomp/pipelines.list "$STATE/pipelines.list"
+if [ -e /usr/lib/mhgu-relink/pipelines.list ] && [ ! -e "$STATE/pipelines.list" ]; then
+  ln -sf /usr/lib/mhgu-relink/pipelines.list "$STATE/pipelines.list"
 fi
-[ -e "$STATE/mhgurecomp.ini" ] || cp -f /usr/lib/mhgu-recomp/mhgurecomp.ini "$STATE/mhgurecomp.ini"
+[ -e "$STATE/mhgurecomp.ini" ] || cp -f /usr/lib/mhgu-relink/mhgurecomp.ini "$STATE/mhgurecomp.ini"
 # A folder argument, MHGU_GAME_DIR, or the usual places (a desktop launch passes no argument; without a
 # folder the game looks for data/ next to its own binary and stops with "game files were not found").
 GAME_DIR="${1:-${MHGU_GAME_DIR:-}}"
@@ -17,8 +17,8 @@ if [ -z "$GAME_DIR" ]; then
   done
 fi
 if [ -z "$GAME_DIR" ]; then
-  echo "mhgu-recomp: no game folder given and none of the usual places has exefs/ and romfs/." >&2
-  echo "  Usage: mhgu-recomp /path/to/MHGU-1.4      (or set MHGU_GAME_DIR)" >&2
+  echo "mhgu-relink: no game folder given and none of the usual places has exefs/ and romfs/." >&2
+  echo "  Usage: mhgu-relink /path/to/MHGU-1.4      (or set MHGU_GAME_DIR)" >&2
   echo "  It needs your own dump of the game, with the 1.4.0 update merged into romfs/." >&2
   exit 1
 fi
@@ -28,7 +28,7 @@ if [ -n "$GAME_DIR" ] && [ -z "${MHGU_GAME_LIB:-}" ]; then
     if [ -e "$lib" ]; then export MHGU_GAME_LIB="$lib"; break; fi
   done
   if [ -z "${MHGU_GAME_LIB:-}" ]; then
-    echo "mhgu-recomp: no game library in $GAME_DIR" >&2
+    echo "mhgu-relink: no game library in $GAME_DIR" >&2
     echo "  The translated game code (libmhgugame.so) is built from your own dump and is not" >&2
     echo "  part of this package: run the recompiler for your dump, or put your build there," >&2
     echo "  or set MHGU_GAME_LIB to it." >&2
@@ -36,4 +36,4 @@ if [ -n "$GAME_DIR" ] && [ -z "${MHGU_GAME_LIB:-}" ]; then
   fi
 fi
 cd "$STATE" || exit 1
-exec /usr/lib/mhgu-recomp/mhgurecomp "$@"
+exec /usr/lib/mhgu-relink/mhgu-relink "$@"

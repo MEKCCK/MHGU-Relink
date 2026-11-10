@@ -1,4 +1,4 @@
-// Mods: folders under mods/ (beside mhgurecomp.exe in the standalone build, else in the current folder;
+// Mods: folders under mods/ (beside mhgu-relink.exe in the standalone build, else in the current folder;
 // MHGU_MODS_DIR overrides). Dropping a mod's folder in installs it, removing the folder uninstalls it: everything is
 // layered over the game's own files at start, nothing is changed on disk. A mod folder may hold:
 //   romfs/   loose files layered over the game's RomFS (same paths as in the game's romfs/ folder; a bare nativeNX/

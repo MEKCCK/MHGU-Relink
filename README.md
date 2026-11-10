@@ -48,7 +48,7 @@ make -j12 GEN=<gen> GAME=<dump> FFMPEG=system
 
 # 3) 把游戏库放到程序旁边，然后运行
 cp build/mhgugame.so build/        # Windows：复制 build/mhgugame.dll
-cd build && ./mhgurecomp <游戏目录>
+cd build && ./mhgu-relink <游戏目录>
 ```
 
 生成游戏代码、`.so` / `.dll` / `.id` 的区别与 Windows 单独编译工具见 [docs/pc.md](docs/pc.md#生成游戏代码so--dll--id)。

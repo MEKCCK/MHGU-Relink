@@ -585,7 +585,7 @@ bool plat_wait_process(unsigned long pid) {
 bool plat_exe_path(char *buf, size_t size) {
     const char *home = getenv("MHGU_HOME");
     if (!home || !*home) return false;
-    return snprintf(buf, size, "%s/mhgurecomp", home) < (int)size;
+    return snprintf(buf, size, "%s/mhgu-relink", home) < (int)size;
 }
 
 // ------------------------------------------------------------------ the app's files folder
@@ -831,7 +831,7 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
     Dl_info di;
     if (!dladdr((void *)(uintptr_t)pc, &di) || !di.dli_fname) return NULL;
     if (!exe[0] && !plat_exe_path(exe, sizeof exe)) snprintf(exe, sizeof exe, "-");
-    if (!strcmp(di.dli_fname, exe)) return NULL;  // (the caller prints "mhgurecomp+<off>" for the executable itself)
+    if (!strcmp(di.dli_fname, exe)) return NULL;  // (the caller prints "mhgu-relink+<off>" for the executable itself)
     const char *slash = strrchr(di.dli_fname, '/');
     snprintf(name, sizeof name, "%s", slash ? slash + 1 : di.dli_fname);
     if (offset) *offset = pc - (uint64_t)(uintptr_t)di.dli_fbase;
@@ -860,7 +860,7 @@ void plat_print_backtrace(void) {
         const char *s = rt_host_fn_name(pc, &off);
         if (!s) s = plat_symbol(pc, &off);
         if (s) fprintf(stderr, "  #%-2d %016llx %s+%llx\n", i, (unsigned long long)pc, s, (unsigned long long)off);
-        else fprintf(stderr, "  #%-2d %016llx mhgurecomp+%llx\n", i, (unsigned long long)pc,
+        else fprintf(stderr, "  #%-2d %016llx mhgu-relink+%llx\n", i, (unsigned long long)pc,
                      (unsigned long long)(exe ? pc - exe : 0));
     }
 }

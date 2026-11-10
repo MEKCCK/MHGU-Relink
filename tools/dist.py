@@ -24,10 +24,10 @@ DATA_NOTE = ('Put your own dump of Monster Hunter Generations Ultimate 1.4.0 her
 def files(build, platform):
     """(path in the archive, file on disk, executable) of everything shipped from the build folder."""
     if platform == 'windows':
-        programs = ['mhgurecomp.exe', 'mhgugame.dll', 'mhgurecomp-updater.exe']
+        programs = ['mhgu-relink.exe', 'mhgugame.dll', 'mhgu-relink-updater.exe']
         extra = sorted(n for n in os.listdir(build) if n.lower().endswith('.dll') and n not in programs)
     else:
-        programs = ['mhgurecomp', 'mhgugame.so', 'mhgurecomp-updater']
+        programs = ['mhgu-relink', 'mhgugame.so', 'mhgu-relink-updater']
         extra = []
     out = []
     for n in programs + extra:
@@ -51,7 +51,7 @@ def files(build, platform):
 
 def check_version(build, platform, version):
     """The updater must be this version's: it compares its own with GitHub's latest release."""
-    p = os.path.join(build, 'mhgurecomp-updater' + ('.exe' if platform == 'windows' else ''))
+    p = os.path.join(build, 'mhgu-relink-updater' + ('.exe' if platform == 'windows' else ''))
     with open(p, 'rb') as f:
         if b'MHGURecomp-updater/' + version.encode() + b'\0' not in f.read():
             sys.exit(f'dist: {p} was not built as version {version} (make dist VERSION={version} rebuilds it)')

@@ -113,7 +113,7 @@ def write_licenses(src, out, dlls, extra):
         if os.path.isdir(os.path.join(out, n)):
             shutil.rmtree(os.path.join(out, n))
     lines = ['Licenses of the third-party software in this game folder, besides LICENSE.txt (MHGU Recomp itself),',
-             'THIRD_PARTY_NOTICES.txt (code compiled into mhgurecomp.exe) and FFmpeg.txt.',
+             'THIRD_PARTY_NOTICES.txt (code compiled into mhgu-relink.exe) and FFmpeg.txt.',
              '',
              'From MSYS2 (https://www.msys2.org/): each package\'s license files are in the folder of its name here, and its',
              'exact source (the upstream release and MSYS2\'s build recipe and patches) at the address given.', '']

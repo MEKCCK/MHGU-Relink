@@ -1,4 +1,4 @@
-package com.mhgu.recomp;
+package com.mhgu.relink;
 
 import java.io.File;
 import java.io.FileInputStream;
