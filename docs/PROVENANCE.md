@@ -32,3 +32,12 @@
 - `cargo test --workspace`（协议、link、hub、crossplay、RyuLdn/房间服务器）
 - PC 构建与启动、Android arm64 交叉编译
 - Crossplay：RyuLdn 客户端/服务器、suyu 房间双进程、混合 hub 端到端测试
+
+## 版本与命名
+
+自 **0.2.0** 起，本项目使用自己的版本序列（`VERSION`、Android `versionName`/`versionCode`、
+Arch `pkgver`），不再跟随 MHGURecomp 或 gu-native 的 0.1.x 编号。产品标识同时统一为仓库名：
+
+- Android：`com.mhgu.relink`（旧安装 `com.mhgu.recomp` 不能覆盖升级）；
+- PC：可执行文件/Arch 包/启动器 `mhgu-relink`、更新器 `mhgu-relink-updater`；
+- 兼容保留：数据目录 `MHGURecomp` 与设置文件 `mhgurecomp.ini` 不改名，已有存档和设置继续有效。
