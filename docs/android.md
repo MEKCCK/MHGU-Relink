@@ -106,7 +106,7 @@ python3 tools/build_game.py /path/to/MHGU
 蓝牙/USB 手柄通常直接可用，多手柄时按一下想用的那个。三星设备可用 adb 安装以获得 Game Booster：
 
 ```sh
-adb install -r -i com.mhgu.relink MHGU-0.1.6.apk
+adb install -r -i com.mhgu.relink MHGU-0.2.0.apk
 ```
 
 ## 排错

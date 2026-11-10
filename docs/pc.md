@@ -23,7 +23,7 @@ Monster Hunter Generations Ultimate（Switch 1.4.0）的静态重编译 PC 版�
 ## 安装（Arch Linux）
 
 ```sh
-sudo pacman -U mhgu-relink-0.1.6-6-x86_64.pkg.tar.zst
+sudo pacman -U mhgu-relink-0.2.0-1-x86_64.pkg.tar.zst
 mhgu-relink /path/to/MHGU-1.4
 ```
 
