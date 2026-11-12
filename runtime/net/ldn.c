@@ -1051,8 +1051,32 @@ static int lobby_list(const char *srv, const char *key, int connect_ms, LobbyLis
     return HUB_ONLINE;
 }
 
-static void *lobby_list_thread(void *arg) {  // (while the LAN is searched; r->server set)
-    LobbyList *r = arg;
+// Scan's hub-server request: a thread of its own, because the game's network thread waits for Scan and a DNS lookup
+// can block far longer than a player will wait. Scan waits SCAN_LIST_WAIT_MS at most; a late answer is dropped. While
+// one request is still out, later scans search the LAN only, so a stuck lookup leaves one thread behind, not one per scan.
+#define SCAN_LIST_WAIT_MS 4000
+typedef struct {
+    LobbyList list;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool done;
+    int refs;  // Scan and the thread: the last one to let go frees it
+} ScanJob;
+static int scan_jobs_out;
+
+static void scan_job_unref(ScanJob *j) {
+    pthread_mutex_lock(&j->mu);
+    bool last = --j->refs == 0;
+    pthread_mutex_unlock(&j->mu);
+    if (!last) return;
+    pthread_cond_destroy(&j->cv);
+    pthread_mutex_destroy(&j->mu);
+    free(j);
+}
+
+static void *lobby_list_thread(void *arg) {
+    ScanJob *j = arg;
+    LobbyList *r = &j->list;
     static int last = HUB_ONLINE;
     r->state = lobby_list(r->server, NULL, 1500, r);
     if (r->state != last && r->state != HUB_ONLINE)
@@ -1060,7 +1084,57 @@ static void *lobby_list_thread(void *arg) {  // (while the LAN is searched; r->s
             r->state == HUB_NOT_FOUND ? "not found" : r->state == HUB_UNREACHABLE ? "unreachable" : "no list");
     last = r->state;
     hub_report(NOTE_SEARCH, r->server, r->state, r->ms, r->state == HUB_ONLINE ? r->n : -1);
+    pthread_mutex_lock(&j->mu);
+    j->done = true;
+    pthread_cond_signal(&j->cv);
+    pthread_mutex_unlock(&j->mu);
+    __atomic_sub_fetch(&scan_jobs_out, 1, __ATOMIC_ACQ_REL);
+    scan_job_unref(j);
     return NULL;
+}
+
+// Starts this scan's request, or NULL when there is no server or an earlier request is still out.
+static ScanJob *scan_job_start(void) {
+    static bool said;
+    if (__atomic_load_n(&scan_jobs_out, __ATOMIC_ACQUIRE) > 0) {
+        if (!said) LOG("[ldn] the hub server's list from an earlier search has not come: only LAN / Join hubs are searched\n");
+        said = true;
+        return NULL;
+    }
+    said = false;
+    ScanJob *j = calloc(1, sizeof *j);
+    if (!j) return NULL;
+    if (!lobby_server(j->list.server)) { free(j); return NULL; }
+    pthread_mutex_init(&j->mu, NULL);
+    pthread_cond_init(&j->cv, NULL);
+    j->refs = 2;
+    __atomic_add_fetch(&scan_jobs_out, 1, __ATOMIC_ACQ_REL);
+    pthread_t th;
+    if (pthread_create(&th, NULL, lobby_list_thread, j)) {
+        __atomic_sub_fetch(&scan_jobs_out, 1, __ATOMIC_ACQ_REL);
+        j->refs = 1;
+        scan_job_unref(j);
+        return NULL;
+    }
+    pthread_detach(th);
+    return j;
+}
+
+// true: the list arrived within SCAN_LIST_WAIT_MS (j->list holds it).
+static bool scan_job_wait(ScanJob *j) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += SCAN_LIST_WAIT_MS / 1000;
+    ts.tv_nsec += (long)(SCAN_LIST_WAIT_MS % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) ts.tv_sec++, ts.tv_nsec -= 1000000000L;
+    pthread_mutex_lock(&j->mu);
+    while (!j->done && !pthread_cond_timedwait(&j->cv, &j->mu, &ts)) {}
+    bool done = j->done;
+    pthread_mutex_unlock(&j->mu);
+    if (!done)
+        LOG("[ldn] hub server %s: no list after %d s: only LAN / Join hubs are given to the game this time\n",
+            j->list.server, SCAN_LIST_WAIT_MS / 1000);
+    return done;
 }
 
 // The settings menu's check (net.h): the server and key being edited, in a thread of its own.
@@ -1679,28 +1753,28 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     if (L.state != ST_STATION && L.state != ST_ACCESS_POINT) { RET(R_INVALID_STATE); return; }
     crossplay_prepare();
     static uint8_t infos[MAX_FOUND][NETINFO_SIZE];
-    static LobbyList online;
     struct sockaddr_in addrs[MAX_FOUND];
     uint64_t hubs[MAX_FOUND] = {0};
-    pthread_t lt;
     hnet_init();  // (before the thread's first socket call)
-    bool asked = lobby_server(online.server) && !pthread_create(&lt, NULL, lobby_list_thread, &online);
+    ScanJob *job = scan_job_start();
     int n = discover(infos, addrs, 16), k = 0;
     int ryu_of[MAX_FOUND] = {0};
     bool room_of[MAX_FOUND] = {0};
-    if (asked) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
-        pthread_join(lt, NULL);
+    const LobbyList *online = NULL;
+    if (job && scan_job_wait(job)) online = &job->list;
+    if (online) {  // the server's hubs after the LAN's (a hub found both ways is joined directly)
         uint64_t own = mhgu_ldn_own_hub();
-        for (int j = 0; j < online.n && n < MAX_FOUND; j++) {
-            if (own && online.ids[j] == own) continue;  // our own hub: joining ourselves can't work
+        for (int j = 0; j < online->n && n < MAX_FOUND; j++) {
+            if (own && online->ids[j] == own) continue;  // our own hub: joining ourselves can't work
             bool dup = false;
-            for (int i = 0; i < n; i++) dup |= !memcmp(infos[i] + NI_BSSID, online.infos[j] + NI_BSSID, 6);
+            for (int i = 0; i < n; i++) dup |= !memcmp(infos[i] + NI_BSSID, online->infos[j] + NI_BSSID, 6);
             if (dup) continue;
-            memcpy(infos[n], online.infos[j], NETINFO_SIZE);
-            addrs[n] = online.addr;
-            hubs[n++] = online.ids[j];
+            memcpy(infos[n], online->infos[j], NETINFO_SIZE);
+            addrs[n] = online->addr;
+            hubs[n++] = online->ids[j];
         }
     }
+    if (job) scan_job_unref(job);
     if (ryu_configured() && mhgu_ryu_server_count() > 0 && n < MAX_FOUND) {
         static uint8_t rinfo[MAX_FOUND][NETINFO_SIZE];
         int rsrv[MAX_FOUND];
@@ -1742,7 +1816,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
     }
     if (pcount) ST32(pcount, k);
     static int last = -1, last_online = -1, last_max = -1;
-    int listed = asked && online.state == HUB_ONLINE ? online.n : 0;
+    int listed = online && online->state == HUB_ONLINE ? online->n : 0;
     if (nfound != last || listed != last_online || max != last_max) {
         LOG("[ldn] scan: %d network(s) found (%d listed on the hub server), %d given to the game (room for %d)\n",
             nfound, listed, k, max);
