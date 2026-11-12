@@ -36,6 +36,11 @@ MOV_LR_PC = 0xE1A0E00F
 PATCHES = {
     ('main', 0xdbcd34): (0xE3A00D1E, '{ extern uint32_t g_render_size[2]; c->r[0] = g_render_size[0]; }'),
     ('main', 0xdbcd38): (0xE3007438, '{ extern uint32_t g_render_size[2]; c->r[7] = g_render_size[1]; }'),
+    # The GPU memory pool render targets and textures share (game heap 6): `movt #0x3520` = 848 MB, sized for the
+    # Switch's resolutions; larger with a larger render size (runtime/config.c g_gpu_pool_size). 0x351e40: the heap
+    # table's entry, 0x351fa4: the pool's creation.
+    ('main', 0x351e40): (0xE3432520, '{ extern uint32_t g_gpu_pool_size; c->r[2] = g_gpu_pool_size; }'),
+    ('main', 0x351fa4): (0xE3433520, '{ extern uint32_t g_gpu_pool_size; c->r[3] = g_gpu_pool_size; }'),
     # 2D UI canvas size: mov r7, #1280 (0xdbcd48) / mov r7, #720 (0xdbcd54)
     ('main', 0xdbcd48): (0xE3A07C05, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[0]; }'),
     ('main', 0xdbcd54): (0xE3A07E2D, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[1]; }'),
@@ -66,6 +71,12 @@ PATCHES = {
     # and its reload `mov r0, #20` count in the frame step instead of updates
     ('main', 0x834d20): (0xE2477001, '{ extern uint32_t buffcycle_tick(void); c->r[7] -= buffcycle_tick(); }'),
     ('main', 0x834ef4): (0xE3A00014, '{ extern uint32_t buffcycle_reload(void); c->r[0] = buffcycle_reload(); }'),
+    # Free slots of a piece (f_2db66c: its slot count minus each decoration's size, `subne r8, r1, r0` at 0x2db770, a u8
+    # at the end): a decoration bigger than the space left (another hunter's armor modded for more slots, or a slot mod
+    # removed) gives -1 = 255, and the slot icons (f_750570, 0x750680) then draw 255 "empty" ones from a 3-entry array
+    # on the stack, crashing when the equipment is viewed. Clamped at 0 on the next instruction, `ldrh r1, [r4, #0xa]`,
+    # which every subtraction reaches
+    ('main', 0x2db778): (0xE1D410BA, '{ if ((int32_t)c->r[8] < 0) c->r[8] = 0; c->r[1] = LD16(c->r[4] + 0xau); }'),
     # UI text glyph snap (runtime/hle/textlayout.c): after a text's lines are aligned, each glyph's x is snapped to the
     # 1280x720 canvas, `vadd.f32 s0, s0, s24` (+0.5), `vrintm.f32 s0, s0` (floor), then +0.5 again; with a canvas unit
     # 1.5 px (1080p) the letters land half a pixel apart unevenly. x keeps its exact place instead (+0.5, as on average)
@@ -75,6 +86,10 @@ PATCHES = {
     # Two-button input window (runtime/hle/combowin.c): the countdown a press waits for a second button takes 1.0 off
     # per update (`vmov.f32 s2, #-1.0`); it takes the frame step instead
     ('main', 0x47ca84): (0xEEBF1A00, '{ extern float combowin_tick(void); c->v.f[2] = -combowin_tick(); }'),
+    # ... and the new-press word the code from here to 0x47cc58 decides on: real presses, a third button waited for
+    # (`mov r6, r4` at the start, `ldrh r1, [sb]` where all its paths have met)
+    ('main', 0x47ca38): (0xE1A06004, '{ extern void combowin_begin(uint32_t); c->r[6] = c->r[4]; combowin_begin(c->r[4]); }'),
+    ('main', 0x47cc58): (0xE1D910B0, '{ extern void combowin_end(uint32_t); combowin_end(c->r[4]); c->r[1] = LD16(c->r[9]); }'),
     # Town NPC fade (uLobbyNpc, 0x8c2d9c): `vldr s8, [r2]` loads the squared distance within which the NPC fades in
     # (table at 0x8c2ef0: 2500^2, or 1800^2 with flag 0x40 of +0x186a); config.c npc_fade_dist2 scales it ([Graphics]
     # DrawDistance)

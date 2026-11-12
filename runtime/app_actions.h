@@ -17,6 +17,7 @@ const char *gpu_driver_name(void);  // (platform/android_gpu.c: "" the system's)
 void ui_request_share_log(void);
 #endif
 void ui_request_action(bool restart); // Called after the in-game confirmation, handled on the host thread.
+void ui_request_exit_menu(void);      // Title screen's Main Menu, B: the window-close question (host thread).
 bool ui_action_failed(void);          // Take and clear a failed restart notification.
 #ifndef __ANDROID__
 // PC: 1 the game files, 2 a save in, 3 the save out, 4 the save's folder, 5 a mod from a zip, 6 a mod from a

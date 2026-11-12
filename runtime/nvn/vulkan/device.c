@@ -7,7 +7,7 @@
 //   MHGU_SHOT_AT=<frame>[,<frame>...]   save the window image at those presented frames as shots/frame_N.png
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
-//   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
+//   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (no Vulkan 1.2 structures), to test it on a PC
 //   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -1133,6 +1133,8 @@ void backend_present(NvnTexture *t) {
         else if (g_hudtrace_request) { g_hudtrace_request = 0; g_hudtrace_active = 2; }
     }
     { void vk_gpuprof_frame(void); vk_gpuprof_frame(); }  // (debug) MHGU_CONTROL "gpuprof"
+    { void menulearn_frame(void); menulearn_frame(); }  // (the frame's HUD pieces: runtime/menulearn.c)
+    { void prompts_frame(void); prompts_frame(); }  // (keyboard and mouse button glyphs: runtime/hle/prompts.c)
     vk_unlock();
 #ifdef __ANDROID__
     perf_hint_frame();  // (this frame's work to the performance hint session, outside the lock: runtime/platform/android_perf.c)

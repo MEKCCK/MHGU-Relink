@@ -109,6 +109,7 @@
     .face_buttons = FACE_POSITION,                                                                  \
     .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
     .background_input = 1,                                                                          \
+    .kbm_prompts = 1,                                                                               \
     .combo_window = COMBO_LENIENT,                                                                  \
     .chat_key = "/",                                                                                \
     .menu_chord = 1,                                                                                \
@@ -127,6 +128,10 @@
     .touch_combo_pad = {0, 0, 0, 0, 0, 0},                                                          \
     /* [Mouse] */                                                                                   \
     .mouse_sensitivity = 1.0f,                                                                      \
+    .mouse_sensitivity_y = 1.0f,                                                                    \
+    .mouse_invert_y = 0,                                                                            \
+    .mouse_smoothing = 0.0f,                                                                        \
+    .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -146,6 +151,7 @@
     .room_name = "MHGU",                                                                            \
     .room_password = "",                                                                                  \
     .sync_small_monsters = 1,                                                                       \
+    .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 2},                                                                        \
@@ -173,6 +179,9 @@
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
+uint32_t g_render_host[2] = {1920, 1080};
+float g_rscale[2] = {1.0f, 1.0f};
+uint32_t g_gpu_pool_size = 0x35200000u;  // the game's GPU pool for render targets and textures (gen.py PATCHES)
 float g_render_aspect = 16.0f / 9.0f;
 float g_fov_scale = 1.0f;
 uint32_t g_ui_size[2] = {1280, 720};
@@ -426,6 +435,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "BackgroundInput = On\n"
     "\n"
+    "; While you play with the keyboard and mouse, the game's button prompts, such as (A) or (ZL), show the key or mouse\n"
+    "; button that does it instead. A controller always gets the game's own prompts\n"
+    "; Default: On\n"
+    "KeyboardPrompts = On\n"
+    "\n"
     "; How long the game waits for a second button after the first, for inputs like X+A. Lenient: as long as at 30 fps\n"
     "; (on the Switch) at any frame rate. Strict: a fixed number of frames, so the higher the frame rate, the closer\n"
     "; together both buttons have to be pressed\n"
@@ -456,6 +470,23 @@ static const char DEFAULT_INI[] =
     "; Mouse sensitivity\n"
     "; Default: 1.0\n"
     "MouseSensitivity = 1.0\n"
+    "\n"
+    "; Vertical sensitivity: times the mouse sensitivity for looking up and down\n"
+    "; Default: 1.0\n"
+    "MouseSensitivityY = 1.0\n"
+    "\n"
+    "; Invert the mouse's up and down (on top of the game's own invert option)\n"
+    "; Default: Off\n"
+    "MouseInvertY = Off\n"
+    "\n"
+    "; Mouse smoothing for the camera in a hunt: 0 turns exactly with the mouse, higher values let the turn trail it\n"
+    "; Default: 0.0\n"
+    "MouseSmoothing = 0.0\n"
+    "\n"
+    "; Click: a click in the window captures the mouse (Esc lets it go). Hunt: it is also captured by itself while the\n"
+    "; hunt camera is yours, and free in menus and cutscenes\n"
+    "; Default: Click\n"
+    "MouseCapture = Click\n"
     "\n"
     "[Touch]\n"
     "; The controls on the screen (a phone): Auto shows them while no controller is connected\n"
@@ -660,6 +691,18 @@ static const char DEFAULT_INI[] =
     "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
     "SyncSmallMonsters = On\n"
+    "\n"
+    "; Experimental. Your hits on large monsters (melee, bows and bowguns) count as you saw them land, even if your hunter\n"
+    "; missed on the screen of the player running the monster. Works when that player has it on too, and has no effect\n"
+    "; otherwise. Emulator players in a crossplay hub need the Lag Compensation Forge plugin for it.\n"
+    "; Default: On\n"
+    "LagCompensation = On\n"
+    "\n"
+    "; Clearing an Urgent quest posted by someone else also counts for you, if you have unlocked it yourself. The\n"
+    "; original game only counts it for the hunter who posted it. This only changes your own save, the others in the\n"
+    "; quest have their own setting.\n"
+    "; Default: On\n"
+    "ShareUrgentCredit = On\n"
     "\n"
     "[Monster HP]\n"
     "; Playercount-specific HP multipliers for monsters in Hub quests.\n"
@@ -892,6 +935,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_XP "Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
+#define ERR_MOUSE "Mouse sensitivity must be 0.1-10 and smoothing 0-0.9."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
 #define ERR_SCALE "Invalid interface scale."
 #define ERR_ICONS "Invalid button icon layout."
@@ -965,10 +1009,15 @@ const ConfigSetting g_settings[] = {
      NULL, false, ERR_MISC},
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
     ON_OFF("Controls", "BackgroundInput", background_input, false),
+    ON_OFF("Controls", "KeyboardPrompts", kbm_prompts, false),
     ON_OFF("Controls", "MenuChord", menu_chord, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
+    {"Mouse", "MouseSensitivityY", SET_FLOAT, F(mouse_sensitivity_y), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_MOUSE},
+    ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
+    {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
+    {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     ON_OFF("Controls", "LockOn", lock_on, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
@@ -1042,6 +1091,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "RoomName", SET_TEXT, F(room_name), sizeof g_config.room_name, 0, 0, NULL, NULL, false, ERR_XP},
     {"Multiplayer", "RoomPassword", SET_TEXT, F(room_password), sizeof g_config.room_password, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
+    ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
@@ -1156,6 +1206,29 @@ static bool parse_bool(const char *v, int *out) {
     return true;
 }
 
+bool config_parse_keys(const char *value, int keys[BIND_KEYS]) {  // names separated by ',' ("Return, Keypad Enter"), or None
+    char v[256];
+    snprintf(v, sizeof v, "%s", value);
+    squash(v);
+    int got[BIND_KEYS] = {0}, n = 0;
+    if (strcmp(v, "none") && *v)
+        for (const char *p = value;; p++) {
+            size_t len = strcspn(p, ",");
+            char one[64];
+            snprintf(one, sizeof one, "%.*s", (int)len, p);
+            char *a = one, *b = one + strlen(one);
+            while (isspace((unsigned char)*a)) a++;
+            while (b > a && isspace((unsigned char)b[-1])) *--b = 0;
+            int code = config_key_code(a);
+            if (!code || !bind_key_valid(code) || n == BIND_KEYS) return false;
+            if (!n || got[0] != code) got[n++] = code;
+            p += len;
+            if (!*p) break;
+        }
+    memcpy(keys, got, sizeof got);
+    return true;
+}
+
 bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     char v[256], *end;
     snprintf(v, sizeof v, "%s", value);
@@ -1194,27 +1267,17 @@ bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     case SET_TEXT:  // (as written: host names keep their dashes)
         snprintf((char *)c + s->field, s->field2, "%s", value);
         return true;
-    case SET_KEYS: {  // names separated by ',' ("Return, Keypad Enter"), or None
-        int keys[BIND_KEYS] = {0}, n = 0;
-        if (strcmp(v, "none") && *v)
-            for (const char *p = value;; p++) {
-                size_t len = strcspn(p, ",");
-                char one[64];
-                snprintf(one, sizeof one, "%.*s", (int)len, p);
-                char *a = one, *b = one + strlen(one);
-                while (isspace((unsigned char)*a)) a++;
-                while (b > a && isspace((unsigned char)b[-1])) *--b = 0;
-                int code = config_key_code(a);
-                if (!code || !bind_key_valid(code) || n == BIND_KEYS) return false;
-                if (!n || keys[0] != code) keys[n++] = code;
-                p += len;
-                if (!*p) break;
-            }
-        memcpy(field_int(c, s->field), keys, sizeof keys);
-        return true;
-    }
+    case SET_KEYS: return config_parse_keys(value, field_int(c, s->field));
     }
     return false;
+}
+
+void config_format_keys(const int keys[BIND_KEYS], char *buf, size_t size) {
+    size_t n = 0;
+    if (size) *buf = 0;
+    for (int i = 0; i < BIND_KEYS; i++)
+        if (keys[i] && n < size) n += (size_t)snprintf(buf + n, size - n, "%s%s", n ? ", " : "", config_key_name(keys[i]));
+    if (!n) snprintf(buf, size, "None");
 }
 
 void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t size) {
@@ -1240,15 +1303,7 @@ void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t si
         else snprintf(buf, size, "%g", (double)fv);
         break;
     case SET_TEXT: snprintf(buf, size, "%s", (const char *)c + s->field); break;
-    case SET_KEYS: {
-        const int *k = field_int(c, s->field);
-        size_t n = 0;
-        if (size) *buf = 0;
-        for (int i = 0; i < BIND_KEYS; i++)
-            if (k[i] && n < size) n += (size_t)snprintf(buf + n, size - n, "%s%s", n ? ", " : "", config_key_name(k[i]));
-        if (!n) snprintf(buf, size, "None");
-        break;
-    }
+    case SET_KEYS: config_format_keys(field_int(c, s->field), buf, size); break;
     }
 }
 
@@ -1504,9 +1559,12 @@ void config_load(void) {
     } else {
         char buf[512], seen[512] = "|";
         int line = 0;
+        bool own = false;  // in a section another module reads itself ([Actions*], runtime/actions.c)
         while (fgets(buf, sizeof buf, f)) {
             line++;
             char *s = trim(buf);
+            if (*s == '[') own = !strncasecmp(s + 1, "Actions", 7) && (s[8] == ']' || s[8] == '.');
+            if (own) continue;
             if (*s == '[' && strchr(s, ']') && strlen(seen) + strlen(s) + 2 < sizeof seen) {
                 for (char *q = s + 1; *q != ']'; q++) {
                     size_t n = strlen(seen);
@@ -1566,6 +1624,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
     if ((e = getenv("MHGU_SYNC_ZAKO"))) g_config.sync_small_monsters = atoi(e) != 0;
+    if ((e = getenv("MHGU_LAGCOMP"))) g_config.lag_compensation = atoi(e) != 0;
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
@@ -1684,9 +1743,52 @@ void config_load(void) {
             "%.2f\n", g_config.fsr_upscaler == FSR_UP_4 ? "4 (3.1 if it cannot start)" : "3.1", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
             g_fsr_lod_bias);
     }
+    // Resolution scaling: a 3D picture more than 1080 lines high (the Switch's docked picture) is rendered by the game
+    // 1080 lines high, in the same shape (g_render_size: what its code, its cameras and its memory see), and the
+    // renderer makes its screen-sized render targets that much larger (textures.c tex_scalable; exec.c scales
+    // viewports, scissors, copies and shader texel coordinates). The game's GPU pool then holds what it holds on the
+    // Switch at any size: rendering at the size itself, its targets took ~59 bytes a pixel of it, which capped the size.
+    // Not with FSR (its stand-ins and inputs are made for the game rendering at its input size: that keeps the old way)
+    // nor with MHGU_NO_RSCALE=1 (A/B tests).
+    bool rscale = !g_config.fsr && h > 1080 && !getenv("MHGU_NO_RSCALE");
+    if (!rscale) {  // The game's 2.5 GB heap fits its GPU pool (below) grown by ~665 MB at most (4800x2700 played;
+        // 5120x2880, +774: "out of command memory" before the town). Larger render sizes never worked: their targets
+        // alone are more than the pool. Keep the shape, lower the size to what fits with 640 MB.
+        const uint64_t max_px = 1920ull * 1080ull + (640ull << 20) / 64;
+        uint64_t px = (uint64_t)w * (uint64_t)h;
+        if (px > max_px) {
+            double s = sqrt((double)max_px / (double)px);
+            int ow = w, oh = h;
+            fit_aspect((int)(w * s), (int)(h * s), aspect, &w, &h);
+            while ((uint64_t)w * (uint64_t)h > max_px) fit_aspect(w - 8, h - 8, aspect, &w, &h);
+            LOG("[config] 3D resolution %dx%d is more than the game's memory holds: using %dx%d\n", ow, oh, w, h);
+            if (g_config.fsr && !getenv("MHGU_FSR_LODBIAS")) g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
+        }
+    } else if (w > 16384 || h > 16384) {  // (the largest image GPUs make)
+        int ow = w, oh = h;
+        fit_aspect(w < 16384 ? w : 16384, h < 16384 ? h : 16384, aspect, &w, &h);
+        LOG("[config] 3D resolution %dx%d is larger than the GPU's images: using %dx%d\n", ow, oh, w, h);
+    }
+    int gw = w, gh = h;
+    if (rscale) fit_aspect(w, 1080, aspect, &gw, &gh);
     g_config.render_w = w, g_config.render_h = h;
-    g_render_size[0] = (uint32_t)w;
-    g_render_size[1] = (uint32_t)h;
+    g_render_host[0] = (uint32_t)w, g_render_host[1] = (uint32_t)h;
+    g_render_size[0] = (uint32_t)gw;
+    g_render_size[1] = (uint32_t)gh;
+    g_rscale[0] = (float)w / (float)gw, g_rscale[1] = (float)h / (float)gh;
+    if (rscale) LOG("[config] resolution scaling: the game renders %dx%d, its picture is made %dx%d (x%.3f)\n", gw, gh, w, h,
+                    g_rscale[1]);
+    {   // The game's screen-sized targets come out of its 848 MB GPU pool: ~59 bytes a pixel (measured at 720p to
+        // 4320x2430). Above the Switch's 1920x1080 the pool grows by that much (64 a pixel), so what's left for
+        // textures stays as on the Switch; at 4320x2430 the pool was otherwise too full for a boss demo's 5.6 MB
+        // texture, and the game copied it to address 0 over its own code. (With resolution scaling only a picture wider
+        // than 16:9 is more pixels than that.)
+        uint64_t px = (uint64_t)gw * (uint64_t)gh, base = 1920ull * 1080ull;
+        uint64_t size = 0x35200000ull + (px > base ? ((px - base) * 64 + 0xfffff) & ~0xfffffull : 0);
+        g_gpu_pool_size = (uint32_t)size;
+        if (px > base) LOG("[config] GPU memory pool %u MB (848 + %u for the render size)\n", (unsigned)(size >> 20),
+                           (unsigned)((size - 0x35200000ull) >> 20));
+    }
     g_render_aspect = aspect;
     g_fov_scale = g_config.fov;
 

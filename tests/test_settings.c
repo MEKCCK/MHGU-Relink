@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
     float camera_before=camera_fovy(0.5f,g_render_aspect);
     c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
-    c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;
+    c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f; c.mouse_sensitivity_y=1.5f; c.mouse_invert_y=1; c.mouse_smoothing=0.5f; c.mouse_capture=MOUSE_CAPTURE_HUNT;
     c.touch_auto_r = 0;
     c.touch_floating = 1;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
@@ -64,6 +64,7 @@ int main(int argc, char **argv) {
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(!config_live_touch_auto_r());
     assert(config_live_touch_floating());
+    assert(config_live_mouse_sensitivity_y()==1.5f && config_live_mouse_invert_y()==1 && config_live_mouse_smoothing()==0.5f && config_live_mouse_capture()==MOUSE_CAPTURE_HUNT);
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
     assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
     float aspect_was=g_render_aspect; uint32_t size_was[2]={g_render_size[0],g_render_size[1]};
@@ -249,6 +250,16 @@ int main(int argc, char **argv) {
     config_format(bind_b, &keys, value, sizeof value); assert(!strcmp(value, "None"));
     keys.binds[BIND_B][0] = SDL_SCANCODE_F;
     assert(config_save(&keys, error, sizeof error) && config_live_bind(BIND_B, 0) == SDL_SCANCODE_F);
+    // A mod's keys for a row (forge_input_setKeybind): over the settings' while set, the settings' kept; NULL: theirs again
+    int mod_keys[BIND_KEYS] = {0};
+    assert(!config_parse_keys("F12", mod_keys) && !config_parse_keys("A, B, C", mod_keys));
+    assert(config_parse_keys("Left Ctrl, Q", mod_keys) && mod_keys[0] == SDL_SCANCODE_LCTRL && mod_keys[1] == SDL_SCANCODE_Q);
+    config_format_keys(mod_keys, value, sizeof value); assert(!strcmp(value, "Left Ctrl, Q"));
+    assert(!config_mod_bound(BIND_B));
+    config_mod_bind(BIND_B, mod_keys);
+    assert(config_mod_bound(BIND_B) && config_live_bind(BIND_B, 1) == SDL_SCANCODE_Q && config_player_bind(BIND_B, 0) == SDL_SCANCODE_F);
+    config_mod_bind(BIND_B, NULL);
+    assert(!config_mod_bound(BIND_B) && config_live_bind(BIND_B, 0) == SDL_SCANCODE_F);
     text = read_file(path);
     // (the section added to the file has the platform's line ends)
     assert((strstr(text, "\nB = F\r\n") || strstr(text, "\nB = F\n")) && strstr(text, "\nPlus = Return, Keypad Enter"));

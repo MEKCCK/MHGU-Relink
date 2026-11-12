@@ -31,6 +31,7 @@ void forge_init(void);  // Forge plugins from the mods' RomFS (runtime/forge.c):
 void hpscale_init(void);  // large monster HP by the number of hunters (runtime/hle/hpscale.c)
 bool hpscale_village_from_hub(uint32_t quest);  // a Village quest started from the Hub or the Pub (hpscale.c)
 void villagehub_init(void);  // Village quests at the Hub / Pub counter (runtime/hle/villagehub.c)
+void urgentcredit_init(void);  // Urgent quests count for all who clear them (runtime/hle/urgentcredit.c)
 void mashrate_init(void);  // mashing out of a stun at the Switch's rate at high frame rates (runtime/hle/mashrate.c)
 void hatestep_init(void);  // monsters' attention scores as at 30 fps at high frame rates (runtime/hle/hatestep.c)
 void inflate_init(void);  // zlib's inflate_fast as host code: archives decompress faster (runtime/hle/inflate.c)
@@ -42,6 +43,7 @@ void netrate_init(void);  // (debug) MHGU_NETRATE: network sends against the fra
 void netrate_udp(uint32_t len);
 void kotrace_init(void);  // (debug) MHGU_KOTRACE: large monster KO (stun) events (runtime/hle/kotrace.c)
 void dummy_set(float dist_cm, float turn_degrees);  // (debug) the control file's "dummy <cm> <degrees>"
+void hitsync_init(void);  // multiplayer: hits as the hunter who made them saw them (runtime/net/hitsync.c)
 void dummy_init(void);  // (debug) MHGU_DUMMY: a large monster held in front of the hunter, for testing attacks (runtime/hle/dummy.c)
 
 // Cheat codes (Atmosphere's format) from the .txt files in cheats/, beside mods/ (runtime/cheats.c)

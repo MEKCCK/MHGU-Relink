@@ -36,7 +36,7 @@ class SettingsLocaleTest(unittest.TestCase):
         # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:ini|cold|lo|hi|getenv)\(' + LITERAL + r'\)', '', source)
         unchanged = {"English", "Español", "中文", "Xbox", "Switch", "PlayStation",
-                     "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown",
+                     "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown", "Settings##bind",
                      "A", "B", "X", "Y", "L", "R", "ZL", "ZR",  # (the Switch buttons' keybinds)
                      "L3", "R3", "Guide", "Misc", "Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad",
                      "FSR 3.1", "FSR 4",  # (product names)
@@ -48,6 +48,17 @@ class SettingsLocaleTest(unittest.TestCase):
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
         self.assertFalse(visible - set(keys) - unchanged,
                          f"Untranslated UI labels: {sorted(visible - set(keys) - unchanged)}")
+
+        # the Game actions screen's labels (runtime/actions.c: an action's and a merged row's)
+        actions = (ROOT / "runtime/actions.c").read_text(encoding="utf-8")
+        labels = [ast.literal_eval(m.group(1)) for m in re.finditer(
+            r'\{"\w+",\s*ACT_VIEW_\w+,[^"]*?(' + LITERAL + r')', actions)]
+        labels += [ast.literal_eval(m.group(1)) for m in re.finditer(
+            r'\{"\w+",\s*(' + LITERAL + r'),\s*\d,\s*ACT_', actions)]
+        self.assertGreater(len(labels), 80)
+        self.assertFalse(set(labels) - set(keys), f"Untranslated action labels: {sorted(set(labels) - set(keys))}")
+        for group in ("Hunt and town", "Menus"):
+            self.assertIn(group, keys)
 
         # notices on screen (runtime/net/ldn.c: UI_TEXT("..."))
         notices = literals(" ".join(re.findall(r'UI_TEXT\((' + LITERAL + r')\)',

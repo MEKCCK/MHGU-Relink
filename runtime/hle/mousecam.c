@@ -11,6 +11,7 @@
 // pitch clamped to +-0x3f00 (89 degrees). The game calls it only while the player may turn the camera (not in
 // cutscenes, menus, while carving...), so it is hooked: after it, the mouse's movement since the last update goes to
 // both the heading and the smoothed angles (no smoothing lag), with the game's invert option.
+//
 // While aiming (the Bow's R, a Bowgun's aim...) the stick turns the hunter instead and the camera follows: the
 // handler isn't called, the hunter's turn is applied by 0x4a1738 (r0 = the player, r1 = which weapon's aim), to the
 // hunter's yaw +0x14a0 and aim pitch +0x14b8 / +0x14bc (a float, -100 to 100; +0x2714, 16-bit units, for mode 1). The
@@ -55,15 +56,19 @@
 #define QC_PLAYER       0x85cu
 #define QC_EYE_PITCH    0x9d8u
 #define QC_EYE_YAW      0x9dcu
-#define QC_PARAM_AIM_UP   0x1du
-#define QC_PARAM_AIM_DOWN 0x1eu
-#define AIM_LEAN_MAX    0x2000
-#define AIM_PITCH_MAX   100.0f
-#define UNITS_PER_DEG   (65536.0f / 360.0f)
 #define QC_PITCH_NOW    0x9e0u
 #define QC_YAW_NOW      0x9e4u
 #define QC_PITCH_TO     0x9e8u
 #define QC_YAW_TO       0x9ecu
+#define QC_PARAM_AIM_UP   0x1du
+#define QC_PARAM_AIM_DOWN 0x1eu
+#define PL_AIM_YAW      0x14a0u
+#define PL_AIM_PITCH    0x14b8u    // (the float, and +4 the copy the camera reads)
+#define PL_AIM_PITCH2   0x14bcu
+#define PL_AIM_LEAN     0x2714u    // (mode 1's pitch: 16-bit units, +-AIM_LEAN_MAX)
+#define AIM_LEAN_MAX    0x2000
+#define AIM_PITCH_MAX   100.0f
+#define UNITS_PER_DEG   (65536.0f / 360.0f)
 #define PITCH_MAX       0x3f00     // (the stick handler's clamp)
 #define MOUSECAM_DEG_PER_COUNT 0.08f
 #define ACTIVE_NS 200000000ull     // the handler ran this recently: the mouse is the camera's
@@ -72,6 +77,9 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static float g_dx, g_dy;           // counts moved since the handler last ran (x right, y down)
 static volatile uint64_t g_seen_ns;  // when a handler last ran
 static float g_rest_yaw, g_rest_pitch;  // (the fractions of a unit left over, so slow movements add up)
+static float g_trail_dx, g_trail_dy;    // (counts a smoothing setting still holds back)
+static int g_log_on = -1;               // MHGU_MOUSECAM_LOG=1: every turn applied, with the camera's angles
+static bool g_last_aim;                 // (the last turn went to the aiming hunter)
 static uint32_t g_cam;             // (the game's thread) the camera the stick handler last had
 static uint32_t g_stick_runs;      // (the game's thread) how many times it ran
 
@@ -94,10 +102,6 @@ bool touch_lock_active(void);  // (runtime/touch.cpp: the lock-on is on and the 
 bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doing)
 bool touch_lock_assist(void);  // (a locked shot of the touch controls holds R for its aim now)
 #define ZONE       0x1054u       // (u8, of a hunter and of a monster: which zone of the map it is in)
-#define PL_HEADING 0x14a0u
-#define PL_AIM     0x14b8u       // (float: the aim's pitch)
-#define PL_AIM2    0x14bcu
-#define PL_PITCH   0x2714u       // (u16: the same in the camera's units)
 #define MUZZLE_Y   110.0f        // (a shot leaves this far above the hunter's feet)
 #define PL_PLACE   0xa0u
 #define SHOT_NS    400000000ull  // (the fire button let go: the shot may leave a little later, on a bow always)
@@ -228,15 +232,15 @@ void mousecam_lock_shot(void) {
     float dx = t[0] - x, dz = t[2] - z, dist = sqrtf(dx * dx + dz * dz);
     if (dist < LOCK_NEAR0) return;  // (under it: the bearing swings)
     const float U = 65536.0f / (2.0f * 3.14159265f);
-    ST32(h + PL_HEADING, (uint32_t)lrintf(atan2f(dx, dz) * U) & 0xffffu);
+    ST32(h + PL_AIM_YAW, (uint32_t)lrintf(atan2f(dx, dz) * U) & 0xffffu);
     if (!aiming && ranged != WEAPON_BOW) return;
     float rise = atan2f(aim_y - (y + MUZZLE_Y), dist);  // (radians; up is positive)
     const float UP = 45.0f * 3.14159265f / 180.0f, DOWN = 30.0f * 3.14159265f / 180.0f;
     if (rise > UP) rise = UP;
     if (rise < -DOWN) rise = -DOWN;
     float aim = 100.0f * rise / (rise >= 0.0f ? UP : DOWN);
-    STF(h + PL_AIM, aim), STF(h + PL_AIM2, aim);
-    ST16(h + PL_PITCH, (uint16_t)(int16_t)lrintf(rise * U));
+    STF(h + PL_AIM_PITCH, aim), STF(h + PL_AIM_PITCH2, aim);
+    ST16(h + PL_AIM_LEAN, (uint16_t)(int16_t)lrintf(rise * U));
 }
 
 // (debug) MHGU_CAMLOG=1: twice a second, the hunt camera (eye, target, its angles) and the large monsters' places
@@ -271,16 +275,43 @@ static bool take_turn(uint32_t invert, int *iy, int *ip) {
     float dx = g_dx, dy = g_dy;
     g_dx = g_dy = 0;
     pthread_mutex_unlock(&g_lock);
-    if (!seen || now - seen >= ACTIVE_NS) g_rest_yaw = g_rest_pitch = 0, dx = dy = 0;  // (moved while it didn't run)
+    if (!seen || now - seen >= ACTIVE_NS) g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0, dx = dy = 0;  // (moved while it didn't run)
+    float sm = config_live_mouse_smoothing();  // (smoothing: each update takes the share of what is waiting that 1 - sm says)
+    if (sm > 0.0f) {
+        g_trail_dx += dx, g_trail_dy += dy;
+        dx = g_trail_dx * (1.0f - sm), dy = g_trail_dy * (1.0f - sm);
+        g_trail_dx -= dx, g_trail_dy -= dy;
+        if (fabsf(g_trail_dx) < 0.01f && fabsf(dx) < 0.01f) g_trail_dx = 0, dx = 0;
+        if (fabsf(g_trail_dy) < 0.01f && fabsf(dy) < 0.01f) g_trail_dy = 0, dy = 0;
+    } else {
+        g_trail_dx = g_trail_dy = 0;
+    }
     if (dx == 0 && dy == 0) return false;
     float s = MOUSECAM_DEG_PER_COUNT * UNITS_PER_DEG * config_live_mouse_sensitivity();
-    float yaw = -dx * s, pitch = -dy * s;  // (right turns the yaw down, up raises the pitch: as the stick)
+    float yaw = -dx * s, pitch = -dy * s * config_live_mouse_sensitivity_y();  // (right turns the yaw down, up raises the pitch: as the stick)
+    if (config_live_mouse_invert_y()) pitch = -pitch;
     if (invert & 1) pitch = -pitch;
     if (invert & 2) yaw = -yaw;
     yaw += g_rest_yaw, pitch += g_rest_pitch;
     *iy = (int)yaw, *ip = (int)pitch;
     g_rest_yaw = yaw - (float)*iy, g_rest_pitch = pitch - (float)*ip;
     return true;
+}
+
+static void log_turn(const char *what, uint32_t cam, int iy, int ip, uint32_t yaw0, uint32_t pitch0) {
+    if (g_log_on < 0) g_log_on = getenv("MHGU_MOUSECAM_LOG") != NULL;
+    if (!g_log_on) return;
+    LOG("[mousecam] %s turn yaw %+d pitch %+d units; camera yaw %04x -> %04x, pitch %04x -> %04x\n", what, iy, ip, yaw0,
+        LD32(cam + QC_YAW_TO) & 0xffffu, pitch0, LD32(cam + QC_PITCH_TO) & 0xffffu);
+}
+
+// (control file "camstat": where the hunt camera looks and whether the mouse has it)
+void mousecam_status(void) {
+    uint32_t cam = g_cam;
+    if (!sane(cam)) return (void)LOG("[mousecam] no hunt camera seen yet (active %d)\n", mousecam_active());
+    LOG("[mousecam] camera %08x active %d yaw %04x (now %04x) pitch %04x (now %04x) aim-last %d\n", cam, mousecam_active(),
+        LD32(cam + QC_YAW_TO) & 0xffffu, LD32(cam + QC_YAW_NOW) & 0xffffu, LD32(cam + QC_PITCH_TO) & 0xffffu,
+        LD32(cam + QC_PITCH_NOW) & 0xffffu, g_last_aim);
 }
 
 static void camera_stick(Cpu *c) {
@@ -297,6 +328,8 @@ static void camera_stick(Cpu *c) {
     }
     int iy, ip;
     if (!take_turn(invert, &iy, &ip) || !sane(cam)) return;
+    g_last_aim = false;
+    uint32_t yaw0 = LD32(cam + QC_YAW_TO) & 0xffffu, pitch0 = LD32(cam + QC_PITCH_TO) & 0xffffu;
     if (iy) {
         ST32(cam + QC_YAW_TO, (LD32(cam + QC_YAW_TO) + (uint32_t)iy) & 0xffffu);
         ST32(cam + QC_YAW_NOW, (LD32(cam + QC_YAW_NOW) + (uint32_t)iy) & 0xffffu);
@@ -308,6 +341,7 @@ static void camera_stick(Cpu *c) {
         ST32(cam + QC_PITCH_NOW, (uint32_t)now_p & 0xffffu);
         if (next != to + ip) g_rest_pitch = 0;  // (at the limit)
     }
+    log_turn("camera", cam, iy, ip, yaw0, pitch0);
 }
 
 static float cam_param(Cpu *c, uint32_t cam, uint32_t id) {
@@ -323,11 +357,11 @@ static int aim_pitch(Cpu *c, uint32_t cam, uint32_t pl, int ip) {
     int range = (uint16_t)(up + down);  // (as the aim camera's: its pitch = -down + (aim + 100) * range / 200)
     if (!range) return 0;
     float units_per_aim = (float)range / (2.0f * AIM_PITCH_MAX);
-    float was = LDF(pl + PL_AIM), aim = was + (float)ip / units_per_aim;
+    float was = LDF(pl + PL_AIM_PITCH), aim = was + (float)ip / units_per_aim;
     if (aim > AIM_PITCH_MAX) aim = AIM_PITCH_MAX, g_rest_pitch = 0;
     if (aim < -AIM_PITCH_MAX) aim = -AIM_PITCH_MAX, g_rest_pitch = 0;
-    STF(pl + PL_AIM, aim);
-    STF(pl + PL_AIM2, aim);
+    STF(pl + PL_AIM_PITCH, aim);
+    STF(pl + PL_AIM_PITCH2, aim);
     return (int)((aim - was) * units_per_aim);
 }
 
@@ -340,21 +374,25 @@ static void aim_turn(Cpu *c) {
     if (stick_ran || !sane(pl) || !sane(cam) || LD32(cam + QC_PLAYER) != pl) return;
     int iy, ip;
     if (!take_turn(LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT), &iy, &ip)) return;
+    g_last_aim = true;
+    uint32_t yaw0 = LD32(pl + PL_AIM_YAW) & 0xffffu, pitch0 = LD32(cam + QC_EYE_PITCH) & 0xffffu;
     if (iy) {
-        ST32(pl + PL_HEADING, (LD32(pl + PL_HEADING) + (uint32_t)iy) & 0xffffu);
+        ST32(pl + PL_AIM_YAW, (LD32(pl + PL_AIM_YAW) + (uint32_t)iy) & 0xffffu);
         ST32(cam + QC_EYE_YAW, (LD32(cam + QC_EYE_YAW) + (uint32_t)iy) & 0xffffu);
     }
     if (!ip) return;
     if (mode == 1) {
-        int lean = (int16_t)LD16(pl + PL_PITCH) + ip;
-        ST16(pl + PL_PITCH, lean < -AIM_LEAN_MAX ? -AIM_LEAN_MAX : lean > AIM_LEAN_MAX ? AIM_LEAN_MAX : lean);
+        int lean = (int16_t)LD16(pl + PL_AIM_LEAN) + ip;
+        ST16(pl + PL_AIM_LEAN, lean < -AIM_LEAN_MAX ? -AIM_LEAN_MAX : lean > AIM_LEAN_MAX ? AIM_LEAN_MAX : lean);
     } else {
         int moved = aim_pitch(c, cam, pl, ip);
         ST32(cam + QC_EYE_PITCH, (LD32(cam + QC_EYE_PITCH) + (uint32_t)moved) & 0xffffu);
     }
+    if (g_log_on == 1) LOG("[mousecam] aim turn yaw %+d pitch %+d units; hunter yaw %04x -> %04x, eye pitch %04x -> %04x (mode %u)\n", iy, ip, yaw0, LD32(pl + PL_AIM_YAW) & 0xffffu, pitch0, LD32(cam + QC_EYE_PITCH) & 0xffffu, mode);
 }
 
 void mousecam_init(void) {
+    g_log_on = getenv("MHGU_MOUSECAM_LOG") != NULL;
     fnhook_set(FN_CAMERA_STICK, hle_register("mousecam:camera_stick", camera_stick));
     fnhook_set(FN_AIM_TURN, hle_register("mousecam:aim_turn", aim_turn));
 }
