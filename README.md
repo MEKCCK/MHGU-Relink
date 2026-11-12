@@ -84,3 +84,13 @@ cargo test --workspace
 
 MIT，见 `LICENSE`；第三方组件许可见 `THIRD_PARTY_NOTICES`。运行时的内核、IPC、NVN 对象与 Maxwell
 着色器翻译派生自 LAS Recomp（MIT）；Android 另含 volk、libadrenotools、bcdec 等，各自保留许可。
+
+### 上游 Android 主线的许可证
+
+本项目的 Android 主干基于 `gu-native` 0.1.5 的 MIT 快照。上游从 0.1.7 起把项目改为
+**All rights reserved**：禁止再分发源码或成品，禁止发布修改版，商业使用也需书面许可。
+
+我们明确谴责这种在 MIT 下接收社区协作、被下游合并之后，又把后续版本锁成禁止分发的专有许可的做法。
+它破坏了开源协作的可预期性，也让下游无法继续基于新版本工作。因此本项目只基于 0.1.5/0.1.6 的 MIT
+快照，不采用 0.1.7 及以后的代码；本仓库新增代码继续使用 MIT。详细来源记录见
+[docs/PROVENANCE.md](docs/PROVENANCE.md)。
