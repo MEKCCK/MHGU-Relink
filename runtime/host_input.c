@@ -25,6 +25,9 @@
 #include <time.h>
 
 #include <SDL3/SDL.h>
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
 
 #include "actions.h"
 #include "config.h"
@@ -1119,6 +1122,71 @@ static void mouse_update(int *rx, int *ry) {
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
 }
 
+// The phone's turn, for the hunt camera ([Controls] Motion: Off, Aiming or Always). MotionSensor.java (the sensor
+// thread) leaves its latest angular rates here, in radians a second: horizontal when the phone turns to the player's
+// right, vertical when its top edge goes up. The rates are integrated here, on the game's thread, each update, and
+// handed to the hunt camera as an angle (runtime/hle/mousecam.c: MotionGain, the camera's units). The first sample
+// after the sensor was off, and every one after a gap, only sets the baseline: the time it was not running is no turn.
+#define MOTION_STALE_NS 200000000ull  // (no sample this recently: the sensor is paused or off)
+#define MOTION_DT_MAX 0.05f           // seconds of turn one update may take (a stall is not a swipe)
+#define MOTION_DEAD_ZONE 0.03f        // rad/s: the hand's tremors, which would drift the camera
+static SDL_SpinLock motion_lock;
+static float motion_h, motion_v;       // (rad/s: horizontal, vertical; the display's axes, MotionSensor.java turns them)
+static uint64_t motion_sample_ns;      // (plat_now_ns: when the last sample arrived)
+static uint64_t motion_integrated_ns;  // (this thread: the last update's time; 0: the next sample is the baseline)
+
+static void motion_sample(float horizontal, float vertical) {
+    SDL_LockSpinlock(&motion_lock);
+    motion_h = horizontal, motion_v = vertical, motion_sample_ns = plat_now_ns();
+    SDL_UnlockSpinlock(&motion_lock);
+}
+
+#ifdef __ANDROID__
+// MotionSensor.java: the gyro's rates (rad/s), on its sensor thread. Nothing is integrated here (that is the game's).
+JNIEXPORT void JNICALL Java_com_mhgu_relink_MotionSensor_sample(JNIEnv *env, jclass cls, jfloat horizontal, jfloat vertical) {
+    (void)env, (void)cls;
+    motion_sample(horizontal, vertical);
+}
+#endif
+
+// This update's turn of the phone, added to the hunt camera's (false: the sensor is not to turn it now).
+static bool motion_update(void) {
+    int mode = config_motion_mode();
+    uint64_t now = plat_now_ns();
+    // (a menu, the chat box, a village's camera or a cutscene: the phone does not turn the hunt camera then; with
+    // Motion = Aiming, only while a bow or a bowgun is aimed)
+    bool active = mode != MOTION_OFF && mousecam_active() && !overlay_menu_open() && !chat_active() &&
+                  (mode != MOTION_AIM || weapon_aiming(weapon_hunter()));
+    if (!active) {
+        motion_integrated_ns = 0;
+        mousecam_motion_reset();  // (whatever the phone turned meanwhile is not applied)
+        return false;
+    }
+    SDL_LockSpinlock(&motion_lock);
+    float h = motion_h, v = motion_v;
+    uint64_t sample_ns = motion_sample_ns;
+    SDL_UnlockSpinlock(&motion_lock);
+    if (!sample_ns || now - sample_ns > MOTION_STALE_NS) {  // (the sensor is off: the next sample only sets the baseline)
+        motion_integrated_ns = 0;
+        return false;
+    }
+    if (!motion_integrated_ns) {  // (the first sample after it started: the time before it is not a turn)
+        motion_integrated_ns = now;
+        return false;
+    }
+    float dt = (float)(now - motion_integrated_ns) * 1e-9f;
+    motion_integrated_ns = now;
+    if (dt > MOTION_DT_MAX) dt = MOTION_DT_MAX;
+    if (fabsf(h) < MOTION_DEAD_ZONE) h = 0.0f;
+    if (fabsf(v) < MOTION_DEAD_ZONE) v = 0.0f;
+    float yaw = h * dt, pitch = v * dt;
+    if (config_motion_flip_x()) yaw = -yaw;
+    if (config_motion_flip_y()) pitch = -pitch;
+    if (yaw == 0.0f && pitch == 0.0f) return false;
+    mousecam_motion_add(yaw, pitch);
+    return true;
+}
+
 // The game's rumble (input_rumble) to the controller. It starts and stops at once; in between a new strength goes out
 // only when a motor moved by RUMBLE_STEP, at most every RUMBLE_CHANGE_NS (twice that on a wireless controller). The
 // game sends a value every 5 ms and a roar's changes nearly every time, while each new strength is an output report
@@ -1322,7 +1390,8 @@ void host_input_update(void) {
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
     touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
     if (tdx != 0 || tdy != 0) mouse_dx += tdx, mouse_dy += tdy, touch_cam_ns = plat_now_ns();
-    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0;  // (the mouse or a finger turning the camera: the lock-on waits)
+    bool motion_moved = motion_update();  // (the phone's turn, added to the hunt camera: hle/mousecam.c)
+    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0 || motion_moved;  // (the mouse, a finger or the phone turning the camera: the lock-on waits)
     mouse_update(&rx, &ry);
 
     if (pad) {

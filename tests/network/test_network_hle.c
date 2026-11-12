@@ -7,7 +7,7 @@ _Static_assert(PROTO_VERSION == 3, "The Rust Local Play protocol must remain com
 
 pthread_mutex_t g_klock = PTHREAD_MUTEX_INITIALIZER;
 static KEvent state_event = {KOBJ_EVENT, 1, false};
-static LONG event_count, down_count, packet_count, em_count, hp_count;
+static LONG event_count, down_count, packet_count, em_count, hp_count, hs_count;
 static VPacket last_packet;
 static uint8_t last_data[256];
 static uint32_t last_size;
@@ -25,6 +25,7 @@ void vsock_peer_gone(uint32_t ip) { (void)ip; }
 void vsock_network_down(void) { InterlockedIncrement(&down_count); }
 void emsync_aux_received(const void *data, uint32_t n) { (void)data; (void)n; InterlockedIncrement(&em_count); }
 void hpscale_aux_received(const void *data, uint32_t n) { (void)data; (void)n; InterlockedIncrement(&hp_count); }
+void hitsync_aux_received(const void *data, uint32_t n) { (void)data; (void)n; InterlockedIncrement(&hs_count); }
 
 enum { A_CFG=0x10000, A_SEC=0x10100, A_USER=0x10200, A_INFO=0x11000, A_STACK=0x1f000, A_FILTER=0x16000, A_COUNT=0x16100 };
 static Cpu cpu;
@@ -94,9 +95,9 @@ static int station(int port, const char *stop) {
     if(transport==XP_RYU) assert(ldn_broadcast_ip()==0x0a72ffffu);
     uint8_t *info=network_info(2); uint32_t host_ip=rd32(node_at(info,0)+NODE_IP);
     assert(L.own_ip && L.own_ip!=host_ip); VPacket p={L.own_ip,host_ip,5500,6600,VPROTO_UDP,0,0}; ldn_send(&p,"ping",4);
-    uint64_t end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && (!packet_count || (!emulator && (!em_count || !hp_count)))) Sleep(10);
-    assert(packet_count && last_size==4 && !memcmp(last_data,"pong",4)); assert(last_packet.dst_ip==L.own_ip); if (emulator) assert(!em_count && !hp_count); else assert(em_count && hp_count);
-    puts("PASS Scan/Connect/GetNetworkInfo, virtual packet roundtrip and both AUX handlers");
+    uint64_t end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && (!packet_count || (!emulator && (!em_count || !hp_count || !hs_count)))) Sleep(10);
+    assert(packet_count && last_size==4 && !memcmp(last_data,"pong",4)); assert(last_packet.dst_ip==L.own_ip); if (emulator) assert(!em_count && !hp_count && !hs_count); else assert(em_count && hp_count && hs_count);
+    puts("PASS Scan/Connect/GetNetworkInfo, virtual packet roundtrip and all AUX handlers (emsync, hpscale, hitsync)");
     FILE *f=fopen(stop,"wb"); assert(f); fputs("stop",f); fclose(f);
     end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && current_state()==ST_STATION_CONNECTED) Sleep(10);
     if(transport==XP_ROOM) assert(current_state()==ST_STATION && call(ldn_get_reason,0,0,0,0)==DR_DESTROYED_BY_SYSTEM && down_count);

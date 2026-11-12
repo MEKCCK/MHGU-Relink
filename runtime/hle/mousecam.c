@@ -69,12 +69,15 @@
 #define AIM_LEAN_MAX    0x2000
 #define AIM_PITCH_MAX   100.0f
 #define UNITS_PER_DEG   (65536.0f / 360.0f)
+#define UNITS_PER_RAD   (65536.0f / (2.0f * 3.14159265f))
 #define PITCH_MAX       0x3f00     // (the stick handler's clamp)
 #define MOUSECAM_DEG_PER_COUNT 0.08f
 #define ACTIVE_NS 200000000ull     // the handler ran this recently: the mouse is the camera's
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static float g_dx, g_dy;           // counts moved since the handler last ran (x right, y down)
+static float g_mot_yaw, g_mot_pitch;  // radians the phone turned since then (see mousecam_motion_add; yaw right, pitch up)
+static int g_cycle_req;            // (host thread) lock-on targets asked for, taken one per hunt camera update
 static volatile uint64_t g_seen_ns;  // when a handler last ran
 static float g_rest_yaw, g_rest_pitch;  // (the fractions of a unit left over, so slow movements add up)
 static float g_trail_dx, g_trail_dy;    // (counts a smoothing setting still holds back)
@@ -93,6 +96,25 @@ bool mousecam_active(void) {
 void mousecam_add(float dx, float dy) {
     pthread_mutex_lock(&g_lock);
     g_dx += dx, g_dy += dy;
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_motion_add(float yaw, float pitch) {
+    if (!isfinite(yaw) || !isfinite(pitch)) return;
+    pthread_mutex_lock(&g_lock);
+    g_mot_yaw += yaw, g_mot_pitch += pitch;
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_motion_reset(void) {
+    pthread_mutex_lock(&g_lock);
+    g_mot_yaw = g_mot_pitch = 0.0f;
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_target_cycle(void) {
+    pthread_mutex_lock(&g_lock);
+    if (g_cycle_req < 8) g_cycle_req++;  // (no runaway: a queued tap each is a target)
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -119,33 +141,78 @@ bool touch_lock_assist(void);  // (a locked shot of the touch controls holds R f
 #define JOINT_SIZE  0xa0u
 #define JOINT_POS   0x40u
 
-// The large monster to follow: the one followed already, unless another is clearly nearer (30%: no back and forth
-// between two at about the same distance), else the nearest; its place, or false. (the hunt camera's thread alone)
-static uint32_t g_lock_en;
-static bool lock_target(float x, float y, float z, float out[3]) {
-    (void)y;
+// The large monster the lock-on follows, remembered by its pointer and the id the game gave it: kept while it is
+// still a valid one in the hunter's zone, else the nearest. The host's target control (mousecam_target_cycle) turns
+// to the next valid one in slot order, around, one request per update. (the hunt camera's thread alone)
+static uint32_t g_lock_en, g_target_id, g_target_hunter;
+static int g_lock_slot = -1;
+static uint64_t g_lock_cycle_ns;  // (when a request was last taken: the two hooks of one update take only one)
+
+// A large monster the lock-on may follow: sEnemy slot k, the monster and its id, where it is, how far
+typedef struct {
+    uint32_t en, id;
+    float x, y, z, d2;
+    int slot;
+} LockChoice;
+
+// The valid monsters around (x, z), in slot order: sEnemy's ten slots with a live large monster (a network id below
+// 10000) in the hunter's zone, a finite place, and no farther than LOCK_RANGE. Returns how many (at most 10).
+static int lock_choices(LockChoice out[10], uint32_t hunter, float x, float z) {
     uint32_t sen = LD32(G_SENEMY);
-    if (!sane(sen)) return false;
-    float best = LOCK_RANGE * LOCK_RANGE, cur_d = -1.0f, cur[3] = {0};
-    uint32_t best_en = 0, hunter = weapon_hunter();
+    if (!sane(sen)) return 0;
+    int n = 0;
     for (int k = 0; k < 10; k++) {
         uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info = sane(en) ? LD32(en + 0x1428) : 0;
         if (!sane(info)) continue;
         uint32_t id = LD16(info + 0x1b6);
         if (id == 0xffff || id >= 10000) continue;
-        if (hunter && LD8(en + ZONE) != LD8(hunter + ZONE)) continue;
+        if (hunter && LD8(en + ZONE) != LD8(hunter + ZONE)) continue;  // (not through the map's walls)
         float mx = LDF(info + 0x40), my = LDF(info + 0x44), mz = LDF(info + 0x48);
         if (!isfinite(mx) || !isfinite(my) || !isfinite(mz)) continue;
-        float d = (mx - x) * (mx - x) + (mz - z) * (mz - z);
-        if (en == g_lock_en && d < LOCK_RANGE * LOCK_RANGE) cur_d = d, cur[0] = mx, cur[1] = my, cur[2] = mz;
-        if (d < best) best = d, best_en = en, out[0] = mx, out[1] = my, out[2] = mz;
+        float d2 = (mx - x) * (mx - x) + (mz - z) * (mz - z);
+        if (d2 > LOCK_RANGE * LOCK_RANGE) continue;
+        LockChoice *c = &out[n++];
+        c->en = en, c->id = id, c->x = mx, c->y = my, c->z = mz, c->d2 = d2, c->slot = k;
     }
-    if (cur_d >= 0.0f && best_en != g_lock_en && best >= cur_d * 0.49f) {
-        out[0] = cur[0], out[1] = cur[1], out[2] = cur[2];
-        return true;
+    return n;
+}
+
+// This update's monster and its place, or false. update: take at most one of the host's cycle requests (the camera's
+// and the hunter's hooks both ask, once an update; the 4 ms gate keeps one tap from counting twice in one update).
+static bool lock_target(float x, float y, float z, float out[3], bool update) {
+    (void)y;
+    uint32_t hunter = weapon_hunter();
+    LockChoice c[10];
+    int n = lock_choices(c, hunter, x, z), cur = -1;
+    if (hunter != g_target_hunter) g_lock_en = g_target_id = 0, g_lock_slot = -1, g_target_hunter = hunter;
+    for (int i = 0; i < n && g_lock_en; i++)
+        if (c[i].en == g_lock_en && c[i].id == g_target_id) cur = i;
+    bool cycle = false;
+    if (update) {
+        uint64_t now = plat_now_ns();
+        pthread_mutex_lock(&g_lock);
+        if (g_cycle_req > 0 && now - g_lock_cycle_ns >= 4000000ull)  // (one a game update: its two hooks are one)
+            g_cycle_req--, g_lock_cycle_ns = now, cycle = true;
+        pthread_mutex_unlock(&g_lock);
     }
-    g_lock_en = best_en;
-    return best_en != 0;
+    if (n == 0) {  // (no monster to follow now: the next hunt starts over)
+        g_lock_en = g_target_id = 0, g_lock_slot = -1;
+        return false;
+    }
+    if (cycle) {  // the next one in slot order, around; the followed one gone, the first after its slot
+        int next = cur >= 0 ? (cur + 1) % n : 0;
+        if (cur < 0)
+            for (int i = 0; i < n; i++)
+                if (c[i].slot > g_lock_slot) { next = i; break; }
+        cur = next;
+    } else if (cur < 0) {  // (none followed yet, or it went away: the nearest)
+        cur = 0;
+        for (int i = 1; i < n; i++)
+            if (c[i].d2 < c[cur].d2) cur = i;
+    }
+    g_lock_en = c[cur].en, g_target_id = c[cur].id, g_lock_slot = c[cur].slot;
+    out[0] = c[cur].x, out[1] = c[cur].y, out[2] = c[cur].z;
+    return true;
 }
 
 // Where a locked shot goes: the monster's body, not its feet. The root joint (the pelvis) when it is well off the
@@ -180,7 +247,7 @@ static bool body_center(uint32_t en, float feet_y, float out[3]) {
 static void lock_follow(uint32_t cam, float dt) {
     float t[3];
     float hx = LDF(cam + 0x60), hy = LDF(cam + 0x64), hz = LDF(cam + 0x68);  // (the target point: by the hunter)
-    if (!isfinite(hx) || !lock_target(hx, hy, hz, t)) return;
+    if (!isfinite(hx) || !lock_target(hx, hy, hz, t, true)) return;
     float dx = t[0] - hx, dz = t[2] - hz, dist = sqrtf(dx * dx + dz * dz);
     // under the monster (its root's bearing swings with every step): the follow fades out, the camera holds
     float f = (dist - LOCK_NEAR0) / (LOCK_NEAR1 - LOCK_NEAR0);
@@ -226,7 +293,7 @@ void mousecam_lock_shot(void) {
     bool aiming = weapon_aiming(h) || (ranged != WEAPON_BOW && touch_lock_assist());
     if (!(aiming && touch_lock_active()) && !((fire || now - fired < SHOT_NS) && (aiming || weapon_moving(h)))) return;
     float x = LDF(h + PL_PLACE), y = LDF(h + PL_PLACE + 4), z = LDF(h + PL_PLACE + 8), t[3];
-    if (!isfinite(x) || !lock_target(x, y, z, t)) return;
+    if (!isfinite(x) || !lock_target(x, y, z, t, true)) return;
     float body[3], aim_y = t[1] + LOCK_HEIGHT;  // (no skeleton to read: a fixed height over its feet)
     if (body_center(g_lock_en, t[1], body)) t[0] = body[0], t[2] = body[2], aim_y = body[1];
     float dx = t[0] - x, dz = t[2] - z, dist = sqrtf(dx * dx + dz * dz);
@@ -267,15 +334,16 @@ static void camlog(uint32_t cam) {
     }
 }
 
-// The mouse's movement since the last update, as whole units of yaw and pitch (false: it didn't move).
+// The mouse's and the phone's movement since the last update, as whole units of yaw and pitch (false: neither moved).
 static bool take_turn(uint32_t invert, int *iy, int *ip) {
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
     g_seen_ns = now;
     pthread_mutex_lock(&g_lock);
-    float dx = g_dx, dy = g_dy;
-    g_dx = g_dy = 0;
+    float dx = g_dx, dy = g_dy, myaw = g_mot_yaw, mpitch = g_mot_pitch;
+    g_dx = g_dy = g_mot_yaw = g_mot_pitch = 0;
     pthread_mutex_unlock(&g_lock);
-    if (!seen || now - seen >= ACTIVE_NS) g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0, dx = dy = 0;  // (moved while it didn't run)
+    if (!seen || now - seen >= ACTIVE_NS)  // (moved while it didn't run)
+        g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0, dx = dy = 0, myaw = mpitch = 0;
     float sm = config_live_mouse_smoothing();  // (smoothing: each update takes the share of what is waiting that 1 - sm says)
     if (sm > 0.0f) {
         g_trail_dx += dx, g_trail_dy += dy;
@@ -286,12 +354,15 @@ static bool take_turn(uint32_t invert, int *iy, int *ip) {
     } else {
         g_trail_dx = g_trail_dy = 0;
     }
-    if (dx == 0 && dy == 0) return false;
+    if (dx == 0 && dy == 0 && myaw == 0.0f && mpitch == 0.0f) return false;
     float s = MOUSECAM_DEG_PER_COUNT * UNITS_PER_DEG * config_live_mouse_sensitivity();
     float yaw = -dx * s, pitch = -dy * s * config_live_mouse_sensitivity_y();  // (right turns the yaw down, up raises the pitch: as the stick)
     if (config_live_mouse_invert_y()) pitch = -pitch;
     if (invert & 1) pitch = -pitch;
     if (invert & 2) yaw = -yaw;
+    // (the phone's turning, in radians: [Controls] MotionGain, and its own invert options; the stick's invert is not its)
+    float mot = UNITS_PER_RAD * config_motion_gain();
+    yaw -= myaw * mot, pitch += mpitch * mot;
     yaw += g_rest_yaw, pitch += g_rest_pitch;
     *iy = (int)yaw, *ip = (int)pitch;
     g_rest_yaw = yaw - (float)*iy, g_rest_pitch = pitch - (float)*ip;
@@ -323,8 +394,6 @@ static void camera_stick(Cpu *c) {
     if (sane(cam) && seen && now - seen < ACTIVE_NS && touch_lock_active()) {
         float dt = (now - seen) / 1e9f;
         lock_follow(cam, dt > 0.1f ? 0.1f : dt);
-    } else {
-        g_lock_en = 0;
     }
     int iy, ip;
     if (!take_turn(invert, &iy, &ip) || !sane(cam)) return;

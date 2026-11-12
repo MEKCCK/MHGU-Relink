@@ -2,6 +2,7 @@ package com.mhgu.relink;
 
 import android.app.Dialog;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -14,6 +15,7 @@ import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.Surface;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -41,6 +43,9 @@ public class GameActivity extends SDLActivity {
     private static final String TAG = "MHGU";
     public static final String EXTRA_LANGUAGE = "com.mhgu.relink.LANGUAGE";
 
+    private MotionSensor motion;                          // ([Controls] Motion: el giro del teléfono)
+    private static volatile boolean motionRequested;      // (lo que el juego pidió, también antes del onResume)
+
     @Override
     protected String[] getLibraries() {
         return new String[] { "c++_shared", "SDL3", "mhguffmpeg", "main" };
@@ -52,6 +57,7 @@ public class GameActivity extends SDLActivity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         pickRefreshRate();
+        motion = new MotionSensor(this);
     }
 
     @Override
@@ -59,16 +65,52 @@ public class GameActivity extends SDLActivity {
         super.onResume();
         stopService(new Intent(this, OnlineSessionService.class));
         pickRefreshRate();
+        if (motion != null) {
+            motion.setEnabled(motionRequested);
+            motion.onResume(displayRotation());
+        }
     }
 
     @Override
     protected void onPause() {
+        if (motion != null) motion.onPause();
         if (isMultiplayerActive()) {
             Intent service = new Intent(this, OnlineSessionService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
             else startService(service);
         }
         super.onPause();
+    }
+
+    /** La rotación de la pantalla, para poner las muestras del giroscopio en sus ejes. */
+    private int displayRotation() {
+        Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
+        return display != null ? display.getRotation() : Surface.ROTATION_0;
+    }
+
+    /** La pantalla giró (las dos orientaciones apaisadas): el giroscopio pasa a los ejes que se ven. */
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (motion != null) motion.setRotation(displayRotation());
+    }
+
+    /**
+     * [Controls] Motion cambió a Off o dejó de estarlo (runtime/ui.c, por JNI desde el hilo de SDL): el giroscopio solo
+     * se lee mientras el juego lo quiera y la actividad esté en primer plano (MotionSensor). El cambio se hace en el
+     * hilo de la interfaz.
+     */
+    public static void setMotionEnabled(boolean on) {
+        motionRequested = on;
+        SDLActivity activity = mSingleton;
+        if (activity instanceof GameActivity) {
+            GameActivity game = (GameActivity) activity;
+            game.runOnUiThread(game::applyMotionRequest);
+        }
+    }
+
+    private void applyMotionRequest() {
+        if (motion != null) motion.setEnabled(motionRequested);
     }
 
     static boolean isMultiplayerActive() {

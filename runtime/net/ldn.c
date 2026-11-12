@@ -350,7 +350,7 @@ static bool ldn_multiplayer_active(void) {
         || mhgu_roomsrv_running() || mhgu_ryusrv_running();
 }
 #ifdef __ANDROID__
-JNIEXPORT jboolean JNICALL Java_com_mhgu_recomp_GameActivity_nativeIsMultiplayerActive(JNIEnv *env, jclass cls) {
+JNIEXPORT jboolean JNICALL Java_com_mhgu_relink_GameActivity_nativeIsMultiplayerActive(JNIEnv *env, jclass cls) {
     (void)env;
     (void)cls;
     return ldn_multiplayer_active() ? JNI_TRUE : JNI_FALSE;
@@ -1129,6 +1129,7 @@ static void link_deliver(const MhguVPacket *p, const uint8_t *data, uint32_t len
 static void link_aux(const uint8_t *data, uint32_t len) {
     emsync_aux_received(data, len);
     hpscale_aux_received(data, len);
+    hitsync_aux_received(data, len);
 }
 
 static void *link_poll_thread(void *arg) {

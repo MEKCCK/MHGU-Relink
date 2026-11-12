@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
     FILE *f = fopen(path, "wb"); assert(f);
     fputs("; Keep this comment\r\n[Display]\r\nMode = Borderless Window\r\nResolution = Desktop\r\nRenderResolution = Auto\r\n"
           "AspectRatio = 21:9\r\nFOV = 1.1 ; camera comment\r\n"
-          "[Performance]\r\nFPS = 60\r\nFrameRate = 60\r\n[Monster HP]\r\nQuest101 = 0.6\r\nQuest102 = 1, 2, 3, 4\r\n"
+          "[Performance]\r\nFPS = 60\r\nFrameRate = 60\r\nGrassOn = Off\r\n[Monster HP]\r\nQuest101 = 0.6\r\nQuest102 = 1, 2, 3, 4\r\n"
           "[Upscaler]\r\nUpscaler = FSR4\r\n"  // (from when FSR 4 existed: ignored, and kept like any unknown line)
           "[Future section]\r\nFutureOption = preserve-me", f);
     fclose(f);
@@ -45,6 +45,8 @@ int main(int argc, char **argv) {
     assert(fabsf(c.fov - 1.1f) < 0.001f);
     assert(g_config.width == 900 && fabsf(g_config.fov - 1.6f) < 0.001f);
     assert(c.hp.quests == 2 && c.language == 0 && c.button_icons == 0);
+    assert(!c.draw_grass && !config_grass_draw());
+    assert(c.motion_mode == MOTION_OFF && config_motion_mode() == MOTION_OFF);
     assert(c.touch_auto_r == 1 && config_live_touch_auto_r() == 1);
     assert(c.touch_floating == 0 && config_live_touch_floating() == 0);
     assert(!config_restart_required(&c)); // Raw Auto/Desktop survives environment resolution.

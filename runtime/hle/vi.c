@@ -135,7 +135,10 @@ static void *vsync_thread(void *arg) {
         next += period;
         plat_sleep_until_ns(next);
         uint64_t now = plat_now_ns();
-        if (now > next + period * 3) next = now;  // don't burst-signal to catch up
+        if (now > next) {  // (woke late: drop the periods already missed, staying on the original grid)
+            uint64_t missed = (now - next) / period;
+            next += missed * period;
+        }
         vi_apply_framerate();
         __atomic_add_fetch(&g_vsync_count, 1, __ATOMIC_RELAXED);
         pthread_mutex_lock(&g_klock);

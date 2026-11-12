@@ -438,6 +438,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_scale);
     SAME(low_end);
     SAME(shadows);
+    SAME(draw_grass);
     SAME(bloom);
     SAME(reverb);
     SAME(adreno_fix);
@@ -488,6 +489,10 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
+    SAME(motion_mode);
+    SAME(motion_gain);
+    SAME(motion_flip_x);
+    SAME(motion_flip_y);
     SAME(mouse_sensitivity);
     SAME(touch_controls);
     SAME(touch_hud);
@@ -1803,6 +1808,10 @@ void reset_section() {
         c.kbm_prompts = f.kbm_prompts;
         c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
+        c.motion_mode = f.motion_mode;
+        c.motion_gain = f.motion_gain;
+        c.motion_flip_x = f.motion_flip_x;
+        c.motion_flip_y = f.motion_flip_y;
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.mouse_sensitivity_y = f.mouse_sensitivity_y;
         c.mouse_invert_y = f.mouse_invert_y;
@@ -2163,6 +2172,7 @@ std::vector<Row> main_rows() {
                     d.render_scale = std::min(d.render_scale, scale);
                     d.fps = std::min(d.fps, LOW_END_FPS);
                     d.shadows = 0;
+                    d.draw_grass = 0;
                     d.bloom = 0;
                     if (v == LOW_END_TOASTER) d.reverb = 0;
                     else if (was == LOW_END_TOASTER) d.reverb = 1;
@@ -2170,6 +2180,7 @@ std::vector<Row> main_rows() {
                     if (d.render_scale <= LOW_END_SCALE) d.render_scale = 100;
                     if (d.fps == LOW_END_FPS) d.fps = 60;
                     d.shadows = 1;
+                    d.draw_grass = 1;
                     d.bloom = 1;
                     d.reverb = 1;
                 }
@@ -2241,6 +2252,7 @@ std::vector<Row> main_rows() {
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
         add_bool(r, "shadows", "Shadows", &c.shadows, ini("ShadowsOn"));
+        add_bool(r, "grass", "Grass", &c.draw_grass, ini("GrassOn"));
         add_bool(r, "bloom", "Bloom and depth of field", &c.bloom, ini("BloomOn"));
         if (c.fsr && !c.low_end) {  // (FSR finds the start of the HUD from these passes: lowend_skipped)
             r.back().enabled = false;
@@ -2357,6 +2369,13 @@ std::vector<Row> main_rows() {
         r.back().help = tr("On: the left stick is hidden until your finger lands, then appears there. Off: it stays at the saved layout position.");
         add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
         r.back().help = tr("The target icon, or a controller's right stick click, keeps the camera on the monster as in the newer games, and bows and bowguns fire at it. Off: the icon turns the camera to it once, as in the original game.");
+#ifdef __ANDROID__
+        add_choice(r, "motion.mode", "Motion controls", c.motion_mode, {tr("Off"), tr("While aiming"), tr("Always on")},
+                   [](int v) { c.motion_mode = v; }, ini("Motion"));
+        number(r, "motion.gain", tr("Motion sensitivity"), &c.motion_gain, lo("MotionGain"), hi("MotionGain"), .05f, ini("MotionGain"));
+        add_bool(r, "motion.x", "Invert motion horizontal", &c.motion_flip_x, ini("MotionInvertX"));
+        add_bool(r, "motion.y", "Invert motion vertical", &c.motion_flip_y, ini("MotionInvertY"));
+#endif
         action(r, "touch.buttons", tr("Buttons on the screen"), []() { push(View::TouchButtons, "tb.0"); });
         r.back().help = tr("Choose which of the game's buttons show on the screen, and add buttons of your own that press several at once.");
         number(r, "touch.camera", tr("Touch camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));

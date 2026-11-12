@@ -102,6 +102,7 @@
     .loading_indicator = 1,                                                                         \
     .low_end = 0,                                                                                   \
     .shadows = 1,                                                                                   \
+    .draw_grass = 1,                                                                                \
     .bloom = 1,                                                                                     \
     .adreno_fix = 0,                                                                                \
     .show_stats = 0,                                                                                \
@@ -127,6 +128,10 @@
     .touch_combo = {"", "", "", "", "", ""},                                                        \
     .touch_combo_pad = {0, 0, 0, 0, 0, 0},                                                          \
     /* [Mouse] */                                                                                   \
+    .motion_mode = MOTION_OFF,                                                                      \
+    .motion_gain = 1.0f,                                                                            \
+    .motion_flip_x = 0,                                                                             \
+    .motion_flip_y = 0,                                                                             \
     .mouse_sensitivity = 1.0f,                                                                      \
     .mouse_sensitivity_y = 1.0f,                                                                    \
     .mouse_invert_y = 0,                                                                            \
@@ -402,6 +407,10 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "ShadowsOn = On\n"
     "\n"
+    "; Draw the scenery grass. Off skips its draw, for speed on a weak phone\n"
+    "; Default: On\n"
+    "GrassOn = On\n"
+    "\n"
     "; The glow around lights and the blur of what is far away (bloom and depth of field). Off: faster on a weak GPU\n"
     "; Default: On\n"
     "BloomOn = On\n"
@@ -462,9 +471,17 @@ static const char DEFAULT_INI[] =
     "PhoneRumble = On\n"
     "\n"
     "; The lock-on, as in the newer games: the target icon or the right stick's click keep the camera on the monster,\n"
-    "; and a bow's or a bowgun's shots go to it. Off: the icon turns the camera to it once, as in the original game\n"
+    "; and a bow's or a bowgun's shots go to it; a tap while locked takes the next large monster in the area.\n"
+    "; Off: the icon turns the camera to it once, as in the original game\n"
     "; Default: On\n"
     "LockOn = On\n"
+    "\n"
+    "; The phone's motion sensor turns the hunt camera: Off, Aiming (only while a bow or bowgun is aimed), or Always\n"
+    "; Default: Off\n"
+    "Motion = Off\n"
+    "MotionGain = 1.0\n"
+    "MotionInvertX = Off\n"
+    "MotionInvertY = Off\n"
     "\n"
     "[Mouse]\n"
     "; Mouse sensitivity\n"
@@ -1001,6 +1018,7 @@ const ConfigSetting g_settings[] = {
     {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
      ERR_MISC},
     ON_OFF("Performance", "ShadowsOn", shadows, false),
+    ON_OFF("Performance", "GrassOn", draw_grass, false),
     ON_OFF("Performance", "BloomOn", bloom, false),
     {"Performance", "AdrenoFix", SET_CHOICE, F(adreno_fix), 0, 0, 0, "Auto,Off", NULL, true, ERR_MISC},
     ON_OFF("Performance", "ShowStats", show_stats, false),
@@ -1020,6 +1038,10 @@ const ConfigSetting g_settings[] = {
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     ON_OFF("Controls", "LockOn", lock_on, false),
+    {"Controls", "Motion", SET_CHOICE, F(motion_mode), 0, 0, 0, "Off,Aiming,Always", NULL, false, ERR_MISC},
+    {"Controls", "MotionGain", SET_FLOAT, F(motion_gain), 0, 0.1f, 5.0f, NULL, NULL, false, ERR_MISC},
+    ON_OFF("Controls", "MotionInvertX", motion_flip_x, false),
+    ON_OFF("Controls", "MotionInvertY", motion_flip_y, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
     ON_OFF("Touch", "MoveHUD", touch_hud, false),
     ON_OFF("Touch", "AutoR", touch_auto_r, false),
@@ -1238,14 +1260,14 @@ bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     switch (s->kind) {
     case SET_BOOL: return parse_bool(v, field_int(c, s->field));
     case SET_INT: {
-        double d = strtod(v, &end);
-        if (end == v || *end || !(d >= s->min && d <= s->max)) return false;
+        double d = strtod(value, &end);
+        if (end == value || end[strspn(end, " \t\r\n")] || !(d >= s->min && d <= s->max)) return false;
         *field_int(c, s->field) = (int)d;
         return true;
     }
     case SET_FLOAT: {
-        float x = strtof(v, &end);
-        if (end == v || *end || !(x >= s->min && x <= s->max)) return false;
+        float x = strtof(value, &end);
+        if (end == value || end[strspn(end, " \t\r\n")] || !(x >= s->min && x <= s->max)) return false;
         *field_float(s, c) = x;
         return true;
     }

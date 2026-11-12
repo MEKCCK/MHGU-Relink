@@ -1108,9 +1108,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
         tap_due();
         if (!config_live_lock_on()) {  // (the original game's: L turns the camera to the target, once)
             pulse(s, B(BTN_L), 60 * MS);
+        } else if (s.lock) {  // (already on: the next large monster, around, as the newer games)
+            mousecam_target_cycle();
+            fprintf(stderr, "[touch] lock-on: next target\n");
         } else {
-            s.lock = !s.lock, s.lock_next = s.lock_until = 0, s.hunt_ns = now;
-            fprintf(stderr, "[touch] lock-on %s\n", s.lock ? "on" : "off");
+            s.lock = true, s.lock_next = s.lock_until = 0, s.hunt_ns = now;
+            fprintf(stderr, "[touch] lock-on on\n");
         }
     }
     // the settings button: a tap opens the port's menu (a long press opened the editor: touch_input)

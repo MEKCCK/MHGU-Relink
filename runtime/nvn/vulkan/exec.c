@@ -3392,6 +3392,24 @@ static VkDescriptorBufferInfo zero_ubo(uint64_t size) {
     return (VkDescriptorBufferInfo){shared_zeros.buf, shared_zeros.off, size};
 }
 
+// hdr.c's parameters: one block for every draw of a submission while the shared path is on, copied again only when the
+// submission number changes or the values do (hdr.c recomputes them from the settings, which no draw changes). With
+// MHGU_VK_SHARED=0 every draw keeps a copy of its own, as before.
+static struct { uint64_t sub; float v[HDR_NPARAMS]; VkSpan span; bool have; } hdr_ubo;
+static VkDescriptorBufferInfo hdr_params_ubo(void) {
+    float p[HDR_NPARAMS];
+    vk_hdr_params(p);
+    if (!shared_on()) return ubo_span(vk_transient_copy(p, sizeof p, 256), sizeof p);
+    uint64_t sub = vk_pending_seq();
+    if (!hdr_ubo.have || hdr_ubo.sub != sub || memcmp(hdr_ubo.v, p, sizeof p)) {
+        hdr_ubo.span = vk_transient_copy(p, sizeof p, 256);
+        memcpy(hdr_ubo.v, p, sizeof p);
+        hdr_ubo.sub = sub;
+        hdr_ubo.have = true;
+    }
+    return ubo_span(hdr_ubo.span, sizeof p);
+}
+
 // Constant buffer k of a stage: 0 the driver's (storage buffer table, compute group counts), 1 the compiler constants
 // stored after the shader code, 3.. the game's bound uniform buffers. Copied into transient memory.
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
@@ -3831,9 +3849,7 @@ static VkDescriptorSet stage_set(int nbinds, const VkBindingInfo *binds, VkDescr
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == 18) {  // rscale: after the textures (below)
             rs_write = n;
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == HDR_PARAMS_BINDING) {  // (hdr.c)
-            float hp[HDR_NPARAMS];
-            vk_hdr_params(hp);
-            bi[n] = ubo_span(vk_transient_copy(hp, sizeof hp, 256), sizeof hp);
+            bi[n] = hdr_params_ubo();
             w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == ALPHA_REF_BUFFER_INDEX) {
             float ref[4] = {st.alpha_ref, 0, 0, 0};
@@ -4611,7 +4627,7 @@ static void draw(CmdRec *r, bool indexed) {
         max_index = first + count;
         if (!native) {
             uint32_t *e = expand_indices(mode, count, NULL, 0, first, &icount);
-            ib = vk_transient_copy(e, (uint64_t)icount * 4 + 4, 4);
+            ib = vk_transient_copy(e, (uint64_t)icount * 4, 4);
             free(e);
         }
     } else {
@@ -4627,7 +4643,7 @@ static void draw(CmdRec *r, bool indexed) {
         if (native && itype != 0) {
             itype_vk = itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
             icount = count;
-            ib = vk_transient_copy(src, (uint64_t)count * isz + 4, 4);
+            ib = vk_transient_copy(src, (uint64_t)count * isz, 4);
             if (isz == 2) max_index = max_index16(src, count, (uint16_t)restart);
             else { const uint32_t *s = src; for (uint32_t i = 0; i < count; i++) if (s[i] > max_index && s[i] != restart) max_index = s[i]; }
         } else if (native) {  // 8-bit indices: widened to 16
@@ -4640,7 +4656,7 @@ static void draw(CmdRec *r, bool indexed) {
         } else {
             uint32_t *e = expand_indices(mode, count, src, (int)itype, 0, &icount);
             for (uint32_t i = 0; i < icount; i++) if (e[i] > max_index) max_index = e[i];
-            ib = vk_transient_copy(e, (uint64_t)icount * 4 + 4, 4);
+            ib = vk_transient_copy(e, (uint64_t)icount * 4, 4);
             free(e);
         }
         max_index += 1;

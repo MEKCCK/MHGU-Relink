@@ -159,10 +159,23 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 - `Scan` 合并 LAN、hub 服务器、RyuLdn 服务器与房间内的大厅；`Connect` 按来源选择对应链路。
 - `Crossplay = Mixed`（或 Ryujinx 模式同时配置了 RoomServer/RoomHost）时，混合 hub（`bridge.rs`）会把房间玩家桥接到 Ryu 大厅，
   地址/MAC 双向改写；房间客户端与服务器协议保持逐字节兼容。
-- 端口类辅助功能（`emsync`、`hpscale` 的 AUX 消息）在 crossplay 下关闭，与上游相同。
+- 端口类辅助功能（`emsync`、`hpscale` 的 AUX 消息）在 crossplay 下关闭，与上游相同；延迟补偿（`hitsync`）是例外，
+  它在 crossplay 下改走 UDP `47318`。
+
+## 延迟补偿（Lag Compensation）
+
+`[Multiplayer] LagCompensation`（默认开）让近战和弓箭/弩的命中按攻击者本地看到的结果结算：攻击者自己的游戏把命中差量
+（部位伤害、状态、KO、仇恨）报告给运行怪物的主机，主机忽略该玩家副本的命中，只应用报告。协议细节：
+
+- 非 crossplay：每个 `F_AUX`（`MAGIC 0xE7`）走 Rust 链路的可靠、有序通道；主机转发给其它站点。
+- Crossplay：同样的消息作为 UDP 广播发到本地联机网络的 `47318` 端口，供模拟器侧的 Forge 延迟补偿插件互通；
+  内置实现与插件不会重复报告。
+- 消息：Hello（每秒及状态变化时，带 slot、开关、能力位，4 字节旧格式兼容）、命中报告（每个命中一次，含序号和怪物状态差量）、
+  远程攻击单独用 shot 消息；3.5 秒听不到 Hello 视为对方关闭。混合版本会安全退化为“按主机自己的副本结算”。
 
 测试（无需游戏文件）：
 
 ```sh
 cargo test -p mhgu-crossplay      # RyuLdn 客户端/服务器、suyu 房间、混合 hub 协议
+cargo test -p mhgu-link-ffi -p mhgu-hub
 ```

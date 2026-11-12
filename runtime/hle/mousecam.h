@@ -17,3 +17,9 @@ void mousecam_init(void);              // hooks the quest camera's stick handler
 bool mousecam_active(void);            // the hunt camera takes the mouse now (its stick handler ran just now)
 void mousecam_status(void);            // log where the hunt camera looks (control command "camstat")
 void mousecam_add(float dx, float dy);  // counts the mouse moved (x right, y down; any thread)
+// The phone turned by (yaw, pitch) radians: yaw to the right, pitch looking up (runtime/host_input.c's motion sensor;
+// MotionGain and the camera's units are applied in take_turn), and forgotten again (a mode turned off meanwhile)
+void mousecam_motion_add(float yaw, float pitch);  // any thread
+void mousecam_motion_reset(void);                  // any thread
+// The lock-on's next large monster (runtime/touch.cpp's target control): the hunt camera takes it on its next update
+void mousecam_target_cycle(void);                  // any thread

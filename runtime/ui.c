@@ -82,6 +82,19 @@ static void frame_cap_to_activity(float fps) {
     if (cls) (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, act);
 }
+// The phone's gyro is registered only while [Controls] Motion has it (runtime/host_input.c turns its samples into the
+// hunt camera's turns); MotionSensor.java unregisters it on its own when the app goes to the background.
+static void motion_to_activity(bool on) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "setMotionEnabled", "(Z)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, on ? JNI_TRUE : JNI_FALSE);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
 #endif
 static bool restart_application(void) {
 #ifdef __ANDROID__
@@ -433,6 +446,9 @@ int ui_run(void) {
         static float screen_for = -1;  // (the screen's refresh rate follows the FPS limit: GameActivity.setFrameCap)
         float fps_now = config_live_fps();
         if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);
+        static int motion_for = -1;  // ([Controls] Motion: the gyro is read only while a mode has it)
+        int motion_now = config_motion_mode() != MOTION_OFF;
+        if (motion_now != motion_for) motion_for = motion_now, motion_to_activity(motion_now);
 #endif
 #ifndef __ANDROID__
         if (action == 6)  // (request 4: the save's folder. SDL wants its dialogs started on this thread)

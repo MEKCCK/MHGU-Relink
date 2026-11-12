@@ -18,6 +18,7 @@
 
 static Config saved, startup;
 static SDL_AtomicInt live_touch_floating;
+static SDL_AtomicInt grass_switch = {1}, motion_mode, motion_flip_x, motion_flip_y, motion_gain = {0x3f800000};
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, menu_chord = {1}, show_battery;
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
@@ -118,6 +119,11 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->show_stats != saved.show_stats) SDL_SetAtomicInt(&live_show_stats, c->show_stats);
     if (all || c->pause_background != saved.pause_background) SDL_SetAtomicInt(&live_pause_bg, c->pause_background);
     if (all || c->shadows != saved.shadows) SDL_SetAtomicInt(&live_shadows, c->shadows);
+    if (all || c->draw_grass != saved.draw_grass) SDL_SetAtomicInt(&grass_switch, c->draw_grass);
+    if (all || c->motion_mode != saved.motion_mode) SDL_SetAtomicInt(&motion_mode, c->motion_mode);
+    if (all || c->motion_flip_x != saved.motion_flip_x) SDL_SetAtomicInt(&motion_flip_x, c->motion_flip_x);
+    if (all || c->motion_flip_y != saved.motion_flip_y) SDL_SetAtomicInt(&motion_flip_y, c->motion_flip_y);
+    if (all || c->motion_gain != saved.motion_gain) set_float(&motion_gain, c->motion_gain);
     if (all || c->bloom != saved.bloom) SDL_SetAtomicInt(&live_bloom, c->bloom);
     if (all || c->reverb != saved.reverb) SDL_SetAtomicInt(&live_reverb, c->reverb);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
@@ -297,11 +303,17 @@ int config_live_phone_rumble(void) { return SDL_GetAtomicInt(&live_phone_rumble)
 int config_live_show_stats(void) { return SDL_GetAtomicInt(&live_show_stats); }
 int config_live_pause_background(void) { return SDL_GetAtomicInt(&live_pause_bg); }
 int config_live_shadows(void) { return SDL_GetAtomicInt(&live_shadows); }
+int config_grass_draw(void) { return SDL_GetAtomicInt(&grass_switch); }
+int config_motion_mode(void) { return SDL_GetAtomicInt(&motion_mode); }
+int config_motion_flip_x(void) { return SDL_GetAtomicInt(&motion_flip_x); }
+int config_motion_flip_y(void) { return SDL_GetAtomicInt(&motion_flip_y); }
+float config_motion_gain(void) { return get_float(&motion_gain); }
 int config_live_bloom(void) { return SDL_GetAtomicInt(&live_bloom); }
 int config_live_reverb(void) { return SDL_GetAtomicInt(&live_reverb); }
 // (config.c: a test run's MHGU_SHADOWS, MHGU_BLOOM, MHGU_FPS_LIMIT, after the file: live, not saved)
 void config_live_test(const Config *c) {
     SDL_SetAtomicInt(&live_shadows, c->shadows);
+    SDL_SetAtomicInt(&grass_switch, c->draw_grass);
     SDL_SetAtomicInt(&live_bloom, c->bloom);
     set_float(&live_fps, (float)c->fps);
 }
