@@ -358,7 +358,7 @@ JNIEXPORT jboolean JNICALL Java_com_mhgu_relink_GameActivity_nativeIsMultiplayer
 #endif
 
 bool ldn_hosting(void) { return L.state == ST_AP_CREATED; }
-bool ldn_crossplay(void) { return L.ryu || L.room; }
+bool ldn_crossplay(void) { return (L.ryu || L.room) && ldn_net_up(); }  // (a lobby that is not up yet is not crossplay)
 bool ldn_party(int *n, int *max, char *id, size_t size) {
     pthread_mutex_lock(&L.mu);
     bool up = ldn_net_up();
@@ -380,12 +380,17 @@ bool ldn_party(int *n, int *max, char *id, size_t size) {
 
 static void ip_bytes(uint32_t ip, uint8_t b[4]) { b[0] = (uint8_t)(ip >> 24); b[1] = (uint8_t)(ip >> 16); b[2] = (uint8_t)(ip >> 8); b[3] = (uint8_t)ip; }
 static void ryu_xmit(const VPacket *p, const void *data, uint32_t len) {
+    if (p->proto != VPROTO_UDP) return;  // (the game's virtual network is UDP; the server relays no TCP)
     bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
     RyuProxy r = {p->src_ip, all ? ldn_broadcast_ip() : p->dst_ip, p->src_port, p->dst_port, 17};
     mhgu_ryu_send(&r, data, len);
 }
 static void room_xmit(const VPacket *p, const void *data, uint32_t len) {
+    if (p->proto != VPROTO_UDP) return;
     bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
+    // (a suyu room relays a broadcast to the other members only: the sender's own copy comes from here)
+    if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);
+    if (p->dst_ip == L.own_ip) return;
     uint8_t s[4], d[4];
     ip_bytes(p->src_ip, s);
     ip_bytes(p->dst_ip, d);
