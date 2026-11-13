@@ -12,7 +12,7 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };
 enum { TOUCH_AUTO, TOUCH_ON, TOUCH_OFF };  // [Touch] Controls (runtime/touch.cpp)
-enum { MOTION_OFF, MOTION_AIM, MOTION_ALWAYS };  // [Controls] Motion: the phone turning the hunt camera
+enum { MOTION_OFF, MOTION_AIM, MOTION_ALWAYS };  // MOTION_ALWAYS: legacy alias for aiming only
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };  // [Performance] ShowBattery
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
@@ -159,6 +159,7 @@ typedef struct {
     int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
     int low_end;              // [Performance] LowEnd: 0 off, 1 a weak GPU's frame, 2 Toaster (LOW_END_TOASTER: all of it and more)
     int lock_on;              // [Controls] LockOn: the camera stays on the monster, and with it a bow's or gun's shots (touch.cpp)
+    int persistent_lock_on;   // [Controls] PersistentLockOn: keep the lock until cancelled, including tracking while aiming
     // (every field's default is in config.c's CONFIG_DEFAULT_VALUES, by position: a new field needs one there)
     int shadows;              // [Performance] Shadows: 0 none drawn (nvn/vulkan/exec.c shadow_skipped)
     int draw_grass;           // [Performance] GrassOn: 0 the scenery grass draw is skipped (hle/grass.c)
@@ -331,6 +332,7 @@ int config_live_touch_hud(void);
 int config_live_touch_auto_r(void);
 int config_live_touch_floating(void);
 int config_live_lock_on(void);
+int config_live_persistent_lock_on(void);
 int config_live_touch_show(int button);        // TB_*
 void config_toggle_touch_dpad(void);           // shared by the hunt and menu layouts
 int config_live_touch_profile(void);

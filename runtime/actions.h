@@ -189,7 +189,7 @@ typedef struct {
     // The physical codes Tier 0 reads for a Switch button: dev 0 the controller's, 1 the keyboard's and mouse's.
     int (*sw_sources)(void *user, int btn, int dev, int *codes, int max);
     uint64_t sw_word;    // the Switch buttons Tier 0 has set (host_input.c's word, after its own suppressions)
-    uint64_t sw_script;  // those of them from scripted input (MHGU_INPUT, the control file), which have no source
+    uint64_t sw_script;  // native touch/script buttons (MHGU_INPUT, control file), which have no physical source
     bool suppress;       // Forge's menu or a text entry has the input: nothing is held
     bool dash_zr;        // the dash role is ZR (options +0x446E)
     uint64_t frame;      // presented frames (for act_inject)

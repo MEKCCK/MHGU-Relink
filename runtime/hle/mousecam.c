@@ -31,14 +31,11 @@
 //
 // A shot with the lock-on on goes to the monster: arrows and shells leave along the hunter's heading (hunter +0x14a0, in
 // the camera's units; (x, z) = (sin, cos); written, the hunter turns at once; +0xfec and +0x2ee4 are copies of it; its
-// place is at +0xa0; measured on a Motorola g06). So with a bow or a bowgun, while the fire button is held and a moment
-// after, the heading is set toward the monster; aiming (R held) keeps it there while the camera is not being turned by
-// hand, and the camera follows the hunter's heading then.
+// place is at +0xa0; measured on a Motorola g06). An unaimed fire press turns toward the monster for that shot;
+// manual aiming retains the player's direction unless PersistentLockOn is enabled.
 //
-// The height: aiming, the shot leaves along the aim's pitch: hunter +0x14b8 (a float, -100 down .. 100 up; +0x14bc a copy),
-// from which the game makes +0x2714 (16-bit units: 100 is 45 degrees up, -100 is 30 down). A shot that isn't aimed ignores
-// them, it leaves level whatever they say (a Motorola g06: a shell in the same place at 0 and at -30 degrees), so with the
-// lock-on on a gun's fire button aims first (runtime/touch.cpp).
+// A bow's charge from normal stance is redirected until its release. Bowguns redirect only unaimed shots;
+// their unaimed shells stay level. Without persistent tracking, manual aim and styles keep their own direction.
 #include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -85,12 +82,23 @@ static int g_log_on = -1;               // MHGU_MOUSECAM_LOG=1: every turn appli
 static bool g_last_aim;                 // (the last turn went to the aiming hunter)
 static uint32_t g_cam;             // (the game's thread) the camera the stick handler last had
 static uint32_t g_stick_runs;      // (the game's thread) how many times it ran
+static uint32_t g_aim_hunter, g_aim_action;
+static uint64_t g_aim_seen_ns;
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
 bool mousecam_active(void) {
     uint64_t seen = g_seen_ns;
     return seen && plat_now_ns() - seen < ACTIVE_NS;
+}
+
+bool mousecam_hunter_aiming(uint32_t hunter) {
+    uint64_t seen = __atomic_load_n(&g_aim_seen_ns, __ATOMIC_ACQUIRE);
+    if (!seen || !hunter || hunter != __atomic_load_n(&g_aim_hunter, __ATOMIC_RELAXED) ||
+        plat_now_ns() - seen >= 150000000ull) return false;
+    unsigned action = weapon_action(hunter);
+    // Recoil keeps the scope open briefly without calling the aim handler. A common idle/roll/knockback ends it.
+    return action == __atomic_load_n(&g_aim_action, __ATOMIC_RELAXED) || (action >> 16 & 0x7fff) == 0x10;
 }
 
 void mousecam_add(float dx, float dy) {
@@ -122,7 +130,6 @@ static int clamp_pitch(int p) { return p < -PITCH_MAX ? -PITCH_MAX : p > PITCH_M
 
 bool touch_lock_active(void);  // (runtime/touch.cpp: the lock-on is on and the player is not turning the camera)
 bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doing)
-bool touch_lock_assist(void);  // (a locked shot of the touch controls holds R for its aim now)
 #define ZONE       0x1054u       // (u8, of a hunter and of a monster: which zone of the map it is in)
 #define MUZZLE_Y   110.0f        // (a shot leaves this far above the hunter's feet)
 #define PL_PLACE   0xa0u
@@ -278,20 +285,44 @@ static void lock_follow(uint32_t cam, float dt) {
 
 // A bow's or a bowgun's shot, with the lock-on on: the hunter turned to the monster, and its aim raised to it (see the top)
 void mousecam_lock_shot(void) {
-    static uint64_t fired;
+    static uint64_t fired, previous_buttons, previous_action_ns;
+    static uint32_t previous_hunter, previous_action;
+    static int previous_drawn;
+    static bool bow_charge;
     uint32_t h = weapon_hunter();
     int ranged = weapon_ranged(h);
-    if (!ranged || !touch_lock_on()) return;
+    if (h != previous_hunter || !ranged || !touch_lock_on()) {
+        previous_hunter = h, previous_buttons = fired = previous_action_ns = 0;
+        previous_action = 0, previous_drawn = -1, bow_charge = false;
+        if (!ranged || !touch_lock_on()) return;
+    }
     uint64_t b, now = plat_now_ns();
     int32_t sticks[4];
     input_get(&b, sticks);
     // (a bowgun: A fires; a bow: what draws it, by the game's Bow Controls; A is its melee attack)
-    bool fire = (b & (ranged != WEAPON_BOW ? 1ull << BTN_A : weapon_bow_type() ? 1ull << BTN_R : 1ull << BTN_X)) != 0;
+    uint64_t fire_button = 1ull << (ranged != WEAPON_BOW ? BTN_A : weapon_bow_type() ? BTN_R : BTN_X);
+    bool fire = (b & fire_button) != 0, pressed = fire && !(previous_buttons & fire_button);
+    previous_buttons = b;
+    unsigned action = weapon_action(h);
+    bool aiming = weapon_aiming(h);
+    int drawn = weapon_drawn();
+    bool normal_before = previous_action == 0x00010000u && previous_drawn == 1 &&
+                         previous_action_ns && now - previous_action_ns < ACTIVE_NS;
+    previous_action = action, previous_drawn = drawn, previous_action_ns = now;
+    uint64_t aim_button = 1ull << (ranged == WEAPON_BOW && weapon_bow_type() ? BTN_X : BTN_R);
+    bool cancel = aiming || (b & aim_button) || drawn != 1 || (b & ((1ull << BTN_B) | (1ull << BTN_Y))) ||
+                  (ranged == WEAPON_BOW ? (b & (1ull << BTN_A)) : (b & (1ull << BTN_X)));
+    if (cancel) { fired = 0, bow_charge = false; return; }
+    if (ranged == WEAPON_BOW) {
+        // The common standing action is 1:0 (docs/GAME-ACTIONS.md). Never start assistance in a dodge or a style move.
+        if (pressed) bow_charge = action == 0x00010000u || (normal_before && weapon_moving(h));
+        if (action != 0x00010000u && (action >> 16 & 0x7fff) != 0x10) bow_charge = false;
+        if (!bow_charge) return;
+    }
     if (fire) fired = now;
-    // (the touch controls' locked shot holds R for the aim: an aim whose actions weapon_aiming doesn't know, another
-    // style's, counts too)
-    bool aiming = weapon_aiming(h) || (ranged != WEAPON_BOW && touch_lock_assist());
-    if (!(aiming && touch_lock_active()) && !((fire || now - fired < SHOT_NS) && (aiming || weapon_moving(h)))) return;
+    // A fire press is enough to redirect a locked bowgun shot while standing still. R remains entirely user-controlled.
+    bool shooting = fire || (fired && now - fired < SHOT_NS);
+    if (!shooting) { bow_charge = false; return; }
     float x = LDF(h + PL_PLACE), y = LDF(h + PL_PLACE + 4), z = LDF(h + PL_PLACE + 8), t[3];
     if (!isfinite(x) || !lock_target(x, y, z, t, true)) return;
     float body[3], aim_y = t[1] + LOCK_HEIGHT;  // (no skeleton to read: a fixed height over its feet)
@@ -300,7 +331,7 @@ void mousecam_lock_shot(void) {
     if (dist < LOCK_NEAR0) return;  // (under it: the bearing swings)
     const float U = 65536.0f / (2.0f * 3.14159265f);
     ST32(h + PL_AIM_YAW, (uint32_t)lrintf(atan2f(dx, dz) * U) & 0xffffu);
-    if (!aiming && ranged != WEAPON_BOW) return;
+    if (ranged != WEAPON_BOW) return;
     float rise = atan2f(aim_y - (y + MUZZLE_Y), dist);  // (radians; up is positive)
     const float UP = 45.0f * 3.14159265f / 180.0f, DOWN = 30.0f * 3.14159265f / 180.0f;
     if (rise > UP) rise = UP;
@@ -391,7 +422,7 @@ static void camera_stick(Cpu *c) {
     camlog(cam);
     g_cam = cam, g_stick_runs++;
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
-    if (sane(cam) && seen && now - seen < ACTIVE_NS && touch_lock_active()) {
+    if (sane(cam) && seen && now - seen < ACTIVE_NS && touch_lock_active() && !weapon_aiming(weapon_hunter())) {
         float dt = (now - seen) / 1e9f;
         lock_follow(cam, dt > 0.1f ? 0.1f : dt);
     }
@@ -434,15 +465,60 @@ static int aim_pitch(Cpu *c, uint32_t cam, uint32_t pl, int ip) {
     return (int)((aim - was) * units_per_aim);
 }
 
+// Scoped tracking uses the same body point as a locked shot and the native camera's aim limits.
+static bool lock_aim(Cpu *c, uint32_t cam, uint32_t pl, uint32_t mode) {
+    if (!config_live_persistent_lock_on() || !touch_lock_on()) return false;
+    float x = LDF(pl + PL_PLACE), y = LDF(pl + PL_PLACE + 4), z = LDF(pl + PL_PLACE + 8), t[3];
+    if (!isfinite(x) || !isfinite(y) || !isfinite(z) || !lock_target(x, y, z, t, true)) return false;
+    float body[3];
+    if (body_center(g_lock_en, t[1], body)) t[0] = body[0], t[1] = body[1], t[2] = body[2];
+    else t[1] += LOCK_HEIGHT;
+    float dx = t[0] - x, dz = t[2] - z, dist = sqrtf(dx * dx + dz * dz);
+    if (dist < LOCK_NEAR0) return false;
+    Cpu params = *c;
+    float up = cam_param(&params, cam, QC_PARAM_AIM_UP), down = cam_param(&params, cam, QC_PARAM_AIM_DOWN);
+    if (!isfinite(up) || !isfinite(down) || up <= 0 || down <= 0 || up >= 90 || down >= 90) return false;
+    int up_units = (int)(up * UNITS_PER_DEG + .5f), down_units = (int)(down * UNITS_PER_DEG + .5f);
+    if (!up_units || !down_units) return false;
+    int pitch = (int)lrintf(atan2f(t[1] - (y + MUZZLE_Y), dist) * UNITS_PER_RAD);
+    if (pitch > up_units) pitch = up_units;
+    if (pitch < -down_units) pitch = -down_units;
+    if (mode == 1) {
+        if (pitch > AIM_LEAN_MAX) pitch = AIM_LEAN_MAX;
+        if (pitch < -AIM_LEAN_MAX) pitch = -AIM_LEAN_MAX;
+    }
+    float aim = (float)(pitch + down_units) * (2.0f * AIM_PITCH_MAX) / (up_units + down_units) - AIM_PITCH_MAX;
+    uint32_t yaw = (uint32_t)lrintf(atan2f(dx, dz) * UNITS_PER_RAD) & 0xffffu;
+    ST32(pl + PL_AIM_YAW, yaw);
+    STF(pl + PL_AIM_PITCH, aim), STF(pl + PL_AIM_PITCH2, aim);
+    ST16(pl + PL_AIM_LEAN, (uint16_t)(int16_t)pitch);
+    // The camera looks along (-sin, -cos); the hunter's heading is (sin, cos).
+    uint32_t camera_yaw = (yaw + 0x8000u) & 0xffffu;
+    ST32(cam + QC_EYE_YAW, camera_yaw), ST32(cam + QC_YAW_NOW, camera_yaw), ST32(cam + QC_YAW_TO, camera_yaw);
+    ST32(cam + QC_EYE_PITCH, (uint32_t)pitch & 0xffffu);
+    ST32(cam + QC_PITCH_NOW, (uint32_t)pitch & 0xffffu), ST32(cam + QC_PITCH_TO, (uint32_t)pitch & 0xffffu);
+    return true;
+}
+
 static void aim_turn(Cpu *c) {
     uint32_t pl = c->r[0], mode = c->r[1], cam = g_cam;
     fnhook_call_original(c, FN_AIM_TURN);
     static uint32_t last_runs;
     bool stick_ran = g_stick_runs != last_runs;  // (some options keep the stick on the camera while aiming)
     last_runs = g_stick_runs;
-    if (stick_ran || !sane(pl) || !sane(cam) || LD32(cam + QC_PLAYER) != pl) return;
+    if (!sane(pl) || !sane(cam) || LD32(cam + QC_PLAYER) != pl || !weapon_ranged(pl)) return;
+    __atomic_store_n(&g_aim_hunter, pl, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_aim_action, weapon_action(pl), __ATOMIC_RELAXED);
+    __atomic_store_n(&g_aim_seen_ns, plat_now_ns(), __ATOMIC_RELEASE);
     int iy, ip;
-    if (!take_turn(LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT), &iy, &ip)) return;
+    bool turned = !stick_ran && take_turn(LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT), &iy, &ip);
+    if (lock_aim(c, cam, pl, mode)) {
+        g_last_aim = true;
+        // Absolute tracking consumes manual input too: nothing queued can jump the aim when the lock is released.
+        g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0;
+        return;
+    }
+    if (stick_ran || !turned) return;
     g_last_aim = true;
     uint32_t yaw0 = LD32(pl + PL_AIM_YAW) & 0xffffu, pitch0 = LD32(cam + QC_EYE_PITCH) & 0xffffu;
     if (iy) {

@@ -12,8 +12,9 @@ extern "C" {
 
 // host main thread (runtime/host_input.c)
 bool touch_event(const SDL_Event *e);  // a finger event: true when it was the controls'
-void touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
-                 float *cam_dx, float *cam_dy);
+// ORs into buttons and returns the buttons contributed by touch, including overlaps with other input sources.
+uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
+                     float *cam_dx, float *cam_dy);
 // game thread (runtime/overlay.cpp): drawn over the game, under the port's menus
 bool touch_visible(void);
 bool touch_drawn(void);  // (something of them is on the screen: the settings button alone, when they are hidden)
@@ -28,9 +29,10 @@ void touch_reset(void);  // every finger gone (the app went to the background: r
 // the Hunter Arts and the target camera to the top right (nvn/vulkan/exec.c)
 extern volatile int g_touch_hud;
 // Where those moved HUD parts are drawn, so a finger on them works them: a tap on the item bar uses the item and a
-// swipe turns it, a tap on a Hunter Art's panel performs it, a tap on the target camera's icon turns the lock-on on
-// or off. The render thread passes each moved part's place (the game's position, and where it went on the 1280x720
-// canvas that covers the screen: nvn/vulkan/exec.c cbuf_info), and closes each presented frame (device.c).
+// swipe turns it, a tap on a Hunter Art's panel performs it, a tap on the target camera's icon enables the lock-on
+// and subsequent taps select the next monster; holding the icon for 500 ms toggles the lock. The render thread passes
+// each moved part's place (the game's
+// position, and where it went on the 1280x720 canvas: nvn/vulkan/exec.c cbuf_info), and closes each frame (device.c).
 enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_COUNT };
 // where the player put them in the layout editor: an offset from their default place, in the game's 16:9 canvas
 // units (1280 x 720); the render thread adds it (nvn/vulkan/exec.c)

@@ -49,6 +49,7 @@ int main(int argc, char **argv) {
     assert(c.motion_mode == MOTION_OFF && config_motion_mode() == MOTION_OFF);
     assert(c.touch_auto_r == 1 && config_live_touch_auto_r() == 1);
     assert(c.touch_floating == 0 && config_live_touch_floating() == 0);
+    assert(!c.persistent_lock_on && !config_live_persistent_lock_on());
     assert(!config_restart_required(&c)); // Raw Auto/Desktop survives environment resolution.
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
     Config volume_only=c; volume_only.volume=35;
@@ -60,12 +61,14 @@ int main(int argc, char **argv) {
     c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f; c.mouse_sensitivity_y=1.5f; c.mouse_invert_y=1; c.mouse_smoothing=0.5f; c.mouse_capture=MOUSE_CAPTURE_HUNT;
     c.touch_auto_r = 0;
     c.touch_floating = 1;
+    c.persistent_lock_on = 1;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
     assert(config_live_fps()==120 && fabsf(config_live_fov()-1.2f)<0.001f);
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(!config_live_touch_auto_r());
     assert(config_live_touch_floating());
+    assert(config_live_persistent_lock_on());
     assert(config_live_mouse_sensitivity_y()==1.5f && config_live_mouse_invert_y()==1 && config_live_mouse_smoothing()==0.5f && config_live_mouse_capture()==MOUSE_CAPTURE_HUNT);
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
     assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
@@ -108,6 +111,7 @@ int main(int argc, char **argv) {
     assert(strstr(text, "Language = Spanish") && strstr(text, "ButtonIcons = PlayStation"));
     assert(strstr(text, "AutoR = Off"));
     assert(strstr(text, "FloatingStick = On"));
+    assert(strstr(text, "PersistentLockOn = On"));
     // Invalid edits must leave both the file and the live audio setting intact.
     Config bad=c;bad.menu_confirm=3;assert(!config_save(&bad,error,sizeof error));
     bad=c;bad.menu_scale=49;assert(!config_save(&bad,error,sizeof error));
@@ -120,6 +124,8 @@ int main(int argc, char **argv) {
     assert(!config_save(&bad, error, sizeof error) && !config_live_touch_auto_r());
     bad = c; bad.touch_floating = 2;
     assert(!config_save(&bad, error, sizeof error) && config_live_touch_floating());
+    bad = c; bad.persistent_lock_on = 2;
+    assert(!config_save(&bad, error, sizeof error) && config_live_persistent_lock_on());
     bad = c; bad.fov = NAN;
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.ldn_port = 0; assert(!config_save(&bad, error, sizeof error));
@@ -142,6 +148,7 @@ int main(int argc, char **argv) {
     assert(loaded.language == 1 && config_language() == 1 && loaded.button_icons == 2);
     assert(!loaded.touch_auto_r && !config_live_touch_auto_r());
     assert(loaded.touch_floating && config_live_touch_floating());
+    assert(loaded.persistent_lock_on && config_live_persistent_lock_on());
     assert(loaded.menu_scale == 170 && loaded.menu_confirm == MENU_CONFIRM_SOUTH);
     assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
     assert(loaded.fps == 120 && loaded.volume == 25 && loaded.hp.quests == 1);
@@ -153,6 +160,7 @@ int main(int argc, char **argv) {
     assert(config_restart_key("RenderResolution") && !config_restart_key("FOV"));
     assert(!config_restart_key("MSAA") && !config_restart_key("VSync") && !config_restart_key("FaceButtons"));
     assert(!config_restart_key("AutoR"));
+    assert(!config_restart_key("PersistentLockOn"));
     assert(!config_restart_key("FloatingStick"));
     assert(config_restart_key("framerate") == config_restart_key("FPS") && !config_restart_key("NoSuchKey"));
     // The menu's help: the default ini's comments, wrapped lines joined, the default last (none when empty)

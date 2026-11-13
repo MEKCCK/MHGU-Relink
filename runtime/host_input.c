@@ -34,6 +34,7 @@
 #include "menu_confirm.h"
 #include "forge.h"
 #include "haptics.h"
+#include "gyro.h"
 #include "hle/chat.h"
 #include "hle/input.h"
 #include "hle/input_view.h"
@@ -907,6 +908,7 @@ static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the 
 }
 
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
+static void motion_sample(SDL_JoystickID source, SDL_SensorType sensor, uint64_t sample_ns, float horizontal, float vertical);
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
     else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
@@ -1018,6 +1020,14 @@ void host_input_event(const SDL_Event *e) {
         if (i >= 0) pads[i].real |= padmap_custom(e->gdevice.which);
         break;
     }
+    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+        // SDL reports controller gyro rates in controller axes: Y is yaw and X is pitch.
+        if (e->gsensor.sensor == SDL_SENSOR_GYRO || e->gsensor.sensor == SDL_SENSOR_GYRO_L ||
+            e->gsensor.sensor == SDL_SENSOR_GYRO_R)
+            motion_sample(e->gsensor.which, (SDL_SensorType)e->gsensor.sensor,
+                          e->gsensor.sensor_timestamp ? e->gsensor.sensor_timestamp : e->gsensor.timestamp,
+                          -e->gsensor.data[1], e->gsensor.data[0]);
+        break;
     }
 }
 
@@ -1122,64 +1132,69 @@ static void mouse_update(int *rx, int *ry) {
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
 }
 
-// The phone's turn, for the hunt camera ([Controls] Motion: Off, Aiming or Always). MotionSensor.java (the sensor
-// thread) leaves its latest angular rates here, in radians a second: horizontal when the phone turns to the player's
-// right, vertical when its top edge goes up. The rates are integrated here, on the game's thread, each update, and
-// handed to the hunt camera as an angle (runtime/hle/mousecam.c: MotionGain, the camera's units). The first sample
-// after the sensor was off, and every one after a gap, only sets the baseline: the time it was not running is no turn.
-#define MOTION_STALE_NS 200000000ull  // (no sample this recently: the sensor is paused or off)
-#define MOTION_DT_MAX 0.05f           // seconds of turn one update may take (a stall is not a swipe)
-#define MOTION_DEAD_ZONE 0.03f        // rad/s: the hand's tremors, which would drift the camera
+// Only the selected controller's gyro is read; without one, the phone is used. Samples carry their own time,
+// so a fast host loop cannot replay the last angular rate and a source switch cannot inherit another sensor's turn.
 static SDL_SpinLock motion_lock;
-static float motion_h, motion_v;       // (rad/s: horizontal, vertical; the display's axes, MotionSensor.java turns them)
-static uint64_t motion_sample_ns;      // (plat_now_ns: when the last sample arrived)
-static uint64_t motion_integrated_ns;  // (this thread: the last update's time; 0: the next sample is the baseline)
+static GyroTurn motion_turn;
+static SDL_JoystickID motion_source;  // 0: phone; otherwise the selected controller's instance id
+static SDL_SensorType motion_sensor = SDL_SENSOR_INVALID;
+static bool motion_active;
+static SDL_AtomicInt motion_phone_requested;
 
-static void motion_sample(float horizontal, float vertical) {
+bool host_input_motion_phone_requested(void) { return SDL_GetAtomicInt(&motion_phone_requested) != 0; }
+
+static void motion_sample(SDL_JoystickID source, SDL_SensorType sensor, uint64_t sample_ns, float horizontal, float vertical) {
     SDL_LockSpinlock(&motion_lock);
-    motion_h = horizontal, motion_v = vertical, motion_sample_ns = plat_now_ns();
+    if (motion_active && source == motion_source && sensor == motion_sensor)
+        gyro_sample(&motion_turn, sample_ns, horizontal, vertical);
     SDL_UnlockSpinlock(&motion_lock);
 }
 
 #ifdef __ANDROID__
-// MotionSensor.java: the gyro's rates (rad/s), on its sensor thread. Nothing is integrated here (that is the game's).
-JNIEXPORT void JNICALL Java_com_mhgu_relink_MotionSensor_sample(JNIEnv *env, jclass cls, jfloat horizontal, jfloat vertical) {
+// MotionSensor.java sends sensor timestamps, independent of the host event loop's update rate.
+JNIEXPORT void JNICALL Java_com_mhgu_relink_MotionSensor_sample(JNIEnv *env, jclass cls, jfloat horizontal, jfloat vertical, jlong sample_ns) {
     (void)env, (void)cls;
-    motion_sample(horizontal, vertical);
+    motion_sample(0, SDL_SENSOR_GYRO, (uint64_t)sample_ns, horizontal, vertical);
 }
 #endif
 
-// This update's turn of the phone, added to the hunt camera's (false: the sensor is not to turn it now).
+// Sensors are enabled only during ranged aim. Old Motion=Always files use the same aiming gate.
 static bool motion_update(void) {
-    int mode = config_motion_mode();
-    uint64_t now = plat_now_ns();
-    // (a menu, the chat box, a village's camera or a cutscene: the phone does not turn the hunt camera then; with
-    // Motion = Aiming, only while a bow or a bowgun is aimed)
-    bool active = mode != MOTION_OFF && mousecam_active() && !overlay_menu_open() && !chat_active() &&
-                  (mode != MOTION_AIM || weapon_aiming(weapon_hunter()));
-    if (!active) {
-        motion_integrated_ns = 0;
-        mousecam_motion_reset();  // (whatever the phone turned meanwhile is not applied)
-        return false;
-    }
+    SDL_Window *window = ui_window();
+    bool active = config_motion_mode() != MOTION_OFF && weapon_aiming(weapon_hunter()) &&
+                  !overlay_menu_open() && !chat_active() && !textinput_active() && window &&
+                  (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS);
+    const SDL_SensorType sensors[] = {SDL_SENSOR_GYRO, SDL_SENSOR_GYRO_R, SDL_SENSOR_GYRO_L};
+    SDL_SensorType selected = SDL_SENSOR_INVALID;
+    if (active && pad)
+        for (unsigned k = 0; k < sizeof sensors / sizeof *sensors; k++)
+            if (SDL_GamepadHasSensor(pad, sensors[k])) { selected = sensors[k]; break; }
+    for (int i = 0; i < npads; i++)
+        for (unsigned k = 0; k < sizeof sensors / sizeof *sensors; k++) {
+            SDL_Gamepad *p = pads[i].pad;
+            bool want = active && p == pad && sensors[k] == selected;
+            if (SDL_GamepadHasSensor(p, sensors[k]) && SDL_GamepadSensorEnabled(p, sensors[k]) != want)
+                SDL_SetGamepadSensorEnabled(p, sensors[k], want);
+        }
+    if (selected != SDL_SENSOR_INVALID && !SDL_GamepadSensorEnabled(pad, selected)) selected = SDL_SENSOR_INVALID;
+    SDL_JoystickID source = selected == SDL_SENSOR_INVALID ? 0 : SDL_GetGamepadID(pad);
+    SDL_SensorType sensor = selected == SDL_SENSOR_INVALID ? SDL_SENSOR_GYRO : selected;
+    SDL_SetAtomicInt(&motion_phone_requested, active && !source);
+    float yaw, pitch;
     SDL_LockSpinlock(&motion_lock);
-    float h = motion_h, v = motion_v;
-    uint64_t sample_ns = motion_sample_ns;
+    bool changed = active != motion_active || source != motion_source || sensor != motion_sensor;
+    if (changed) {
+        motion_turn = (GyroTurn){0};
+        motion_active = active, motion_source = source, motion_sensor = sensor;
+    }
+    yaw = motion_turn.yaw, pitch = motion_turn.pitch;
+    motion_turn.yaw = motion_turn.pitch = 0;
     SDL_UnlockSpinlock(&motion_lock);
-    if (!sample_ns || now - sample_ns > MOTION_STALE_NS) {  // (the sensor is off: the next sample only sets the baseline)
-        motion_integrated_ns = 0;
+    if (changed) mousecam_motion_reset();
+    if (!active) {
+        mousecam_motion_reset();
         return false;
     }
-    if (!motion_integrated_ns) {  // (the first sample after it started: the time before it is not a turn)
-        motion_integrated_ns = now;
-        return false;
-    }
-    float dt = (float)(now - motion_integrated_ns) * 1e-9f;
-    motion_integrated_ns = now;
-    if (dt > MOTION_DT_MAX) dt = MOTION_DT_MAX;
-    if (fabsf(h) < MOTION_DEAD_ZONE) h = 0.0f;
-    if (fabsf(v) < MOTION_DEAD_ZONE) v = 0.0f;
-    float yaw = h * dt, pitch = v * dt;
     if (config_motion_flip_x()) yaw = -yaw;
     if (config_motion_flip_y()) pitch = -pitch;
     if (yaw == 0.0f && pitch == 0.0f) return false;
@@ -1388,7 +1403,7 @@ void host_input_update(void) {
     if (kx && ky) k = k * 7071 / 10000;  // diagonals: same length as straight
     lx += kx * k, ly += ky * k;
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
-    touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
+    uint64_t touch_b = touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
     if (tdx != 0 || tdy != 0) mouse_dx += tdx, mouse_dy += tdy, touch_cam_ns = plat_now_ns();
     bool motion_moved = motion_update();  // (the phone's turn, added to the hunt camera: hle/mousecam.c)
     bool mouse_moved = mouse_dx != 0 || mouse_dy != 0 || motion_moved;  // (the mouse, a finger or the phone turning the camera: the lock-on waits)
@@ -1549,6 +1564,7 @@ void host_input_update(void) {
         else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(BTN_B));
     }
-    act_update(b, script_b, menu || (typing && !chat_active()));
+    // Touch buttons have no physical source; carry them through action rebinding after the input suppressions.
+    act_update(b, script_b | (touch_b & b), menu || (typing && !chat_active()));
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }

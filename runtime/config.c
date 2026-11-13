@@ -115,6 +115,7 @@
     .chat_key = "/",                                                                                \
     .menu_chord = 1,                                                                                \
     .lock_on = 1,                                                                                   \
+    .persistent_lock_on = 0,                                                                        \
     .phone_rumble = 1,                                                                              \
     /* [Touch] */                                                                                   \
     .touch_controls = TOUCH_AUTO,                                                                   \
@@ -476,7 +477,13 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "LockOn = On\n"
     "\n"
-    "; The phone's motion sensor turns the hunt camera: Off, Aiming (only while a bow or bowgun is aimed), or Always\n"
+    "; Keep an enabled lock until it is manually cancelled; while aiming, track the selected monster's body.\n"
+    "; Tap the target icon to switch monsters; hold it for half a second or click the right stick to toggle the lock.\n"
+    "; Requires LockOn. Default: Off\n"
+    "PersistentLockOn = Off\n"
+    "\n"
+    "; The phone or selected controller's gyro turns the aim: Off or Aiming (bows and bowguns only).\n"
+    "; Legacy Always values are accepted and use the same aiming-only behavior.\n"
     "; Default: Off\n"
     "Motion = Off\n"
     "MotionGain = 1.0\n"
@@ -1038,6 +1045,7 @@ const ConfigSetting g_settings[] = {
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     ON_OFF("Controls", "LockOn", lock_on, false),
+    ON_OFF("Controls", "PersistentLockOn", persistent_lock_on, false),
     {"Controls", "Motion", SET_CHOICE, F(motion_mode), 0, 0, 0, "Off,Aiming,Always", NULL, false, ERR_MISC},
     {"Controls", "MotionGain", SET_FLOAT, F(motion_gain), 0, 0.1f, 5.0f, NULL, NULL, false, ERR_MISC},
     ON_OFF("Controls", "MotionInvertX", motion_flip_x, false),

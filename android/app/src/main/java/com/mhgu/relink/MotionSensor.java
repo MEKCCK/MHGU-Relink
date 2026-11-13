@@ -9,7 +9,7 @@ import android.util.Log;
 import android.view.Surface;
 
 /**
- * El giroscopio del teléfono para el runtime ([Controls] Motion: Off, Aiming, Always). Se registra solo mientras el
+ * El giroscopio del teléfono para el runtime ([Controls] Motion: Off, Aiming). Se registra solo mientras el
  * juego lo pida (GameActivity.setMotionEnabled, desde runtime/ui.c) y la actividad esté en primer plano; al apagarse o
  * al pasar a segundo plano se desregistra y manda un cero, para que no quede ningún giro pendiente.
  *
@@ -22,7 +22,7 @@ final class MotionSensor implements SensorEventListener {
 
     private final SensorManager manager;
     private final Sensor gyro;
-    private volatile boolean enabled;   // (el juego lo pidió: [Controls] Motion no es Off)
+    private volatile boolean enabled;   // ranged aim is active and no controller gyro is selected
     private volatile boolean resumed;   // (la actividad está en primer plano)
     private volatile boolean sampling;  // (registrado: enabled y resumed, y hay giroscopio)
     private volatile int rotation = Surface.ROTATION_0;  // (la pantalla, para poner las muestras en sus ejes)
@@ -34,7 +34,7 @@ final class MotionSensor implements SensorEventListener {
         if (gyro == null) Log.i(TAG, "motion: no gyroscope");
     }
 
-    /** [Controls] Motion pasó a Off o dejó de estarlo. */
+    /** The runtime entered or left ranged aiming, or changed the active gyro source. */
     void setEnabled(boolean on) {
         if (enabled == on) return;
         enabled = on;
@@ -73,7 +73,7 @@ final class MotionSensor implements SensorEventListener {
         } else {
             sampling = false;
             if (manager != null) manager.unregisterListener(this, gyro);
-            send(0.0f, 0.0f);  // (nada pendiente: la próxima actualización del juego no es un giro)
+            send(0.0f, 0.0f, 0);  // the native aim gate discards any pending turn
             Log.i(TAG, "motion: off");
         }
     }
@@ -89,17 +89,17 @@ final class MotionSensor implements SensorEventListener {
             case Surface.ROTATION_270: sx =  gy; sy = -gx; break;
             default:                   sx =  gx; sy =  gy; break;
         }
-        // (girar hacia la derecha es positivo en el eje vertical de la pantalla; mirar arriba, negativo en el horizontal)
-        send(sy, -sx);
+        // Right-hand axes: turning right is -Y and looking up is +X, as for SDL controller gyros.
+        send(-sy, sx, event.timestamp);
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
-    private void send(float horizontal, float vertical) {
+    private void send(float horizontal, float vertical, long sampleTimeNs) {
         if (!nativeOk) return;
         try {
-            sample(horizontal, vertical);
+            sample(horizontal, vertical, sampleTimeNs);
         } catch (UnsatisfiedLinkError e) {
             nativeOk = false;
             Log.w(TAG, "motion: no native sample (" + e + ")");
@@ -107,5 +107,5 @@ final class MotionSensor implements SensorEventListener {
     }
 
     /** runtime/host_input.c: las velocidades angulares (rad/s) de este momento. */
-    private static native void sample(float horizontal, float vertical);
+    private static native void sample(float horizontal, float vertical, long sampleTimeNs);
 }

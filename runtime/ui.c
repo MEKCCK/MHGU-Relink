@@ -447,7 +447,7 @@ int ui_run(void) {
         float fps_now = config_live_fps();
         if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);
         static int motion_for = -1;  // ([Controls] Motion: the gyro is read only while a mode has it)
-        int motion_now = config_motion_mode() != MOTION_OFF;
+        int motion_now = host_input_motion_phone_requested();
         if (motion_now != motion_for) motion_for = motion_now, motion_to_activity(motion_now);
 #endif
 #ifndef __ANDROID__

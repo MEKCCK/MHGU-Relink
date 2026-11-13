@@ -1,6 +1,6 @@
 # Maintainer: mhgu
 pkgname=mhgu-relink
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="MHGU Relink: Monster Hunter Generations Ultimate recompiled runtime (Linux, Vulkan) with Rust networking"
 arch=('x86_64')

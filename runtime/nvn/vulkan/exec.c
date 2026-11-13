@@ -25,8 +25,10 @@
 #endif
 
 #include "../../kernel.h"
+#include "../../hle/mousecam.h"
 #include "fsr.h"
 #include "hdr.h"
+#include "hud_layout.h"
 #include "shaders.h"
 #include "vk.h"
 #include "../../touch.h"
@@ -42,6 +44,11 @@
 #define ARTS_DX (311.0f)            // (x 709..957 -> 1020..1268, then anchored to the screen's right edge)
 #define ARTS_TOP 41.0f              // the top row's first piece goes to this y (two rows: 631 -> 41; three: the same)
 #define TARGET_DX (-250.0f)         // (x 1200 -> 950, from the right edge: left of the arts)
+// The target selector's full hit area on the game's 1280x720 HUD, not just its centre transform.
+#define TARGET_X0 1170.0f
+#define TARGET_X1 1230.0f
+#define TARGET_Y0 16.0f
+#define TARGET_Y1 95.0f
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_snapshots;
 // (MHGU_VK_STATS) time spent: translating command lists, waiting for the GPU, guest memory copied per submission
@@ -875,6 +882,7 @@ static VkFormat pass_color[8], pass_depth;
 static bool pass_d24_as_float;  // the depth attachment is a DEPTH24_STENCIL8 made as D32S8 (polygon offsets in D24 steps)
 static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
+static int ui_scissor_h = -1;  // a menu's partial scissor follows its entire canvas horizontally
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
@@ -1897,7 +1905,7 @@ static bool preview_mapped(void) {
     pass_guest_size(&pw, &ph);
     if (fabsf(g_render_aspect - 16.0f / 9.0f) <= 0.01f || !st.ds[0] || !pass_w || ph != (float)g_render_size[1]) return false;
     float w = st.viewport[0][2], h = fabsf(st.viewport[0][3]);
-    return !(w < 8.0f || w > 0.9f * pw || h > 0.98f * ph);
+    return !(w < 8.0f || w > 0.9f * pw || h > 0.98f * ph) && !weapon_aiming(weapon_hunter());
 }
 static bool ui_preview_map(PreviewMap *pm) {
     float asp = g_render_aspect, pw, ph;
@@ -1907,6 +1915,7 @@ static bool ui_preview_map(PreviewMap *pm) {
     const float *vp = st.viewport[0];
     float w = vp[2], h = fabsf(vp[3]);
     if (w < 8.0f || w > 0.9f * pw || h > 0.98f * ph) return false;  // (the scene itself: the whole picture)
+    if (weapon_aiming(weapon_hunter())) return false;  // a scoped hunt viewport is not an equipment preview
     *pm = (PreviewMap){0, 1, 0, 1};
     // The window it is drawn in: the last quad over the viewport (inside it sideways, give or take 60: a frame drawn as
     // one turned quad is placed by its corner, just outside the box, as the Poogie costume's at x 161 beside a box from
@@ -1974,6 +1983,18 @@ static VkRect2D scissor_rect(void) {
     if (!w) return (VkRect2D){{0, 0}, {pass_w, pass_h}};
     int x = st.scissor[0][0], y = st.scissor[0][1], sw = st.scissor[0][2], sh = st.scissor[0][3];
     if (ui_relax_scissor) { x = y = 0; sw = w; sh = h; }
+    if (ui_scissor_h >= 0 && !ui_relax_scissor) {
+        float pw, ph;
+        pass_guest_size(&pw, &ph);
+        if (x > 0 || y > 0 || sw < (int)pw || sh < (int)ph) {
+            float scale = (16.0f / 9.0f) / g_render_aspect;
+            float aspect = ui_frontend_pass ? 16.0f / 9.0f : fminf(g_ui_anchor_aspect, g_render_aspect);
+            float left = 640.0f * (1.0f - aspect / g_render_aspect);
+            float x0 = hud_map_x(x / pw * 1280.0f, scale, left, 1280.0f - left, ui_scissor_h) * pw / 1280.0f;
+            float x1 = hud_map_x((x + sw) / pw * 1280.0f, scale, left, 1280.0f - left, ui_scissor_h) * pw / 1280.0f;
+            x = (int)floorf(x0), sw = (int)ceilf(x1) - x;
+        }
+    }
     if (ui_scissor_v >= 0 && !ui_relax_scissor) {  // (16:10: a HUD piece's scissor moves with it, unless it is the whole pass)
         float pw, ph;
         pass_guest_size(&pw, &ph);
@@ -3461,7 +3482,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (size > r.size && r.size) size = r.size;
     if (size < 16) size = 16;
     if (!guest_range_ok(r.addr, size)) return zero_ubo(size);
-    if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = -1;
+    if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
     // (a pass the size of the game's picture, in the guest's units: FSR's stand-ins and scaled targets are larger)
     bool screen_pass = stage == 0 && k == 3 && roundf((float)pass_h / pass_sy) == (float)g_render_size[1];
     if (screen_pass && !st.ds[0] && size >= 64) {
@@ -3483,6 +3504,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             if (is_fullscreen && g_hudtrace_active)
                 LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
             if (!is_fullscreen) {
+                bool aiming = weapon_aiming(weapon_hunter());
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
                 float s = g_render_aspect > 16.0f / 9.0f ? (16.0f / 9.0f) / g_render_aspect : 1.0f;
@@ -3497,8 +3519,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 if (fabsf(pos_z - 110.0f) < 0.5f) {
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
-                    unsigned row = fabsf(pos_y - 168.0f) < 0.3f ? 1u : fabsf(pos_y - 433.0f) < 0.3f ? 2u
-                                 : fabsf(pos_y - 570.0f) < 0.3f ? 4u : 0u;
+                    unsigned row = aiming ? 0 : hud_loading_row(pos_x, pos_y);
                     loading_strip = row != 0;
                     // The loading screen once the backdrop has shown two of its rows: a reticle or lock-on marker passing
                     // through one of those heights mid-hunt made the pass a loading screen, and the HUD drawn after it for
@@ -3526,6 +3547,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 float anchor_right = 1280.0f - anchor_left;
 
                 bool is_3d_overlay = (pos_z > 180.0f);
+                bool menu_canvas = false;
                 float new_pos_x = pos_x, new_pos_y = pos_y;
                 bool item_bar_move = false, arts_move = false, target_move = false, status_edge = false;
                 // the hunt's HUD (not a menu, the results, a loading screen, the title): its item bar, Hunter Arts and
@@ -3539,7 +3561,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 if (is_3d_overlay && g_hudtrace_active)
                     LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: 3D overlay, not moved\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
                 if (!is_3d_overlay) {
-                    enum { ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_CENTER } anchor = ANCHOR_CENTER;
+                    enum { ANCHOR_LEFT = HUD_LEFT, ANCHOR_RIGHT = HUD_RIGHT, ANCHOR_CENTER = HUD_CENTER } anchor = ANCHOR_CENTER;
                     // vertically one anchor per layer (or per part of one), so a window drawn in pieces stays together
                     enum { V_TOP, V_BOTTOM, V_CENTER } vanchor = V_CENTER;
 
@@ -3570,36 +3592,40 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // 97.0: Menus and Submenus
                         // 98.0: text drawn over them (the Qty. label of the quantity box): it used the generic rule, which
                         // centered it 36 px below its top-anchored box
-                        // Left window (Quest Info: x <= 430) -> Left anchor
-                        // Submenu & Pause Menu (Combine, Items, Menu 1/2: x > 430) -> Right anchor
-                        if (pos_x > 430.0f) {
-                            anchor = ANCHOR_RIGHT;
-                        } else {
-                            anchor = ANCHOR_LEFT;
-                        }
+                        // Keep a menu and its submenus on one canvas; their corners can cross x 430.
+                        anchor = ANCHOR_LEFT;
                         // The Quest Complete banner's lower border slides in from y 739: it belongs to the bottom edge.
                         vanchor = pos_y > 650.0f ? V_BOTTOM : V_TOP;
 
                         // The Quest Complete stamp is one picture, after its borders (x 640, by the top and bottom edges; the
                         // lower one slides in from y 739). Right / Left by place split it on a wide picture, its tilted
                         // "QUEST" (x -17) left of the rest.
-                        if (fabsf(pos_z - 97.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && (pos_y < 60.0f || pos_y > 680.0f))
+                        if (!aiming && fabsf(pos_z - 97.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && (pos_y < 60.0f || pos_y > 680.0f))
                             ui_stamp_pass = true;
                         if (fabsf(pos_z - 97.0f) < 0.5f) {
-                            ui_menu_pass = true, ui_menu_frame = g_present_count;
                             // (a menu of the game's is open: the touch controls' menu layout; not the field's Quest
                             // Complete banner, drawn on this layer too, nor the chat's log: a box at the bottom left,
                             // x 30..605, y 547..708 (y 323.. while the shoutouts are open beside it), which stays a few
                             // seconds after a line is sent or comes, and kept the menu layout under the player: no
                             // walking. Measured on a Motorola g06, a village)
-                            bool chat_log = pos_x < 620.0f && pos_y >= 540.0f;
-                            if (!ui_stamp_pass && !chat_log) touch_hud_menu();
+                            if (hud_menu_panel_allowed(pos_x, pos_y, aiming, ui_stamp_pass)) {
+                                ui_menu_pass = true, ui_menu_frame = g_present_count;
+                                touch_hud_menu();
+                            }
                         }
                         if (ui_stamp_pass) anchor = ANCHOR_CENTER;
+                        // A menu's body, corners and text share one canvas, including submenus spanning x 430.
+                        menu_canvas = hud_menu_panel_allowed(pos_x, pos_y, aiming, ui_stamp_pass) ||
+                                      (!aiming && !ui_stamp_pass && ui_menu_pass);
                     } else if (fabsf(pos_z - 100.0f) < 0.5f) {
                         // (a window on this layer, the multiplayer menu or the hub's form: a stretched panel, which the
                         // HUD's parts here never are, in a hunt: the touch controls' menu layout)
-                        if (fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) touch_hud_menu();
+                        if (hud_menu_panel_allowed(pos_x, pos_y, aiming, ui_stamp_pass) && fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) {
+                            ui_menu_pass = true, ui_menu_frame = g_present_count;
+                            hunt_hud = false;
+                            touch_hud_menu();
+                        }
+                        menu_canvas = !aiming && ui_menu_pass && !ui_stamp_pass;
                         // 100.0: Hunter Arts HUD and bottom right prompts (y > 600) -> Bottom anchor
                         // Target cam selector (right edge, y 42..82: x > 1000, y < 360) -> Top anchor, so it stays by the minimap.
                         // (Windows centered on this layer, x 640, must stay one piece: they keep the Bottom anchor.)
@@ -3614,7 +3640,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         if (hunt_hud && pos_x >= 700.0f && pos_x <= 900.0f && pos_y > 560.0f) {
                             arts_part = true;
                             if (g_touch_hud) vanchor = V_TOP, arts_move = true;
-                        } else if (hunt_hud && fabsf(pos_x - 1200.0f) < 1.0f && pos_y < 100.0f) {
+                        } else if (hunt_hud && pos_x >= TARGET_X0 && pos_x <= TARGET_X1 && pos_y >= TARGET_Y0 && pos_y <= TARGET_Y1) {
                             target_part = true;
                             target_move = g_touch_hud != 0;
                         }
@@ -3690,18 +3716,21 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     if (sy < 1.0f && ui_pv_v >= 0 && ui_pv_present + 2 >= g_present_count && fabsf(pos_z - 100.0f) < 0.5f &&
                         pos_x >= ui_pv_x0 - 60.0f && pos_x <= ui_pv_x1 + 60.0f && pos_y >= ui_pv_y0 - 60.0f && pos_y <= ui_pv_y1 + 40.0f)
                         vanchor = ui_pv_v == 0 ? V_TOP : ui_pv_v == 2 ? V_BOTTOM : V_CENTER;
+                    // Labels, parchment and highlights can use different UI layers from their menu's frame.
+                    if (!aiming && ui_menu_pass && !ui_stamp_pass && !ui_loading_pass && !ui_results_pass && !ui_results_last &&
+                        pos_z >= 95.5f && pos_z < 109.5f)
+                        menu_canvas = true;
+                    anchor = hud_canvas_anchor(pos_z, anchor, menu_canvas, aiming, loading_strip || ui_loading_pass);
+                    if (aiming && pos_z > 96.5f && pos_z < 98.5f) vanchor = V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
                     if (loading_strip) {
                         new_pos_x = pos_x * s;
-                    } else if (anchor == ANCHOR_LEFT) {
-                        new_pos_x = anchor_left + pos_x * s;
-                    } else if (anchor == ANCHOR_RIGHT) {
-                        new_pos_x = anchor_right - (1280.0f - pos_x) * s;
                     } else {
-                        new_pos_x = 640.0f + (pos_x - 640.0f) * s;
+                        new_pos_x = hud_map_x(pos_x, s, anchor_left, anchor_right, anchor);
                     }
+                    if (menu_canvas && s < 1.0f) ui_scissor_h = anchor;
                     if (status_edge) new_pos_x = pos_x * s;
                     // (each moved part where the player put it in the touch layout editor, runtime/touch.cpp)
                     if (item_bar_move) new_pos_x += (ITEM_BAR_DX + g_touch_zone_dx[TZ_ITEM]) * s;
@@ -4610,9 +4639,9 @@ static void draw(CmdRec *r, bool indexed) {
         ss.sets_layout = pr->layout, memcpy(ss.sets, sets, sizeof sets);
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);
     }
-    if (ui_relax_scissor || ui_scissor_v >= 0) {  // (set while the constants above were built: for this draw only; the
+    if (ui_relax_scissor || ui_scissor_v >= 0 || ui_scissor_h >= 0) {  // (set while the constants above were built: for this draw only; the
         apply_scissor(cb);                         // next draw and any clear before it get the game's scissor again)
-        ui_relax_scissor = false, ui_scissor_v = -1;
+        ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
     }
 
     // ---- indices (copied; the largest index bounds the vertex data copied below)

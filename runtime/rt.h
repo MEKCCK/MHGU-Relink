@@ -136,6 +136,7 @@ extern volatile uint64_t g_present_count;  // frames the game presented (the ren
 union SDL_Event;
 void host_input_event(const union SDL_Event *e);
 void host_input_update(void);            // recompute the controller state the game reads (each loop pass)
+bool host_input_motion_phone_requested(void);  // only during ranged aim without an active controller gyro
 bool host_input_press(const char *button, unsigned frames);  // scripted press from the next frame (UI thread)
 // The mouse for mods (runtime/forge.c: forge_input_getMouse, getMouseMove, setMouseFree). Any thread.
 typedef struct {

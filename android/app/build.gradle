@@ -16,8 +16,8 @@ android {
         applicationId "com.mhgu.relink"
         minSdk 28
         targetSdk 35
-        versionCode 9
-        versionName "0.2.0"
+        versionCode 201
+        versionName "0.2.1"
         ndk {
             abiFilters 'arm64-v8a'
             if (project.hasProperty('emu')) abiFilters 'x86_64'  // (dev_emu.sh: el emulador de la PC)

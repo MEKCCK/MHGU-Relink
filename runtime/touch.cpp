@@ -15,7 +15,7 @@
 //     moves the cursor, a step every so far, as a list on a phone
 //   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): a tap on the item bar (bottom middle)
 //     uses the item, a swipe on it turns the bar; a tap on a Hunter Art's panel (top right) performs it; a tap on the
-//     target camera's icon turns the lock-on on or off (the camera keeps turning to the target, as in the newer games;
+//     target camera's icon enables the lock-on, then cycles the target (the camera keeps turning to the selected monster;
 //     a controller's right stick click does the same, runtime/host_input.c)
 //   - with a bow or a bowgun in hand, in a hunt, a layout of their own: a large button under the thumb that fires
 //     (a drag on it, held, aims: the right thumb can't be on the screen and on a button at once), a smaller one that
@@ -162,6 +162,11 @@ const char *const LEGACY_NAME[TOUCH_LEGACY_LAYOUTS] = {"Melee layout 1", "Melee 
 const char *profile_name(int profile) {
     return profile < TOUCH_WEAPON_LAYOUTS ? PROFILE_NAME[profile] : LEGACY_NAME[profile - TOUCH_WEAPON_LAYOUTS];
 }
+bool fixed_quest_attack_style(int profile) {
+    if (profile < 0 || profile >= TOUCH_WEAPON_LAYOUTS) return false;
+    int weapon = PROFILE_WEAPON[profile];
+    return weapon != 4 && weapon != 6 && weapon != 10;  // bowguns and bow keep their ranged controls
+}
 int ranged_profile(int profile) {
     int weapon = profile >= 0 && profile < TOUCH_WEAPON_LAYOUTS ? PROFILE_WEAPON[profile] : 0;
     return weapon == 10 ? WEAPON_BOW : weapon == 4 || weapon == 6 ? WEAPON_BOWGUN : 0;
@@ -210,6 +215,7 @@ bool is_tab(int i) { return i == C_ML || i == C_MR || i == C_MZL || i == C_MZR; 
 bool is_dpad(int i) { return i == C_DPAD || i == C_HDPAD; }
 bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {  // (the menus: the d-pad, the layout switch, the diamond, the shoulders and the settings)
     if (ranged < 0) ranged = g_ranged.load();
+    menu = menu && in_quest;  // Outside quests the selected one of the four presets also controls shops and other menus.
     // (no run button: the thumb past the stick's rim runs; what a hunt can do without is off until asked for: [Touch] Show*)
     if (i == C_RUN) return false;
     int show = show_setting(i);
@@ -286,6 +292,7 @@ const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target"};
 Layout defaults(int profile) {
     Layout l = {};
     for (int i = 0; i < C_COUNT; i++) l.x[i] = DEFS[i].x, l.y[i] = DEFS[i].y, l.scale[i] = 1.0f;  // (the menu layout's: unused)
+    if (fixed_quest_attack_style(profile)) l.style = STYLE_SEPARATE;
     if (profile >= TOUCH_WEAPON_LAYOUTS && profile < TOUCH_WEAPON_LAYOUTS + STYLE_COUNT)
         l.style = profile - TOUCH_WEAPON_LAYOUTS;
     return l;
@@ -318,6 +325,7 @@ bool load_layout(Layout *l, int profile) {
             if (!strcmp(key, "attack_style") && x >= 0 && x < STYLE_COUNT) l->style = (int)x;
         }
     fclose(f);
+    if (fixed_quest_attack_style(profile)) l->style = STYLE_SEPARATE;
     return true;
 }
 
@@ -450,7 +458,7 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
         *part = (x - g.c.x) * PILL_U.x + (y - g.c.y) * PILL_U.y > 0 ? 0 : 1;
     }
     if (best == C_CORNER && part) *part = band_part(place(l, C_CORNER, w, h), x, y);
-    if (part && !menu && g_style.load() == STYLE_SEPARATE &&
+    if (part && !(menu && in_quest) && g_style.load() == STYLE_SEPARATE &&
         (editing ? in_editor(C_LIGHT, in_quest, profile) : in_mode(C_LIGHT, menu, in_quest, ranged))) {  // (the separate attacks' seam)
         ImVec2 at;
         float size;
@@ -599,15 +607,12 @@ struct State {
     bool run;                // the thumb is past the stick's rim: running (R held)
     uint64_t run_idle;
     float fx, fy;            // the stick's thumb where it is (the knob stops at the rim)
-    bool lock;               // the lock-on: L is pressed every LOCK_EVERY while the hunt camera turns
-    uint64_t lock_next, lock_until, hunt_ns;
+    bool lock;               // the hunt camera follows the selected monster
+    uint64_t hunt_ns;
     uint64_t item_flash, art_flash;
     int item_dir, art_row;
     int drawn;               // weapon_drawn, at the last touch_input
     uint64_t ammo_ready, ammo_hold;  // the next press of the ammo may start then; L held for it until then
-    uint64_t assist_until, assist_fire;  // a locked shot: R held so far (the aim), A until then
-    uint64_t assist_t0;                  // (when it began to wait for the aim)
-    bool assist_wait, fired;             // it waits for the aim; the fire button was down
     float w, h;              // the screen, pixels
     Layout layout, saved;
     int layout_profile;
@@ -622,13 +627,12 @@ struct State {
     float pinch_d0, pinch_s0;
 };
 bool editor_style_locked(const State &s) {
-    return !s.in_quest || ranged_layout_profile(s.layout_profile) != 0;
+    return !s.in_quest || ranged_layout_profile(s.layout_profile) != 0 || fixed_quest_attack_style(s.layout_profile);
 }
 std::mutex g_lock;
 State g_s;
 std::atomic<bool> g_lock_follow;  // (touch_lock_buttons -> the hunt camera: follow the monster now)
 std::atomic<bool> g_lock_shots;   // (the lock-on is on, in a hunt: hle/mousecam.c turns a bow's or a gun's shots)
-std::atomic<uint64_t> g_assist_until;  // (a locked shot holds R for its aim until then: SDL_GetTicksNS)
 // a click on the phone's vibrator, asked for under g_lock and made once it is released (a JNI / binder call: the
 // game thread's touch_draw waits on that lock); the SDL main thread's alone
 bool g_tap_due;
@@ -640,7 +644,7 @@ struct TapAfterUnlock {
 };
 std::atomic<bool> g_visible;
 std::atomic<bool> g_gear_only;  // (the controls hidden: only the settings button shows, and answers)
-const uint64_t LOCK_EVERY = 250 * MS, LOCK_PRESS = 50 * MS, LOCK_AFTER_DRAG = 400 * MS, MIN_PRESS = 70 * MS;
+const uint64_t LOCK_AFTER_DRAG = 400 * MS, MIN_PRESS = 70 * MS;
 void recompute_held(State &s);
 
 void enforce_legacy_style(State &s) {
@@ -655,7 +659,9 @@ void ensure_loaded(State &s) {
     if (s.loaded) return;
     s.loaded = true, s.sel = -1;
     s.in_quest = presence_in_quest();
-    s.legacy_mode = 0;
+    int saved_profile = config_live_touch_profile();
+    s.legacy_mode = saved_profile >= TOUCH_WEAPON_LAYOUTS && saved_profile < TOUCH_LAYOUT_PROFILES
+                        ? saved_profile - TOUCH_WEAPON_LAYOUTS : 0;
     s.layout_profile = s.in_quest ? config_live_touch_profile() : TOUCH_WEAPON_LAYOUTS + s.legacy_mode;
     s.detected_weapon = -1;
     if (s.layout_profile < 0 || s.layout_profile >= TOUCH_LAYOUT_PROFILES || (s.in_quest && s.layout_profile >= TOUCH_WEAPON_LAYOUTS))
@@ -682,8 +688,7 @@ void select_layout(State &s, int profile) {
     s.saved = s.layout;
     s.held = 0, s.stick_on = false;
     s.cam_dx = s.cam_dy = 0;
-    s.ammo_ready = s.ammo_hold = s.assist_until = s.assist_fire = 0;
-    s.assist_wait = s.fired = false;
+    s.ammo_ready = s.ammo_hold = 0;
     for (Finger &f : s.f) f = {};
     for (Pulse &p : s.pulse) p = {};
     publish_zones(s.layout);
@@ -1062,8 +1067,9 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 f->swipe_y = across ? 0 : f->swipe_y - copysignf(step, f->swipe_y);
                 tap_due();
             }
-        } else if (f->kind == F_CAMERA || (f->kind == F_BUTTON && f->ctl == C_RFIRE && f->moved && !f->done)) {
-            s.cam_dx += dx, s.cam_dy += dy, s.cam_ns = now;  // (a drag on the shot aims while it is held)
+        } else if (f->kind == F_CAMERA ||
+                   (f->kind == F_BUTTON && (f->ctl == C_RFIRE || f->ctl == C_RAIM) && f->moved && !f->done)) {
+            s.cam_dx += dx, s.cam_dy += dy, s.cam_ns = now;  // The aim or fire button also owns its camera drag until release.
         } else if (f->kind == F_STICK) stick_to(s, x, y);
         else if (f->kind == F_ITEM) {  // One horizontal item or vertical ammo step owns this gesture.
             f->swipe += dx, f->swipe_y += dy;
@@ -1104,15 +1110,19 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (f->kind == F_ARTS && tap && f->part >= 0)  // a tap on a Hunter Art's panel: its d-pad direction
         pulse(s, ART_FACE[f->part], 120 * MS),  // (its d-pad direction)
             s.art_row = f->part, s.art_flash = now + 250 * MS, tap_due();
-    if (f->kind == F_TARGET && tap) {
+    bool target_hold = f->kind == F_TARGET && !f->moved && !cancel && now - f->t0 >= 500 * MS;
+    if (f->kind == F_TARGET && (tap || target_hold)) {
         tap_due();
         if (!config_live_lock_on()) {  // (the original game's: L turns the camera to the target, once)
-            pulse(s, B(BTN_L), 60 * MS);
+            if (tap) pulse(s, B(BTN_L), 60 * MS);
+        } else if (target_hold) {
+            s.lock = !s.lock, s.hunt_ns = now;
+            fprintf(stderr, "[touch] lock-on %s (target held)\n", s.lock ? "on" : "off");
         } else if (s.lock) {  // (already on: the next large monster, around, as the newer games)
             mousecam_target_cycle();
             fprintf(stderr, "[touch] lock-on: next target\n");
         } else {
-            s.lock = true, s.lock_next = s.lock_until = 0, s.hunt_ns = now;
+            s.lock = true, s.hunt_ns = now;
             fprintf(stderr, "[touch] lock-on on\n");
         }
     }
@@ -1133,8 +1143,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
     return true;
 }
 
-extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
-                            float *cam_dx, float *cam_dy) {
+extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
+                                float *cam_dx, float *cam_dy) {
     TapAfterUnlock tap_after;  // (declared first: it runs after the lock is released)
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
@@ -1218,9 +1228,13 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
         }
     }
     g_touch_hud = visible && config_live_touch_hud();
-    for (Finger &f : s.f)
+    for (Finger &f : s.f) {
         if (f.kind == F_BUTTON && ((!visible && f.ctl != C_SETTINGS) ||
                                  !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile)))) f.done = true;
+        // The press which draws a sheathed bowgun must end before X can become its reload action.
+        if (f.kind == F_BUTTON && f.ctl == C_RFIRE && ranged == WEAPON_BOWGUN && s.drawn == 1 && f.btn == B(BTN_X))
+            f.done = true;
+    }
     if (!config_live_touch_show(TB_DPAD)) release_dpad(s);
     if (!visible || !in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile))) s.stick_on = false;
     recompute_held(s);
@@ -1232,17 +1246,23 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     // (while a menu is open the fingers are its mouse: nothing of theirs reaches the game or the menu's controller)
     if (menu) {
         s.cam_dx = s.cam_dy = 0;
-        return;
+        return 0;
     }
+    uint64_t touch_b = 0;
     for (Pulse &p : s.pulse)
-        if (p.until > now && now >= p.from) *buttons |= p.buttons;
-    if (now < s.ammo_hold) *buttons |= B(BTN_L);
+        if (p.until > now && now >= p.from) touch_b |= p.buttons, *buttons |= p.buttons;
+    // Repeat while L stays held; releasing the arrow leaves time for the last step to confirm.
+    for (const Finger &f : s.f)
+        if (f.kind == F_BUTTON && !f.done && (f.ctl == C_AMMO_UP || f.ctl == C_AMMO_DOWN) && now >= s.ammo_ready)
+            ammo_step(s, f.ctl == C_AMMO_UP ? 1 : -1);
+    if (now < s.ammo_hold) touch_b |= B(BTN_L), *buttons |= B(BTN_L);
     if (s.h > 0 && !s.edit) {
         float k = CAMERA_COUNTS * config_live_touch_camera() / s.h;
         *cam_dx += s.cam_dx * k, *cam_dy += s.cam_dy * k;
     }
     s.cam_dx = s.cam_dy = 0;
-    if (!visible || s.edit) return;
+    if (!visible || s.edit) return touch_b;
+    touch_b |= s.held;
     *buttons |= s.held;
     {
         static uint64_t was;
@@ -1251,40 +1271,6 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
         if (*buttons & ~was & OPENS) g_press_ns = now;
         was = *buttons;
     }
-    // With the lock-on on, a gun's shot aims first: only an aimed shot takes the monster's height (hle/mousecam.c). Its aim
-    // stays a moment, for the next shot; the scope, opened by hand, is left alone
-    // The aim is known by the hunter's actions (weapon_aiming): some styles' aims are other actions, and a shot that
-    // waited for them never left (seen: a light and a heavy bowgun). So after a moment of R it fires anyway: R is the aim
-    if (g_ranged.load() == WEAPON_BOWGUN && s.drawn == 1 && g_lock_shots.load()) {
-        bool fire = (*buttons & B(BTN_A)) != 0, aiming = weapon_aiming(hunter);
-        if (fire && !s.fired && !aiming) s.assist_wait = true, s.assist_t0 = now;
-        if (fire && !aiming) s.assist_until = now + 1300 * MS;
-        s.fired = fire;
-        if (now < s.assist_until) *buttons |= B(BTN_R);
-        if (s.assist_wait) {
-            *buttons &= ~B(BTN_A);
-            bool late = now - s.assist_t0 >= 450 * MS;
-            if (aiming || late) {
-                s.assist_wait = false, s.assist_fire = now + 110 * MS;
-                if (!aiming) {
-                    static unsigned said[8];
-                    unsigned act = weapon_action(hunter), k = 0;
-                    while (k < 8 && said[k] && said[k] != act) k++;
-                    if (k < 8 && !said[k]) {
-                        said[k] = act;
-                        fprintf(stderr, "[touch] a locked shot: no aim seen (action %04x:%03u), fired with R held\n",
-                                act >> 16, act & 0xffff);
-                    }
-                }
-            } else if (now >= s.assist_until) {
-                s.assist_wait = false;
-            }
-        }
-        if (now < s.assist_fire) *buttons |= B(BTN_A);
-    } else {
-        s.assist_wait = s.fired = false, s.assist_until = 0;
-    }
-    g_assist_until = s.assist_until;
     if (s.menu) {  // the left stick only moves the hunter; only screen swipes press the d-pad to select menu entries
         float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
         if (s.stick_on && r > 0) {
@@ -1295,7 +1281,7 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
                 *lx += (int)(dx * t * 32767), *ly += (int)(dy * t * 32767);
             }
         }
-        return;
+        return touch_b;
     }
     bool moving = false;
     if (s.stick_on && s.h > 0) {
@@ -1328,8 +1314,9 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
         was = d > r * (was ? 1.45f : 1.6f);  // (well past the rim: a thumb at the edge in a fight still walks;
                                              // r is the stick's size in the layout: a bigger stick, farther)
         s.run = was;
-        if (s.run) *buttons |= B(BTN_R);
+        if (s.run) touch_b |= B(BTN_R), *buttons |= B(BTN_R);
     }
+    return touch_b;
 }
 
 extern "C" bool touch_visible(void) { return g_visible; }
@@ -1347,21 +1334,21 @@ extern "C" void touch_edit_cancel(void) {  // (the settings menu stayed open: "C
 
 extern "C" void touch_lock_toggle(void) {
     std::lock_guard<std::mutex> l(g_lock);
-    g_s.lock = !g_s.lock, g_s.lock_next = g_s.lock_until = 0, g_s.hunt_ns = SDL_GetTicksNS();
+    g_s.lock = !g_s.lock, g_s.hunt_ns = SDL_GetTicksNS();
     fprintf(stderr, "[touch] lock-on %s (controller)\n", g_s.lock ? "on" : "off");
 }
 
 // The lock-on: the camera turned to the target again and again (L tapped: the game's target camera; with no target,
 // behind the hunter), while the hunt camera turns and the player is neither turning it (a finger, the right stick, the
 // mouse: cam_input) nor pressing another button (L held with A / Y turns the item bar). Off by itself once the hunt
-// camera has not run for 10 s (the hunt over).
+// camera has not run for 10 s, unless persistent lock-on keeps the player's choice until manually turned off.
 extern "C" uint64_t touch_lock_buttons(uint64_t buttons, bool cam_input) {
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     uint64_t now = SDL_GetTicksNS();
     bool hunt = mousecam_active() || g_ranged.load();  // (a gun aimed has a camera of its own)
     if (hunt) s.hunt_ns = now;
-    if (s.lock && now - s.hunt_ns > 10000 * MS) {
+    if (s.lock && !config_live_persistent_lock_on() && now - s.hunt_ns > 10000 * MS) {
         s.lock = false;
         fprintf(stderr, "[touch] lock-on off (no hunt camera)\n");
     }
@@ -1378,7 +1365,6 @@ extern "C" uint64_t touch_lock_buttons(uint64_t buttons, bool cam_input) {
 // (the hunt camera's thread, hle/mousecam.c) the lock-on is on and the player is not turning the camera
 extern "C" bool touch_lock_active(void) { return g_lock_follow.load(); }
 extern "C" bool touch_lock_on(void) { return g_lock_shots.load(); }
-extern "C" bool touch_lock_assist(void) { return g_lock_shots.load() && SDL_GetTicksNS() < g_assist_until.load(); }
 
 // The app goes to the background (Android): every finger is gone (their ups will not come)
 extern "C" void touch_reset(void) {
@@ -1387,6 +1373,7 @@ extern "C" void touch_reset(void) {
     for (Finger &f : s.f) f.kind = F_NONE;
     for (Pulse &p : s.pulse) p.until = 0;
     s.stick_on = false, s.held = 0, s.cam_dx = s.cam_dy = 0, s.pinch = false;
+    s.ammo_hold = s.ammo_ready = 0;
 }
 
 extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y) {

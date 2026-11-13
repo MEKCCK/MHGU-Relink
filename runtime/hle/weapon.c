@@ -92,7 +92,7 @@ int weapon_ranged(uint32_t h) {
 bool weapon_aiming(uint32_t h) {
     if (!h || !weapon_ranged(h)) return false;
     uint32_t st = LD16(h + PL_ACT_ST), no = LD16(h + PL_ACT_NO);
-    return (st == 1 && no >= 45 && no <= 48) || (st == 2 && no == 16);
+    return (st == 1 && no >= 45 && no <= 48) || (st == 2 && no == 16) || mousecam_hunter_aiming(h);
 }
 
 // the hunter's current action, st << 16 | no (the log of a shot that found no aim it knew)

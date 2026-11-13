@@ -26,7 +26,7 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
                      live_touch, live_touch_profile, live_touch_hud, live_touch_auto_r = {1}, live_touch_show[TB_COUNT],
                      live_touch_combo[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS], live_touch_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS],
-                     live_touch_cam, live_touch_opacity, live_lock_on = {1},
+                     live_touch_cam, live_touch_opacity, live_lock_on = {1}, live_persistent_lock_on,
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
                      live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
                      live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_ldn_direct, live_bonus;
@@ -112,6 +112,8 @@ static void publish_live(const Config *c, bool all) {
             SDL_SetAtomicInt(&live_touch_combo_pad[profile][i], c->touch_weapon_combo_pad[profile][i]);
         }
     if (all || c->lock_on != saved.lock_on) SDL_SetAtomicInt(&live_lock_on, c->lock_on);
+    if (all || c->persistent_lock_on != saved.persistent_lock_on)
+        SDL_SetAtomicInt(&live_persistent_lock_on, c->persistent_lock_on);
     if (all || c->touch_camera != saved.touch_camera) set_float(&live_touch_cam, c->touch_camera);
     if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
     if (all || c->touch_vibration != saved.touch_vibration) SDL_SetAtomicInt(&live_touch_vibration, c->touch_vibration);
@@ -260,6 +262,7 @@ int config_live_touch_hud(void) { return SDL_GetAtomicInt(&live_touch_hud); }
 int config_live_touch_auto_r(void) { return SDL_GetAtomicInt(&live_touch_auto_r); }
 int config_live_touch_floating(void) { return SDL_GetAtomicInt(&live_touch_floating); }
 int config_live_lock_on(void) { return SDL_GetAtomicInt(&live_lock_on); }
+int config_live_persistent_lock_on(void) { return SDL_GetAtomicInt(&live_persistent_lock_on); }
 int config_live_touch_show(int button) { return SDL_GetAtomicInt(&live_touch_show[button]); }
 void config_toggle_touch_dpad(void) {
     int before;
