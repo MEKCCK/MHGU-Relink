@@ -1060,7 +1060,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Touch", "ShowSheathe", touch_show[TB_SHEATHE], false),
     ON_OFF("Touch", "ShowPlus", touch_show[TB_PLUS], false),
     ON_OFF("Touch", "ShowMinus", touch_show[TB_MINUS], false),
-    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], true),
+    ON_OFF("Touch", "ShowDpad", touch_show[TB_DPAD], false),
     ON_OFF("Touch", "ShowL", touch_show[TB_L], false),
     ON_OFF("Touch", "ShowZL", touch_show[TB_ZL], false),
     ON_OFF("Touch", "ShowZR", touch_show[TB_ZR], false),

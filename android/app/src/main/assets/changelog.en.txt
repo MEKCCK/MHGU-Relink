@@ -1,5 +1,26 @@
 MHGU Relink 0.2.2 · 2026-11-13
 
+r11: Use any saved preset regardless of weapon
+During quests, selecting any saved preset immediately uses its own control positions, sizes, HUD offsets, style and combos, regardless of the equipped weapon. The choice is saved separately and remains through weapon changes, menus, backgrounding, restarts and later quests. The base weapon for presets 17-20 is an initialization template, not a usage restriction; selecting an existing preset does not copy the template again. The list highlights the actual selection. Save and use selects the edited preset; Cancel preserves the earlier explicit choice. Outside quests, ordinary switching still uses Melee layout 2 and Ranged layout. Older configurations without a manual selection retain their original weapon mappings.
+
+r10: Reload the saved layout when reapplying a preset
+Reapplying the active preset during a quest now reloads its saved control positions, sizes, HUD offsets and style, and clears old touches and tap pulses. Previously an unchanged preset binding could leave the old in-memory layout active and later write old coordinates back when changing weapons. Existing weapon bindings remain: a different weapon's preset updates only that weapon; outside quests, Melee layout 2 or Ranged layout is used.
+
+r9: Universal control visibility and D-pad shortcut
+Universal virtual buttons and reserved presets that inherit them now follow the corresponding Buttons on the screen settings, consistently for drawing, touch hit testing and editing. Hiding a held control releases its touch input. Restore the D-pad visibility shortcut with editable, saved position and size. Hiding the D-pad clears its held directions and short-tap pulses while preserving physical controller input. Move only the formerly unused shortcut's old default below L; keep custom positions and sizes. Retain the two outside-quest layouts, top editor toolbar and hidden universal virtual right stick.
+
+r8: Top editor toolbar and two outside-quest layouts
+Hide the virtual right stick in the universal classic layout and reserved presets that inherit it, without adding a switch. Camera swipes and physical controller right-stick input remain available. Every layout editor now places its action buttons at the top, with the title and hint in the upper center, preserving saved control positions. Outside quests, only Melee layout 2 and Ranged layout remain in ordinary switching, editor paging and settings choices. All 20 weapon presets remain. Data for the retired melee layouts 1 and 3 is retained; old selections fall back to Melee layout 2.
+
+r7: Direct preset selection and layout saving
+Fix Android layout saves using different relative directories for temporary files and replacement, which also blocked Next layout. Editing can save both during and outside quests. Settings → Controls adds Layout presets: weapon/Prowler presets 1-15, universal virtual buttons at 16, and reserved presets 17-20. Tap a bound preset to save and use it immediately; choose a weapon first for an unbound reserve. Preset 16 applies to every weapon and Prowler; a weapon-specific preset changes only that weapon. Edit the selected preset directly without paging through the others. Ordinary layout switching outside quests still uses four layouts. Failed saves report an error and retain the previous selection; canceling edits does not undo a preset already selected explicitly.
+
+r6: Preset 16, universal virtual buttons
+Preset 16 works with every melee and ranged weapon and Prowler. It provides A/B/X/Y, L/R, ZL/ZR, the D-pad, both sticks, L3/R3 and plus/minus, with editable positions and sizes. Save and use selects it for all weapons and Prowler. Saving a weapon-specific preset afterward switches only that weapon back. Presets 1-15 still cover the 14 weapons and Prowler; presets 17-20 are four bindable reserves, keeping 20 presets in total. Universal controls send their original buttons; stick movement does not automatically press R. Editing remains available during quests without automatic layout switching. Ordinary switching outside quests still uses the original four layouts.
+
+r5: Layout editing and 20 weapon presets
+In quests, keep editing the current weapon's layout. Outside quests, edit 20 weapon presets: one for each of the 14 weapons and Prowler, plus five reserved slots that can bind to a weapon. The four general layouts remain editable. Each preset saves its own positions, sizes and HUD offsets. Binding a reserved slot copies that weapon's current layout and uses its combo bindings. Save and use selects the preset only for its bound weapon. Changing pages saves positions without selecting the preset; a new or changed weapon binding requires Save and use. Cancel reverts the current page. Leaving the editor restores the active layout. Ordinary switching outside quests still cycles only the four general layouts.
+
 r4: Bow charge reticle
 The native bow screen reticle appears while charging and closes outside charging. Firing, canceling and non-charging follow-up moves do not extend its display. Uses the game's charge query rather than treating held Fire or every weapon action as charging. Reticle display is independent of lock-on, left-stick movement and action rebinding; retains r3's automatic facing when the left stick is centered.
 

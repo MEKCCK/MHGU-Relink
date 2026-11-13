@@ -71,12 +71,12 @@ enum Ctl {
     C_ATTACK, C_DODGE, C_R, C_ZR, C_ZL, C_L, C_MENU, C_MAP, C_SETTINGS, C_SHEATHE, C_RUN, C_HEAVY, C_LIGHT, C_CORNER,
     C_HMINUS, C_R3, C_HDPAD, C_COMBO, C_COMBO_END = C_COMBO + TOUCH_COMBOS - 1,
     C_RFIRE, C_RSECOND, C_RAIM, C_RSPECIAL, C_RDODGE, C_RSHEATHE, C_AMMO_UP, C_AMMO_DOWN,  // (a bow's or a bowgun's)
-    C_LAYOUT, C_DPAD_TOGGLE, C_STICK,  // (the layout switches and movement stick are laid out)
+    C_LAYOUT, C_DPAD_TOGGLE, C_STICK, C_RSTICK,  // append saved controls so existing keys keep their identities
     C_DPAD, C_MPILL, C_FX, C_FY, C_MINUS, C_ML, C_MR,  // (the menu layout's: saved d-pad and fixed face buttons)
     C_MZL, C_MZR,                                       // (and ZL / ZR beside L / R, when [Touch] ShowMenuZL / ZR say so)
     C_COUNT
 };
-const int C_LAID = C_STICK + 1;
+const int C_LAID = C_RSTICK + 1;
 enum Icon { I_ATTACK, I_DODGE, I_SHIELD, I_BURST, I_TARGET_SELECT, I_CAMERA, I_MENU, I_MAP, I_GEAR, I_SHEATHE, I_RUN, I_STICK, I_DPAD,
             I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN };
 
@@ -135,6 +135,7 @@ const Def DEFS[C_COUNT] = {
     {"weapon_layout", "Weapon layout", I_LETTER, "GS", 0, false, .08f, .12f, .046f},
     {"dpad_toggle", "D-pad visibility", I_DPAD, "", 0, false, .18f, .79f, .043f},
     {"stick", "Movement", I_STICK, "", 0, false, .29f, .27f, .115f},
+    {"right_stick", "Right stick", I_STICK, "", 0, true, .29f, .22f, .115f},
     // the menu layout's (the d-pad uses dpad_hunt's saved position)
     {"dpad", "D-pad", I_DPAD, "", 0, false, 0, 0, .145f},
     {"menu_pill", "Confirm and back", I_ATTACK, "", 0, true, 0, 0, .085f},
@@ -149,6 +150,7 @@ const Def DEFS[C_COUNT] = {
 // which layout a control belongs to: the hunt's (the pill, B, the map, the stick), the menus' (the d-pad, the diamond,
 // Minus), or both
 enum { STYLE_PILL, STYLE_SEPARATE, STYLE_CORNER, STYLE_COUNT };  // how the attacks and the guard are laid out
+const int STYLE_CLASSIC = STYLE_COUNT;  // separate from the four legacy layouts' three attack styles
 std::atomic<int> g_style{STYLE_PILL};                            // (Layout.style, for every thread)
 std::atomic<int> g_ranged{0};     // the active profile's ranged controls: weapon profile in a quest, preset outside it
 std::atomic<int> g_bow_type{0};   // the game's Bow Controls: 0 X draws, 1 R draws
@@ -158,7 +160,25 @@ const char *const PROFILE_NAME[TOUCH_WEAPON_LAYOUTS] = {"Great Sword", "Sword & 
                                                         "Light Bowgun", "Long Sword", "Switch Axe", "Gunlance", "Bow",
                                                         "Dual Blades", "Hunting Horn", "Insect Glaive", "Charge Blade", "Prowler"};
 const char *const LEGACY_NAME[TOUCH_LEGACY_LAYOUTS] = {"Melee layout 1", "Melee layout 2", "Melee layout 3", "Ranged layout"};
+const int UNIVERSAL_LAYOUT = TOUCH_LAYOUT_PROFILES;
+const int RESERVED_LAYOUT_BASE = UNIVERSAL_LAYOUT + 1, RESERVED_LAYOUT_COUNT = 4;
+const int LAYOUT_SLOTS = RESERVED_LAYOUT_BASE + RESERVED_LAYOUT_COUNT;
+bool available_layout(int profile) {
+    return profile >= 0 && profile < LAYOUT_SLOTS && profile != TOUCH_WEAPON_LAYOUTS && profile != TOUCH_WEAPON_LAYOUTS + 2;
+}
+int next_layout(int profile) {
+    do { profile = (profile + 1) % LAYOUT_SLOTS; } while (!available_layout(profile));
+    return profile;
+}
+bool reserved_layout(int slot) { return slot >= RESERVED_LAYOUT_BASE && slot < LAYOUT_SLOTS; }
+int preset_slot(int preset) {
+    return preset < 0 || preset >= TOUCH_PRESET_COUNT ? -1 :
+           preset < TOUCH_WEAPON_LAYOUTS ? preset : UNIVERSAL_LAYOUT + preset - TOUCH_WEAPON_LAYOUTS;
+}
 const char *profile_name(int profile) {
+    if (profile < 0) return "Unassigned";
+    if (profile == UNIVERSAL_LAYOUT) return "Universal (virtual buttons)";
+    if (reserved_layout(profile)) return "Reserved preset";
     return profile < TOUCH_WEAPON_LAYOUTS ? PROFILE_NAME[profile] : LEGACY_NAME[profile - TOUCH_WEAPON_LAYOUTS];
 }
 bool fixed_quest_attack_style(int profile) {
@@ -212,14 +232,21 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
 bool is_combo(int i) { return i >= C_COMBO && i <= C_COMBO_END; }
 bool is_tab(int i) { return i == C_ML || i == C_MR || i == C_MZL || i == C_MZR; }  // (the menu's shoulders, drawn as tabs)
 bool is_dpad(int i) { return i == C_DPAD || i == C_HDPAD; }
+bool classic_control(int i) {
+    return i == C_HEAVY || i == C_LIGHT || i == C_DODGE || i == C_SHEATHE || i == C_R || i == C_L ||
+           i == C_ZL || i == C_ZR || i == C_MENU || i == C_HMINUS || i == C_MAP || i == C_R3 ||
+           i == C_HDPAD || i == C_DPAD_TOGGLE || i == C_STICK || i == C_SETTINGS;
+}
 bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
+    int show = show_setting(i);
+    if (show >= 0 && !config_live_touch_show(show)) return false;
+    if (g_style.load() == STYLE_CLASSIC) return classic_control(i);
+    if (i == C_RSTICK) return false;
     if (ranged < 0) ranged = g_ranged.load();
     // Menu detection still controls cursor gestures and lock-on, never the visible buttons or their positions.
     menu = false;
     // (no run button: the thumb past the stick's rim runs; what a hunt can do without is off until asked for: [Touch] Show*)
     if (i == C_RUN) return false;
-    int show = show_setting(i);
-    if (show >= 0 && !config_live_touch_show(show)) return false;
     if (i == C_DPAD_TOGGLE) return true;
     if (i == C_LAYOUT) return !in_quest;
     if (i == C_HDPAD) return !menu;
@@ -243,8 +270,11 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
     return true;
 }
 bool in_editor(int i, bool in_quest, int profile) {
+    if (profile < 0) return false;
     if (i == C_HDPAD) return config_live_touch_controls() != TOUCH_OFF && config_live_touch_show(TB_DPAD);
-    if (i == C_LAYOUT) return !in_quest;
+    if (g_style.load() == STYLE_CLASSIC) return in_mode(i, false, in_quest, 0);
+    if (i == C_LAYOUT) return !in_quest && profile >= TOUCH_WEAPON_LAYOUTS;
+    if (is_combo(i)) return config_live_touch_combo(profile, i - C_COMBO) != 0;
     return in_mode(i, false, in_quest, ranged_layout_profile(profile));
 }
 const ImVec2 PILL_U(.766f, -.643f);  // the pill's axis on the screen (y down): up and to the right
@@ -286,14 +316,30 @@ struct Layout {
     float x[C_COUNT], y[C_COUNT], scale[C_COUNT];
     float zx[TZ_COUNT], zy[TZ_COUNT];  // the moved HUD parts' offsets (canvas units: g_touch_zone_dx / dy)
     int style;                         // STYLE_*
+    int weapon_profile;                // reserved slots bind to one of the original 15 weapons
 };
+bool from_right(const Layout &l, int i) {
+    return DEFS[i].right && !(l.style == STYLE_CLASSIC && (i == C_L || i == C_ZL));
+}
 const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target"};
 Layout defaults(int profile) {
     Layout l = {};
+    l.weapon_profile = profile < TOUCH_WEAPON_LAYOUTS ? profile : -1;
     for (int i = 0; i < C_COUNT; i++) l.x[i] = DEFS[i].x, l.y[i] = DEFS[i].y, l.scale[i] = 1.0f;  // (the menu layout's: unused)
     if (fixed_quest_attack_style(profile)) l.style = STYLE_SEPARATE;
     if (profile >= TOUCH_WEAPON_LAYOUTS && profile < TOUCH_WEAPON_LAYOUTS + STYLE_COUNT)
         l.style = profile - TOUCH_WEAPON_LAYOUTS;
+    if (profile == UNIVERSAL_LAYOUT) {
+        l.style = STYLE_CLASSIC;
+        static const struct { int ctl; float x, y; } positions[] = {
+            {C_HEAVY, .13f, .54f}, {C_LIGHT, .27f, .69f}, {C_DODGE, .27f, .40f}, {C_SHEATHE, .41f, .54f},
+            {C_L, .12f, .84f}, {C_ZL, .30f, .84f}, {C_R, .12f, .84f}, {C_ZR, .30f, .84f},
+            {C_HMINUS, .58f, .89f}, {C_MENU, .74f, .89f}, {C_MAP, .12f, .42f}, {C_R3, .56f, .22f},
+            {C_HDPAD, .43f, .60f}, {C_DPAD_TOGGLE, .18f, .70f}, {C_STICK, .29f, .22f}, {C_RSTICK, .29f, .22f}
+        };
+        for (const auto &p : positions) l.x[p.ctl] = p.x, l.y[p.ctl] = p.y;
+        l.scale[C_HEAVY] = l.scale[C_LIGHT] = .78f;
+    }
     return l;
 }
 const Layout MENU_LAYOUT = defaults(0);
@@ -301,7 +347,8 @@ void publish_zones(const Layout &l) {  // (to the render thread)
     for (int k = 0; k < TZ_COUNT; k++) g_touch_zone_dx[k] = l.zx[k], g_touch_zone_dy[k] = l.zy[k];
 }
 void layout_path(int profile, char *path, size_t size) {
-    if (profile == 0) snprintf(path, size, "touch_layout.txt");
+    if (profile == UNIVERSAL_LAYOUT) snprintf(path, size, "touch_layout_universal.txt");
+    else if (profile == 0) snprintf(path, size, "touch_layout.txt");
     else snprintf(path, size, "touch_layout_%02d.txt", profile);
 }
 
@@ -321,25 +368,48 @@ bool load_layout(Layout *l, int profile) {
                     l->x[i] = x, l->y[i] = y, l->scale[i] = s;
             for (int k = 0; k < TZ_COUNT; k++)
                 if (!strcmp(key, ZONE_KEY[k]) && fabsf(x) <= 1400 && fabsf(y) <= 800) l->zx[k] = x, l->zy[k] = y;
-            if (!strcmp(key, "attack_style") && x >= 0 && x < STYLE_COUNT) l->style = (int)x;
+            if (!strcmp(key, "attack_style") && x >= 0 && x <= STYLE_CLASSIC && x == (int)x) l->style = (int)x;
+            if (reserved_layout(profile) && !strcmp(key, "weapon_profile") && x >= 0 && x < TOUCH_WEAPON_LAYOUTS && x == (int)x)
+                l->weapon_profile = (int)x;
         }
     fclose(f);
-    if (fixed_quest_attack_style(profile)) l->style = STYLE_SEPARATE;
+    if (profile == UNIVERSAL_LAYOUT) l->style = STYLE_CLASSIC;
+    else if (fixed_quest_attack_style(l->weapon_profile) && (!reserved_layout(profile) || l->style != STYLE_CLASSIC))
+        l->style = STYLE_SEPARATE;
+    // The formerly hidden shortcut's old default overlaps L in classic layouts; keep custom placements.
+    if (l->style == STYLE_CLASSIC && l->x[C_DPAD_TOGGLE] == DEFS[C_DPAD_TOGGLE].x &&
+        l->y[C_DPAD_TOGGLE] == DEFS[C_DPAD_TOGGLE].y && l->scale[C_DPAD_TOGGLE] == 1.0f)
+        l->y[C_DPAD_TOGGLE] = .70f;
     return true;
 }
 
-void save_layout(const Layout &l, int profile) {
-    char path[40];
+bool commit_layout_file(const char *temp, const char *path) {
+#ifdef _WIN32
+    return SDL_RenamePath(temp, path);
+#else
+    // Android SDL prefixes relative paths with internal storage; fopen uses the game's working directory.
+    return rename(temp, path) == 0;
+#endif
+}
+
+bool save_layout(const Layout &l, int profile) {
+    char path[40], temp[48];
     layout_path(profile, path, sizeof path);
-    FILE *f = fopen(path, "w");
-    if (!f) { fprintf(stderr, "[touch] could not save %s\n", path); return; }
+    snprintf(temp, sizeof temp, "%s.tmp", path);
+    FILE *f = fopen(temp, "w");
+    if (!f) { fprintf(stderr, "[touch] could not save %s\n", path); return false; }
     fprintf(f, "# touch controls: name, centre (screen heights from its edge and the bottom), size\n");
     for (int i = 0; i < C_LAID; i++) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
     fprintf(f, "# the game's HUD parts moved for touch: name, offset from their place (the game's 1280x720 units), 1\n");
     for (int k = 0; k < TZ_COUNT; k++) fprintf(f, "%s %.1f %.1f 1\n", ZONE_KEY[k], l.zx[k], l.zy[k]);
     fprintf(f, "attack_style %d 0 1\n", l.style);
-    fclose(f);
+    if (reserved_layout(profile)) fprintf(f, "weapon_profile %d 0 1\n", l.weapon_profile);
+    bool ok = fflush(f) == 0 && !ferror(f);
+    if (fclose(f)) ok = false;
+    if (ok) ok = commit_layout_file(temp, path);
+    if (!ok) { remove(temp); fprintf(stderr, "[touch] could not save %s; previous file kept\n", path); return false; }
     fprintf(stderr, "[touch] layout saved (%s)\n", path);
+    return true;
 }
 
 struct Geo {
@@ -364,7 +434,7 @@ Geo place(const Layout &l, int i, float w, float h) {
         float mx = n >= 2 ? r * 1.8f : r * 1.1f, my = r * 1.1f;  // (a pill moved to an edge: they stay on the screen)
         return {ImVec2(std::clamp(g.c.x + ox[n] * k * h, mx, w - mx), std::clamp(g.c.y + oy[n] * k * h, my, h - my)), r};
     }
-    return {ImVec2(d.right ? w - l.x[i] * h : l.x[i] * h, h - l.y[i] * h), d.r * l.scale[i] * h};
+    return {ImVec2(from_right(l, i) ? w - l.x[i] * h : l.x[i] * h, h - l.y[i] * h), d.r * l.scale[i] * h};
 }
 
 // the d-pad's direction under a finger, from its centre: one at a time (a menu's cursor goes one way: a thumb between
@@ -443,7 +513,8 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
     float bd = 1e30f;
     int ranged = profile >= 0 ? ranged_layout_profile(profile) : -1;
     for (int i = 0; i < C_COUNT; i++) {
-        if (!(editing ? in_editor(i, in_quest, profile) : in_mode(i, menu, in_quest, ranged)) || (i == C_STICK && !stick)) continue;
+        if (!(editing ? in_editor(i, in_quest, profile) : in_mode(i, menu, in_quest, ranged)) ||
+            ((i == C_STICK || i == C_RSTICK) && !stick)) continue;
         Geo g = place(l, i, w, h);
         float d = i == C_ATTACK || i == C_MPILL ? pill_distance(g, x, y) / (g.r * (slop - .07f))
                 : i == C_CORNER ? band_distance(g, x, y, nullptr) / (g.r * BAND_T * (slop - .07f))
@@ -575,7 +646,7 @@ Zones zones(void) {
 }
 
 // ------------------------------------------------------------------ fingers (host main thread)
-enum Kind { F_NONE, F_BUTTON, F_STICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT };
+enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT };
 struct Finger {
     SDL_FingerID id;
     Kind kind;
@@ -616,17 +687,28 @@ struct State {
     Layout layout, saved;
     int layout_profile;
     int detected_weapon;
-    int legacy_mode;
+    int legacy_mode = 1;
+    int weapon_layout[TOUCH_WEAPON_LAYOUTS];
+    int selected_layout = -1;
+    bool presets_loaded, save_failed;
     bool loaded, touched, auto_wait;
     bool menu;  // the menu layout is shown (game_menu, at the last touch_input)  // (auto_wait: a desktop's Auto, waiting for the first finger)
     bool in_quest;
     bool edit, edit_request;  // the layout editor
+    int edit_profile_request = -1;
     int sel;
     bool pinch;
     float pinch_d0, pinch_s0;
 };
+int control_profile(const State &s) {
+    return reserved_layout(s.layout_profile) ? s.layout.weapon_profile : s.layout_profile;
+}
+int display_ranged(const State &s) {
+    return s.layout.style == STYLE_CLASSIC ? 0 : ranged_layout_profile(control_profile(s));
+}
 bool editor_style_locked(const State &s) {
-    return !s.in_quest || ranged_layout_profile(s.layout_profile) != 0 || fixed_quest_attack_style(s.layout_profile);
+    return s.layout.style == STYLE_CLASSIC || !s.in_quest || ranged_layout_profile(control_profile(s)) != 0 ||
+           fixed_quest_attack_style(control_profile(s));
 }
 std::mutex g_lock;
 State g_s;
@@ -646,66 +728,147 @@ std::atomic<bool> g_gear_only;  // (the controls hidden: only the settings butto
 const uint64_t LOCK_AFTER_DRAG = 400 * MS, MIN_PRESS = 70 * MS;
 void recompute_held(State &s);
 
+void load_preset_selection(State &s) {
+    if (s.presets_loaded) return;
+    s.presets_loaded = true;
+    s.selected_layout = -1;
+    for (int p = 0; p < TOUCH_WEAPON_LAYOUTS; p++) s.weapon_layout[p] = p;
+    FILE *f = fopen("touch_weapon_presets.txt", "r");
+    if (!f) return;
+    char universal_path[40];
+    layout_path(UNIVERSAL_LAYOUT, universal_path, sizeof universal_path);
+    FILE *universal = fopen(universal_path, "r");
+    bool has_universal = universal != nullptr;  // old slot 19 used a different file and was a bound preset
+    if (universal) fclose(universal);
+    char line[80]; int weapon, slot;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "selected %d", &slot) == 1) {
+            Layout layout;
+            if ((slot >= 0 && slot < TOUCH_WEAPON_LAYOUTS) || (slot == UNIVERSAL_LAYOUT && has_universal) ||
+                (reserved_layout(slot) && load_layout(&layout, slot) && layout.weapon_profile >= 0 &&
+                 layout.weapon_profile < TOUCH_WEAPON_LAYOUTS)) s.selected_layout = slot;
+            continue;
+        }
+        if (sscanf(line, "%d %d", &weapon, &slot) == 2 && weapon >= 0 && weapon < TOUCH_WEAPON_LAYOUTS &&
+            (slot == weapon || (slot == UNIVERSAL_LAYOUT && has_universal) || reserved_layout(slot))) s.weapon_layout[weapon] = slot;
+    }
+    fclose(f);
+}
+int active_layout(const State &s, int profile) {
+    if (profile < 0 || profile >= TOUCH_WEAPON_LAYOUTS) return profile;
+    int slot = s.weapon_layout[profile];
+    if (slot == profile || slot == UNIVERSAL_LAYOUT) return slot;
+    Layout layout;
+    return reserved_layout(slot) && load_layout(&layout, slot) && layout.weapon_profile == profile ? slot : profile;
+}
+int quest_layout(const State &s, int profile) {
+    return s.selected_layout >= 0 ? s.selected_layout : active_layout(s, profile);
+}
+bool activate_layout(State &s, int slot, int weapon) {
+    if (slot != UNIVERSAL_LAYOUT && (weapon < 0 || weapon >= TOUCH_WEAPON_LAYOUTS)) return true;
+    int selected[TOUCH_WEAPON_LAYOUTS];
+    std::copy(s.weapon_layout, s.weapon_layout + TOUCH_WEAPON_LAYOUTS, selected);
+    if (slot == UNIVERSAL_LAYOUT) std::fill(selected, selected + TOUCH_WEAPON_LAYOUTS, UNIVERSAL_LAYOUT);
+    else {
+        for (int p = 0; p < TOUCH_WEAPON_LAYOUTS; p++)
+            if (selected[p] == slot) selected[p] = p;
+        selected[weapon] = slot;
+    }
+    if (s.selected_layout == slot && std::equal(selected, selected + TOUCH_WEAPON_LAYOUTS, s.weapon_layout)) return true;
+    const char *path = "touch_weapon_presets.txt", *temp = "touch_weapon_presets.txt.tmp";
+    FILE *f = fopen(temp, "w");
+    if (!f) return false;
+    for (int p = 0; p < TOUCH_WEAPON_LAYOUTS; p++) fprintf(f, "%d %d\n", p, selected[p]);
+    fprintf(f, "selected %d\n", slot);
+    bool ok = fflush(f) == 0 && !ferror(f);
+    if (fclose(f)) ok = false;
+    if (ok) ok = commit_layout_file(temp, path);
+    if (!ok) { remove(temp); return false; }
+    std::copy(selected, selected + TOUCH_WEAPON_LAYOUTS, s.weapon_layout);
+    s.selected_layout = slot;
+    return true;
+}
+bool activate_layout(State &s) { return activate_layout(s, s.layout_profile, control_profile(s)); }
+
 void enforce_legacy_style(State &s) {
     int mode = s.layout_profile - TOUCH_WEAPON_LAYOUTS;
-    if (mode >= 0 && mode < TOUCH_LEGACY_LAYOUTS) s.legacy_mode = mode;
-    s.layout.style = legacy_style(s.legacy_mode);
+    if (mode < 0 || mode >= TOUCH_LEGACY_LAYOUTS) return;
+    if (!s.edit) s.legacy_mode = mode;
+    s.layout.style = legacy_style(mode);
     s.saved.style = s.layout.style;
     g_style = s.layout.style;
 }
 
 void ensure_loaded(State &s) {
+    load_preset_selection(s);
     if (s.loaded) return;
     s.loaded = true, s.sel = -1;
     s.in_quest = presence_in_quest();
     int saved_profile = config_live_touch_profile();
-    s.legacy_mode = saved_profile >= TOUCH_WEAPON_LAYOUTS && saved_profile < TOUCH_LAYOUT_PROFILES
-                        ? saved_profile - TOUCH_WEAPON_LAYOUTS : 0;
+    s.legacy_mode = saved_profile == TOUCH_WEAPON_LAYOUTS + 3 ? 3 : 1;
     s.layout_profile = s.in_quest ? config_live_touch_profile() : TOUCH_WEAPON_LAYOUTS + s.legacy_mode;
     s.detected_weapon = -1;
     if (s.layout_profile < 0 || s.layout_profile >= TOUCH_LAYOUT_PROFILES || (s.in_quest && s.layout_profile >= TOUCH_WEAPON_LAYOUTS))
         s.layout_profile = s.in_quest ? 0 : TOUCH_WEAPON_LAYOUTS + s.legacy_mode;
     config_set_touch_profile(s.layout_profile);
+    if (s.in_quest) s.layout_profile = quest_layout(s, s.layout_profile);
     bool had = load_layout(&s.layout, s.layout_profile);
+    if (s.in_quest && control_profile(s) >= 0 && control_profile(s) < TOUCH_LAYOUT_PROFILES)
+        config_set_touch_profile(control_profile(s));
     s.saved = s.layout;
     if (!s.in_quest) enforce_legacy_style(s);
     publish_zones(s.layout);
     g_style = s.layout.style;
-    g_ranged = ranged_layout_profile(s.layout_profile);
+    g_ranged = display_ranged(s);
     char path[40];
     layout_path(s.layout_profile, path, sizeof path);
     fprintf(stderr, "[touch] %s layout: %s\n", profile_name(s.layout_profile), had ? path : "the defaults");
 }
 
-void select_layout(State &s, int profile) {
-    if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES) return;
-    if (s.layout_profile == profile) return;
-    save_layout(s.layout, s.layout_profile);
+void load_selected_layout(State &s, int profile) {
+    s.save_failed = false;
     s.layout_profile = profile;
-    config_set_touch_profile(profile);
     bool had = load_layout(&s.layout, profile);
+    // Editor previews must not change the controller's active per-weapon combo bindings.
+    if (!s.edit) {
+        int logical = control_profile(s);
+        if (logical == UNIVERSAL_LAYOUT) logical = profile_for_weapon(s.detected_weapon);
+        if (logical >= 0 && logical < TOUCH_LAYOUT_PROFILES) config_set_touch_profile(logical);
+    }
     s.saved = s.layout;
-    s.held = 0, s.stick_on = false;
+    s.held = 0, s.stick_on = false, s.run = false;
     s.cam_dx = s.cam_dy = 0;
     s.ammo_ready = s.ammo_hold = 0;
     for (Finger &f : s.f) f = {};
     for (Pulse &p : s.pulse) p = {};
     publish_zones(s.layout);
     g_style = s.layout.style;
-    g_ranged = ranged_layout_profile(profile);
+    g_ranged = display_ranged(s);
     char path[40];
     layout_path(profile, path, sizeof path);
     fprintf(stderr, "[touch] %s layout: %s\n", profile_name(profile), had ? path : "the defaults");
 }
 
+void select_layout(State &s, int profile) {
+    if (profile == TOUCH_WEAPON_LAYOUTS || profile == TOUCH_WEAPON_LAYOUTS + 2) profile = TOUCH_WEAPON_LAYOUTS + 1;
+    if (profile < 0 || profile >= LAYOUT_SLOTS || s.layout_profile == profile) return;
+    // A new binding needs Save and use; previewing another page must not replace an active weapon's slot.
+    bool pending_binding = s.edit && reserved_layout(s.layout_profile) && s.layout.weapon_profile != s.saved.weapon_profile;
+    if (!pending_binding && !save_layout(s.layout, s.layout_profile) && s.edit) {
+        s.save_failed = true;
+        return;
+    }
+    load_selected_layout(s, profile);
+}
+
 void select_legacy_mode(State &s, int mode) {
-    mode = (mode % 4 + 4) % 4;
+    mode = mode == 3 ? 3 : 1;
     s.legacy_mode = mode;
     select_layout(s, TOUCH_WEAPON_LAYOUTS + mode);
     enforce_legacy_style(s);
-    g_ranged = ranged_layout_profile(s.layout_profile);
+    g_ranged = display_ranged(s);
     for (Finger &f : s.f)
-        if (f.kind == F_BUTTON && !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile))) f.done = true;
+        if (f.kind == F_BUTTON && !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(control_profile(s)))) f.done = true;
     recompute_held(s);
 }
 
@@ -731,6 +894,10 @@ Geo item_arrow(const Rect &item, int d, float h) {
 }
 
 bool in_stick_zone(const State &s, float x, float y, const Rect &item) {
+    if (s.layout.style == STYLE_CLASSIC) {
+        Geo g = place(s.layout, C_STICK, s.w, s.h);
+        return hypotf(x - g.c.x, y - g.c.y) < g.r * 1.22f;
+    }
     if (!s.menu && item.in(x, y)) return false;
     if (config_live_touch_floating()) return x < s.w * .45f && y > s.h * .35f;
     Geo g = place(s.layout, C_STICK, s.w, s.h);
@@ -817,25 +984,54 @@ void to_menu(const SDL_Event *e) {
 // ---- the layout editor: a panel at the top (smaller, bigger, defaults, cancel, save); drag a control to move it,
 // pinch (a second finger anywhere) or the panel's - / + to size it
 void editor_panel(float w, float h, Rect *panel, Rect btn[E_COUNT]) {
-    float pw = std::min(w * .9f, 1.8f * h), ph = .2f * h, x0 = (w - pw) * .5f, y0 = (h - ph) * .4f;
-    *panel = {x0, y0, x0 + pw, y0 + ph, true};
-    float gap = .015f * h, bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = y0 + ph * .5f, by1 = y0 + ph - gap;
+    float pw = std::min(w * .9f, 1.8f * h), x0 = (w - pw) * .5f;
+    *panel = {x0, 0, x0 + pw, .06f * h, true};
+    float gap = .015f * h, bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = .005f * h, by1 = .055f * h;
     for (int i = 0; i < E_COUNT; i++) btn[i] = {x0 + gap + i * (bw + gap), by0, x0 + gap + i * (bw + gap) + bw, by1, true};
 }
 
 void edit_begin(State &s) {
+    if (s.edit) { s.edit_request = false; return; }
     s.edit = true, s.edit_request = false, s.sel = -1, s.pinch = false;
+    s.save_failed = false;
     s.saved = s.layout;
     for (Finger &f : s.f) f.kind = F_NONE;
     s.stick_on = false, s.held = 0;
     fprintf(stderr, "[touch] layout editor\n");
 }
-void edit_end(State &s, bool keep) {
-    if (keep) save_layout(s.layout, s.layout_profile), s.saved = s.layout;
-    else s.layout = s.saved;
+void edit_end(State &s, bool keep, bool activate = true) {
+    bool pending_binding = reserved_layout(s.layout_profile) && s.layout.weapon_profile != s.saved.weapon_profile;
+    if (keep && !activate && pending_binding) s.layout = s.saved;
+    if (keep) {
+        if (!save_layout(s.layout, s.layout_profile)) {
+            s.save_failed = true;
+            return;
+        }
+        if (activate && !activate_layout(s)) {
+            save_layout(s.saved, s.layout_profile);
+            s.save_failed = true;
+            return;
+        }
+        s.saved = s.layout;
+    } else s.layout = s.saved;
+    s.edit = false, s.sel = -1, s.pinch = false;
+    int logical = s.in_quest ? profile_for_weapon(s.detected_weapon) : config_live_touch_profile();
+    if (logical < 0) logical = 0;
+    int target = s.in_quest ? quest_layout(s, logical) : logical;
+    if (target == s.layout_profile) load_selected_layout(s, target);
+    else select_layout(s, target);
+    if (!s.in_quest) enforce_legacy_style(s);
     publish_zones(s.layout);
     g_style = s.layout.style;
-    s.edit = false, s.sel = -1, s.pinch = false;
+}
+void bind_next_weapon(State &s) {
+    int weapon = (s.layout.weapon_profile + 1) % TOUCH_WEAPON_LAYOUTS;
+    load_layout(&s.layout, active_layout(s, weapon));
+    s.layout.weapon_profile = weapon;
+    s.sel = -1;
+    publish_zones(s.layout);
+    g_style = s.layout.style;
+    g_ranged = display_ranged(s);
 }
 // The next way of laying out the attacks. What the corner band would cover goes inside its bend; leaving it, back to
 // where it was when the editor opened
@@ -851,7 +1047,7 @@ void next_style(State &s) {
         if (band_distance(band, o.c.x, o.c.y, nullptr) < band.r * BAND_T + o.r)
             s.layout.x[m.c] = s.layout.y[m.c] = m.at;
     }
-    if (s.sel >= 0 && s.sel < C_COUNT && !in_editor(s.sel, s.in_quest, s.layout_profile)) s.sel = -1;
+    if (s.sel >= 0 && s.sel < C_COUNT && !in_editor(s.sel, s.in_quest, control_profile(s))) s.sel = -1;
 }
 const int ZONE_SEL = 100;  // (s.sel / a finger's ctl: a HUD part, ZONE_SEL + its TZ_*)
 
@@ -874,17 +1070,22 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         editor_panel(s.w, s.h, &panel, btn);
         for (int i = 0; i < E_COUNT; i++)
             if (btn[i].in(x, y)) {
-                if ((i == E_STYLE && editor_style_locked(s)) || (i == E_SET && s.in_quest)) return;
+                if ((i == E_STYLE && (reserved_layout(s.layout_profile) ? s.in_quest : editor_style_locked(s))) ||
+                    (i == E_SET && s.in_quest) || (i == E_SAVE && control_profile(s) < 0)) return;
                 f->kind = F_MENU;  // (held until it lifts: nothing under it moves)
                 if (i == E_SMALLER || i == E_BIGGER) {
                     if (s.sel >= 0 && s.sel < C_COUNT) s.layout.scale[s.sel] += i == E_BIGGER ? .1f : -.1f, clamp_place(s, s.sel);
                 } else if (i == E_SET) {
-                    if (!s.in_quest) select_legacy_mode(s, s.legacy_mode + 1);
+                    if (!s.in_quest) {
+                        select_layout(s, next_layout(s.layout_profile));
+                        enforce_legacy_style(s);
+                    }
                     s.sel = -1;
                 } else if (i == E_STYLE) {
-                    next_style(s);
+                    if (reserved_layout(s.layout_profile)) bind_next_weapon(s);
+                    else next_style(s);
                 } else if (i == E_RESET) {
-                    s.layout = defaults(s.layout_profile);
+                    s.layout = defaults(control_profile(s));
                     publish_zones(s.layout);
                     g_style = s.layout.style;
                 } else {
@@ -902,8 +1103,8 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             f->kind = F_EDIT;
             return;
         }
-        int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.5f, true, false, s.in_quest, true, s.layout_profile);
-        if (c < 0) {  // (a HUD part of the game's: the item bar, the Hunter Arts, the target camera)
+        int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.5f, true, false, s.in_quest, true, control_profile(s));
+        if (c < 0 && control_profile(s) >= 0) {  // (a HUD part of the game's: the item bar, the Hunter Arts, the target camera)
             Zones z = zones();
             for (int k = 0; k < TZ_COUNT && c < 0; k++)
                 if (zone_rect(z, k, s.w, s.h).in(x, y)) c = ZONE_SEL + k;
@@ -932,7 +1133,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h, -800.0f, 800.0f);
             publish_zones(s.layout);
         } else if (f->ctl >= 0) {
-            s.layout.x[f->ctl] += (DEFS[f->ctl].right ? -dx : dx) / s.h;
+            s.layout.x[f->ctl] += (from_right(s.layout, f->ctl) ? -dx : dx) / s.h;
             s.layout.y[f->ctl] -= dy / s.h;
             clamp_place(s, f->ctl);
         }
@@ -952,6 +1153,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     ensure_loaded(s);
+    bool classic = s.layout.style == STYLE_CLASSIC;
     uint64_t now = SDL_GetTicksNS();
     s.last_ns = now, s.touched = true;
     SDL_Window *win = ui_window();
@@ -990,8 +1192,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
         Zones z = zones();
         Rect item = zone_rect(z, TZ_ITEM, s.w, s.h), arts = zone_rect(z, TZ_ARTS, s.w, s.h),
              target = zone_rect(z, TZ_TARGET, s.w, s.h);
-        int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, s.menu, s.in_quest, false, s.layout_profile);
-        if ((c == C_R || c == C_DODGE || c == C_CORNER || c == C_RSECOND || c == C_AMMO_UP || c == C_AMMO_DOWN) && item.in(x, y))
+        int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, classic, s.menu, s.in_quest, false, control_profile(s));
+        if (!classic && (c == C_R || c == C_DODGE || c == C_CORNER || c == C_RSECOND || c == C_AMMO_UP || c == C_AMMO_DOWN) && item.in(x, y))
             c = -1;  // (narrow screens: their default places, and B's in layouts saved before, reach the item bar)
         int arrow = 0;
         if (c < 0 && item.ok && !s.menu && config_live_touch_show(TB_ITEM_ARROWS))
@@ -999,14 +1201,26 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 Geo g = item_arrow(item, d, s.h);
                 if (hypotf(x - g.c.x, y - g.c.y) < g.r * 1.2f) arrow = d;
             }
-        if (c >= 0) {
+        if (classic && c == C_STICK) {
+            f->kind = s.stick_on ? F_MENU : F_STICK;
+            f->ctl = c;
+            if (!s.stick_on) {
+                Geo g = place(s.layout, C_STICK, s.w, s.h);
+                s.stick_on = true, s.bx = g.c.x, s.by = g.c.y;
+                stick_to(s, x, y);
+            }
+        } else if (classic && c == C_RSTICK) {
+            bool held = false;
+            for (const Finger &g : s.f) if (g.kind == F_RSTICK) held = true;
+            f->kind = held ? F_MENU : F_RSTICK, f->ctl = c;
+        } else if (c >= 0) {
             f->kind = F_BUTTON, f->ctl = c, f->part = part;
             if (c == C_DPAD_TOGGLE) {
                 config_toggle_touch_dpad();
                 if (!config_live_touch_show(TB_DPAD)) release_dpad(s);
                 f->done = true;
             }
-            f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, ranged_layout_profile(s.layout_profile)) : 0;
+            f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, ranged_layout_profile(control_profile(s))) : 0;
             if (c == C_AMMO_UP || c == C_AMMO_DOWN) ammo_step(s, c == C_AMMO_UP ? 1 : -1);
             tap_due();
         } else if (arrow) {
@@ -1025,12 +1239,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 if (d < best) best = d, row = i;
             }
             f->kind = F_ARTS, f->part = row;  // (performed on the tap, when it lifts: a drag turns the camera)
-        } else if (!s.stick_on && in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile)) && in_stick_zone(s, x, y, item)) {
+        } else if (!s.stick_on && in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) && in_stick_zone(s, x, y, item)) {
             f->kind = F_STICK;
             s.stick_on = true;
             Geo g = place(s.layout, C_STICK, s.w, s.h);
-            s.bx = config_live_touch_floating() ? x : g.c.x;
-            s.by = config_live_touch_floating() ? y : g.c.y;
+            s.bx = !classic && config_live_touch_floating() ? x : g.c.x;
+            s.by = !classic && config_live_touch_floating() ? y : g.c.y;
             stick_to(s, x, y);
         } else {
             f->kind = F_CAMERA;
@@ -1075,14 +1289,14 @@ extern "C" bool touch_event(const SDL_Event *e) {
         } else if (f->kind == F_BUTTON && is_dpad(f->ctl)) {  // the d-pad: the direction the thumb is in now
             int part = dpad_part(place(s.layout, f->ctl, s.w, s.h), x, y, f->part);
             if (part != f->part) f->part = part, recompute_held(s), tap_due();
-        } else if (f->kind == F_BUTTON && (f->ctl == C_ATTACK || f->ctl == C_CORNER)) {  // sliding along it: another part
-            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, s.layout_profile);
+        } else if (!classic && f->kind == F_BUTTON && (f->ctl == C_ATTACK || f->ctl == C_CORNER)) {  // sliding along it: another part
+            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, control_profile(s));
             if (c == f->ctl && part != f->part) f->part = part, recompute_held(s), tap_due();
-        } else if (f->kind == F_BUTTON && (f->ctl == C_HEAVY || f->ctl == C_LIGHT)) {  // from one attack to the other
-            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, s.layout_profile);
+        } else if (!classic && f->kind == F_BUTTON && (f->ctl == C_HEAVY || f->ctl == C_LIGHT)) {  // from one attack to the other
+            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, control_profile(s));
             if ((c == C_HEAVY || c == C_LIGHT) && (c != f->ctl || part != f->part)) f->ctl = c, f->part = part, recompute_held(s), tap_due();
-        } else if (f->kind == F_BUTTON && (f->ctl == C_DODGE || f->ctl == C_R)) {  // a thumb sliding onto the attacks
-            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, s.layout_profile);
+        } else if (!classic && f->kind == F_BUTTON && (f->ctl == C_DODGE || f->ctl == C_R)) {  // a thumb sliding onto the attacks
+            int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, false, s.in_quest, false, control_profile(s));
             if (c == C_ATTACK || c == C_CORNER || c == C_HEAVY || c == C_LIGHT) f->ctl = c, f->part = part, recompute_held(s);
         }
         f->x = x, f->y = y;
@@ -1135,7 +1349,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     f->kind = F_NONE;
     recompute_held(s);
     if (cycle_layout) {
-        if (!s.in_quest) select_legacy_mode(s, s.legacy_mode + 1);
+        if (!s.in_quest) select_legacy_mode(s, s.legacy_mode == 1 ? 3 : 1);
     }
     return true;
 }
@@ -1151,12 +1365,21 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     uint32_t hunter = weapon_hunter();
     play_seen(hunter);
     bool quest = presence_in_quest();
+    int weapon = quest ? weapon_type() : -1;
+    if (s.edit && (quest != s.in_quest || (quest && weapon >= 0 && weapon != s.detected_weapon))) {
+        edit_end(s, true, false);  // scene changes save work, but only Save and use changes the selected preset
+        if (s.edit) edit_end(s, false);  // a failed disk write must not leave controls on the old scene
+    }
     if (quest) {
-        int weapon = weapon_type();
+        if (!s.in_quest && s.selected_layout >= 0) select_layout(s, s.selected_layout);
         if (weapon >= 0 && weapon != s.detected_weapon) {
             s.detected_weapon = weapon;
             int profile = profile_for_weapon(weapon);
-            if (profile >= 0) select_layout(s, profile);
+            if (profile >= 0) {
+                select_layout(s, quest_layout(s, profile));
+                int logical = control_profile(s);
+                config_set_touch_profile(logical >= 0 && logical < TOUCH_LAYOUT_PROFILES ? logical : profile);
+            }
         }
     } else {
         s.detected_weapon = -1;
@@ -1166,7 +1389,8 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     if (!quest) enforce_legacy_style(s);
     // (a bow or a gun being aimed draws on the layer of the game's menus, and it is the hunt's controls that it needs)
     bool game = game_menu() && !weapon_aiming(hunter);
-    int ranged = ranged_layout_profile(s.layout_profile);
+    int ranged = display_ranged(s);
+    bool classic = s.layout.style == STYLE_CLASSIC;
     s.drawn = weapon_drawn();
     g_bow_type = weapon_bow_type();
     if (ranged != g_ranged.load()) {  // (a weapon in hand or gone: the other layout, under the same fingers)
@@ -1186,7 +1410,12 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         recompute_held(s);
     }
     // the editor, asked for from the settings menu (which closes itself: settings_panel.cpp): once it has closed
-    if (s.edit_request && !menu) edit_begin(s);
+    if (s.edit_request && !menu) {
+        int target = s.edit_profile_request;
+        s.edit_profile_request = -1;
+        edit_begin(s);
+        if (target >= 0) select_layout(s, target);
+    }
     // a long press on the settings button opens the editor; on L, it turns the lock-on on or off
     for (Finger &f : s.f) {
         if (f.kind != F_BUTTON || f.done) continue;
@@ -1208,7 +1437,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     bool was_visible = g_visible.exchange(visible);
     if (was_visible && !visible) {
         for (Finger &f : s.f)
-            if (f.kind == F_BUTTON || f.kind == F_STICK) f.kind = F_NONE;
+            if (f.kind == F_BUTTON || f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
         s.stick_on = false;
         s.held = 0;
         for (Pulse &p : s.pulse) p.until = 0;
@@ -1226,22 +1455,28 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     g_touch_hud = visible && config_live_touch_hud();
     for (Finger &f : s.f) {
+        if (f.kind == F_RSTICK && !in_mode(C_RSTICK, s.menu, s.in_quest, ranged)) f.kind = F_NONE;
         if (f.kind == F_BUTTON && ((!visible && f.ctl != C_SETTINGS) ||
-                                 !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile)))) f.done = true;
+                                 !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))))) f.done = true;
         // The press which draws a sheathed bowgun must end before X can become its reload action.
         if (f.kind == F_BUTTON && f.ctl == C_RFIRE && ranged == WEAPON_BOWGUN && s.drawn == 1 && f.btn == B(BTN_X))
             f.done = true;
     }
     if (!config_live_touch_show(TB_DPAD)) release_dpad(s);
-    if (!visible || !in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(s.layout_profile))) s.stick_on = false;
+    if (!visible || !in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s)))) s.stick_on = false;
     recompute_held(s);
     if (!visible) {
         for (Pulse &p : s.pulse) p = {};
+        for (Finger &f : s.f) if (f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
         s.ammo_hold = s.ammo_ready = 0;
         s.run = false;
     }
     // (while a menu is open the fingers are its mouse: nothing of theirs reaches the game or the menu's controller)
     if (menu) {
+        if (classic) {
+            for (Finger &f : s.f) if (f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
+            s.stick_on = false, s.run = false;
+        }
         s.cam_dx = s.cam_dy = 0;
         return 0;
     }
@@ -1264,9 +1499,29 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     {
         static uint64_t was;
         // (with a gun out A fires, and the scope's window comes back after each shot)
-        const uint64_t OPENS = (g_ranged.load() && s.drawn == 1 ? 0 : B(BTN_A) | B(BTN_Y)) | B(BTN_PLUS) | B(BTN_MINUS) | B(BTN_ZL) | B(BTN_ZR);
+        const uint64_t OPENS = ((g_ranged.load() || (quest && weapon_ranged(hunter))) && s.drawn == 1 ? 0 : B(BTN_A) | B(BTN_Y)) |
+                               B(BTN_PLUS) | B(BTN_MINUS) | B(BTN_ZL) | B(BTN_ZR);
         if (*buttons & ~was & OPENS) g_press_ns = now;
         was = *buttons;
+    }
+    if (classic) {
+        s.run = false;
+        if (s.stick_on && s.h > 0) {
+            float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
+            if (r > 0) {
+                *lx += (int)((s.kx - s.bx) / r * 32767);
+                *ly += (int)((s.by - s.ky) / r * 32767);
+            }
+        }
+        if (s.h > 0) {
+            Geo g = place(s.layout, C_RSTICK, s.w, s.h);
+            for (const Finger &f : s.f) if (f.kind == F_RSTICK && !f.done && g.r > 0) {
+                float dx = (f.x - g.c.x) / g.r, dy = (g.c.y - f.y) / g.r;
+                float scale = 32767 / std::max(1.0f, hypotf(dx, dy));
+                *rx += (int)(dx * scale), *ry += (int)(dy * scale);
+            }
+        }
+        return touch_b;
     }
     if (s.menu) {  // the left stick only moves the hunter; only screen swipes press the d-pad to select menu entries
         float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
@@ -1322,11 +1577,81 @@ extern "C" bool touch_drawn(void) { return g_visible || g_gear_only; }
 extern "C" void touch_edit_begin(void) {
     std::lock_guard<std::mutex> l(g_lock);
     g_s.edit_request = true;
+    g_s.edit_profile_request = -1;
 }
 
 extern "C" void touch_edit_cancel(void) {  // (the settings menu stayed open: "Cancel" in its unsaved-changes dialog)
     std::lock_guard<std::mutex> l(g_lock);
     g_s.edit_request = false;
+    g_s.edit_profile_request = -1;
+}
+
+extern "C" const char *touch_preset_name(int preset) {
+    int slot = preset_slot(preset);
+    return slot < 0 ? "Unassigned" : profile_name(slot);
+}
+
+extern "C" int touch_preset_binding(int preset) {
+    int slot = preset_slot(preset);
+    if (slot < 0 || slot == UNIVERSAL_LAYOUT) return -1;
+    if (!reserved_layout(slot)) return slot;
+    std::lock_guard<std::mutex> l(g_lock);
+    Layout layout;
+    load_layout(&layout, slot);
+    return layout.weapon_profile;
+}
+
+extern "C" int touch_preset_current(void) {
+    std::lock_guard<std::mutex> l(g_lock);
+    State &s = g_s;
+    ensure_loaded(s);
+    int slot = s.selected_layout;
+    if (slot < 0 && s.in_quest) {
+        int logical = profile_for_weapon(s.detected_weapon);
+        slot = active_layout(s, logical >= 0 ? logical : 0);
+    }
+    return slot >= 0 && slot < TOUCH_WEAPON_LAYOUTS ? slot :
+           slot >= UNIVERSAL_LAYOUT && slot < LAYOUT_SLOTS ? slot - UNIVERSAL_LAYOUT + TOUCH_WEAPON_LAYOUTS : -1;
+}
+
+extern "C" bool touch_preset_use(int preset, int weapon) {
+    int slot = preset_slot(preset);
+    if (slot < 0 || weapon < -1 || weapon >= TOUCH_WEAPON_LAYOUTS ||
+        (weapon >= 0 && !reserved_layout(slot))) return false;
+    std::lock_guard<std::mutex> l(g_lock);
+    State &s = g_s;
+    ensure_loaded(s);
+    if (s.edit) return false;
+    Layout previous, layout;
+    bool existed = load_layout(&previous, slot);
+    layout = previous;
+    if (reserved_layout(slot) && weapon >= 0 && weapon != layout.weapon_profile) {
+        load_layout(&layout, active_layout(s, weapon));
+        layout.weapon_profile = weapon;
+    }
+    if (reserved_layout(slot) && layout.weapon_profile < 0) return false;
+    bool written = !existed || layout.weapon_profile != previous.weapon_profile;
+    if (written && !save_layout(layout, slot)) return false;
+    if (!activate_layout(s, slot, layout.weapon_profile)) {
+        if (written) {
+            if (existed) save_layout(previous, slot);
+            else {
+                char path[40]; layout_path(slot, path, sizeof path);
+                remove(path);
+            }
+        }
+        return false;
+    }
+    if (s.in_quest) load_selected_layout(s, slot);
+    return true;
+}
+
+extern "C" void touch_edit_preset(int preset) {
+    int slot = preset_slot(preset);
+    if (slot < 0) return;
+    std::lock_guard<std::mutex> l(g_lock);
+    g_s.edit_profile_request = slot;
+    g_s.edit_request = true;
 }
 
 extern "C" void touch_lock_toggle(void) {
@@ -1343,7 +1668,8 @@ extern "C" uint64_t touch_lock_buttons(uint64_t buttons, bool cam_input) {
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     uint64_t now = SDL_GetTicksNS();
-    bool hunt = mousecam_active() || g_ranged.load();  // (a gun aimed has a camera of its own)
+    uint32_t hunter = weapon_hunter();
+    bool hunt = mousecam_active() || g_ranged.load() || weapon_ranged(hunter) || weapon_aiming(hunter);
     if (hunt) s.hunt_ns = now;
     if (s.lock && !config_live_persistent_lock_on() && now - s.hunt_ns > 10000 * MS) {
         s.lock = false;
@@ -1969,8 +2295,8 @@ void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on) 
     dl->AddConvexPolyFilled(q, 4, fade(GOLD, a));
 }
 
-void combo_label(int i, char *out, size_t size) {
-    config_combo_text(config_live_touch_combo(config_live_touch_profile(), i - C_COMBO), out, size);
+void combo_label(int i, int profile, char *out, size_t size) {
+    config_combo_text(config_live_touch_combo(profile, i - C_COMBO), out, size);
 }
 
 // What a ranged control shows: the weapon profile in a hunt or the fixed bowgun-style preset outside it, and its drawn state
@@ -1987,6 +2313,17 @@ void ranged_face(int i, int ranged, int drawn, Icon *ic, char *letter, size_t si
 
 void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, float h, const State &s, float a) {
     Geo g = place(l, i, w, h);
+    if (i == C_RSTICK) {
+        ImVec2 knob = g.c;
+        bool on = false;
+        if (!s.edit) for (const Finger &f : s.f) if (f.kind == F_RSTICK && !f.done) {
+            float dx = f.x - g.c.x, dy = f.y - g.c.y;
+            float scale = g.r / std::max(g.r, hypotf(dx, dy));
+            knob = ImVec2(g.c.x + dx * scale, g.c.y + dy * scale), on = true;
+        }
+        stick(dl, g.c, knob, g.r, a * (on ? 1.0f : .8f), on);
+        return;
+    }
     if (i == C_STICK) {
         if (s.stick_on && !s.edit) {
             stick(dl, ImVec2(s.bx, s.by), ImVec2(s.kx, s.ky), g.r, a, true);
@@ -2001,7 +2338,7 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
                 }
             }
         }
-        else if (s.edit || !config_live_touch_floating()) stick(dl, g.c, g.c, g.r, a * .8f, false);
+        else if (s.edit || l.style == STYLE_CLASSIC || !config_live_touch_floating()) stick(dl, g.c, g.c, g.r, a * .8f, false);
         return;
     }
     int mask = 0;
@@ -2023,7 +2360,7 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
     if (i == C_MPILL) { menu_pill(dl, font, g, mask, a); return; }
     if (is_tab(i)) { tab(dl, font, g, i == C_ML || i == C_MZL, DEFS[i].letter, mask != 0, a); return; }
     if (i == C_CORNER) { corner_band(dl, font, g, mask, a); return; }
-    if (i == C_HEAVY || i == C_LIGHT) {  // (a great sword, a small one, as on the pill)
+    if (l.style != STYLE_CLASSIC && (i == C_HEAVY || i == C_LIGHT)) {  // (a great sword, a small one, as on the pill)
         float r = mask ? g.r * .95f : g.r;
         disc(dl, g.c, r, mask != 0, a);
         ImU32 col = fade(mask ? GLOW : INK, a);
@@ -2042,9 +2379,9 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
         return;
     }
     if (is_dpad(i)) { dpad(dl, g, mask, a); return; }
-    if (DEFS[i].icon == I_LETTER || DEFS[i].icon == I_COMBO) {  // (the diamond: the game's letter, large, as on the Switch)
+    if ((l.style == STYLE_CLASSIC && DEFS[i].buttons) || DEFS[i].icon == I_LETTER || DEFS[i].icon == I_COMBO) {
         char label[32];
-        if (is_combo(i)) combo_label(i, label, sizeof label);
+        if (is_combo(i)) combo_label(i, control_profile(s), label, sizeof label);
         else if (i == C_LAYOUT)
             snprintf(label, sizeof label, "%s", settings_text(config_language(), profile_name(s.layout_profile)));
         else snprintf(label, sizeof label, "%s", DEFS[i].letter);
@@ -2063,7 +2400,7 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
     Icon ic = DEFS[i].icon;
     char letter[8];
     snprintf(letter, sizeof letter, "%s", DEFS[i].letter);
-    if (is_ranged(i)) ranged_face(i, ranged_layout_profile(s.layout_profile), s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
+    if (is_ranged(i)) ranged_face(i, ranged_layout_profile(control_profile(s)), s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
     icon(dl, ic, g.c, i == C_RFIRE ? r * .94f : r, fade(mask ? GLOW : INK, a), fade(DEEP, a));
     float br = std::max(r * (i == C_RFIRE ? .22f : .3f), .021f * h);  // (the large one's as large as the others')
     badge(dl, font, ImVec2(g.c.x + r * .7f, g.c.y + r * .7f), br, letter, a);
@@ -2107,6 +2444,7 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
     static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
                                                     "Hunter Arts - drag to move", "Lock-on - drag to move"};
     for (int k = 0; k < TZ_COUNT; k++) {
+        if (control_profile(s) < 0) break;
         Rect r = zone_rect(z, k, w, h);
         if (!r.ok) continue;
         bool sel = s.sel == ZONE_SEL + k;
@@ -2115,7 +2453,7 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
                     INK, T(ZONE_HINT[k]), w);
     }
     for (int i = 0; i < C_LAID; i++) {
-        if (!in_editor(i, s.in_quest, s.layout_profile)) continue;  // (the controls no longer there stay in the file's order only)
+        if (!in_editor(i, s.in_quest, control_profile(s))) continue;  // (the controls no longer there stay in the file's order only)
         control(dl, font, s.layout, i, w, h, s, 1.0f);
         Geo g = place(s.layout, i, w, h);
         float rr = i == C_ATTACK ? g.r * PILL_HALF * .75f + g.r : g.r;
@@ -2145,14 +2483,14 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         // its name below it, or above it near the bottom edge, or beside it in a column at an edge (the control below
         // would be under it); the selected one's size on the other side
         char own[32];
-        if (is_combo(i)) combo_label(i, own, sizeof own);
-        const char *t = is_combo(i) ? own : T(DEFS[i].name);
+        if (is_combo(i)) combo_label(i, control_profile(s), own, sizeof own);
+        const char *t = is_combo(i) ? own : s.layout.style == STYLE_CLASSIC && DEFS[i].buttons ? DEFS[i].letter : T(DEFS[i].name);
         float fs = .024f * h;
         ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, t);
-        float side = DEFS[i].right ? -1.0f : 1.0f, tx = g.c.x + side * (g.r * 1.3f + ts.x * .5f);
-        bool beside = s.layout.x[i] < .12f && i != C_ATTACK && i != C_STICK;
+        float side = from_right(s.layout, i) ? -1.0f : 1.0f, tx = g.c.x + side * (g.r * 1.3f + ts.x * .5f);
+        bool beside = s.layout.x[i] < .12f && i != C_ATTACK && i != C_STICK && i != C_RSTICK;
         for (int j = 0; j < C_LAID && beside; j++) {  // (not over another control: then below or above it)
-            if (j == i || !in_editor(j, s.in_quest, s.layout_profile)) continue;
+            if (j == i || !in_editor(j, s.in_quest, control_profile(s))) continue;
             Geo o = place(s.layout, j, w, h);
             if (j == C_CORNER) continue;
             if (j == C_ATTACK) {  // (a thin tilted capsule: the label's corners, edges and middle against its axis)
@@ -2185,22 +2523,37 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
     editor_panel(w, h, &panel, btn);
     float line = .004f * h;
     plate(dl, panel, line, 1.0f, false);
-    const char *title = profile_name(s.layout_profile);
-    text_center(dl, font, .034f * h, ImVec2((panel.x0 + panel.x1) * .5f, panel.y0 + .045f * h), GLOW,
-                T(title));
-    text_center(dl, font, .022f * h, ImVec2((panel.x0 + panel.x1) * .5f, panel.y0 + .078f * h), INK,
-                T(s.sel >= 0 ? "Drag to move  -  pinch or use - / + for its size" : "Tap a control to pick it, drag it to move it"));
+    char title[192];
+    int preset = s.layout_profile == UNIVERSAL_LAYOUT ? TOUCH_WEAPON_LAYOUTS + 1
+               : reserved_layout(s.layout_profile) ? TOUCH_WEAPON_LAYOUTS + s.layout_profile - RESERVED_LAYOUT_BASE + 2
+               : s.layout_profile < TOUCH_WEAPON_LAYOUTS ? s.layout_profile + 1 : 0;
+    if (preset) snprintf(title, sizeof title, T("Preset %d/20: %s"), preset, T(profile_name(control_profile(s))));
+    else snprintf(title, sizeof title, "%s", T(profile_name(s.layout_profile)));
+    // Keep the top buttons clear of Plus/Minus and the shoulder controls without moving saved positions.
+    auto caption = [&](const char *text, float size, float y, ImU32 color) {
+        float room = std::max(.3f * h, w - .9f * h), wide = font->CalcTextSizeA(size, FLT_MAX, 0, text).x;
+        if (wide > room) size *= room / wide;
+        text_center(dl, font, size, ImVec2(w * .5f, y), color, text);
+    };
+    caption(title, .028f * h, .21f * h, GLOW);
+    caption(T(s.save_failed ? "Could not save layout; please try again." : control_profile(s) < 0 ?
+                  "Choose a base weapon to copy its layout; Save and use confirms." : s.sel >= 0 ? "Drag to move  -  pinch or use - / + for its size" :
+                  s.layout_profile == UNIVERSAL_LAYOUT ? "Save and use selects this preset for quests, regardless of weapon." :
+                  "Tap a control to pick it, drag it to move it"), .018f * h, .235f * h, INK);
     static const char *const STYLE_LABEL[STYLE_COUNT] = {"Attacks: pill", "Attacks: buttons", "Attacks: corner"};
-    const char *const LABEL[E_COUNT] = {"-", "+", s.in_quest ? "Next weapon" : "Next layout", STYLE_LABEL[s.layout.style],
-                                        "Defaults", "Cancel", "Save"};
+    const char *const LABEL[E_COUNT] = {"-", "+", s.in_quest ? "Next weapon" : "Next layout",
+                                        reserved_layout(s.layout_profile) ? "Base weapon" : s.layout.style == STYLE_CLASSIC ?
+                                        "Attacks: virtual buttons" : STYLE_LABEL[s.layout.style],
+                                        "Defaults", "Cancel", preset ? "Save and use" : "Save"};
     for (int i = 0; i < E_COUNT; i++) {
-        bool off = ((i == E_SMALLER || i == E_BIGGER) && s.sel < 0) || (i == E_STYLE && editor_style_locked(s)) ||
-                   (i == E_SET && s.in_quest);
+        bool off = ((i == E_SMALLER || i == E_BIGGER) && s.sel < 0) ||
+                   (i == E_STYLE && (reserved_layout(s.layout_profile) ? s.in_quest : editor_style_locked(s))) ||
+                   (i == E_SET && s.in_quest) || (i == E_SAVE && control_profile(s) < 0);
         bool lit = false;
         for (const Finger &f : s.f)
             if (f.kind == F_MENU && btn[i].in(f.x, f.y)) lit = true;
         plate(dl, btn[i], line * .8f, off ? .45f : 1.0f, lit);
-        float fs = (i < 2 ? .05f : .028f) * h, room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
+        float fs = (i < 2 ? .04f : .028f) * h, room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
         if (wide > room) fs *= room / wide;  // (a narrow screen, a long word: on one line, smaller)
         text_center(dl, font, fs, ImVec2((btn[i].x0 + btn[i].x1) * .5f, (btn[i].y0 + btn[i].y1) * .5f),
                     fade(i == E_SAVE ? GLOW : INK, off ? .45f : 1.0f), T(LABEL[i]));
@@ -2236,7 +2589,7 @@ extern "C" void touch_draw(float w, float h) {
         control(dl, font, s.layout, C_SETTINGS, w, h, s, a * .75f);
         return;
     }
-    int ranged = ranged_layout_profile(s.layout_profile);
+    int ranged = ranged_layout_profile(control_profile(s));
     if (s.menu && in_mode(C_DPAD, s.menu, s.in_quest, ranged)) control(dl, font, s.layout, C_DPAD, w, h, s, a);
     for (int i = 0; i < C_COUNT; i++)
         if (i != C_DPAD && in_mode(i, s.menu, s.in_quest, ranged)) control(dl, font, s.layout, i, w, h, s, a);

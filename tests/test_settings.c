@@ -95,6 +95,27 @@ int main(int argc, char **argv) {
     assert(!strcmp(settings_text(2, "Language"), "语言"));
     assert(!strcmp(settings_text(2, "Full stick automatically holds R"), "拉满摇杆自动按 R"));
     assert(!strcmp(settings_text(2, "D-pad visibility"), "十字键显示／隐藏"));
+    assert(!strcmp(settings_text(1, "Base weapon"), "Arma base"));
+    assert(!strcmp(settings_text(2, "Base weapon"), "基础武器"));
+    assert(!strcmp(settings_text(2, "Base: %s"), "基础：%s"));
+    assert(!strcmp(settings_text(2, "Selected preset %d/20: %s"), "已选择方案 %d/20：%s"));
+    const char *preset_messages[] = {
+        "Selected preset %d/20: %s", "Not initialized",
+        "Tap any saved preset to use it in quests, regardless of weapon. Preset 16 uses traditional virtual buttons; presets 17-20 need a base weapon only for initialization. Outside quests, switch between Melee layout 2 and Ranged layout.",
+        "Tap to use traditional virtual buttons in quests, regardless of weapon. No extra Save is needed.",
+        "Choose a base weapon to initialize this reserved preset, then use it with any weapon.",
+        "Tap to use this saved preset in quests, regardless of weapon. No extra Save is needed.",
+        "Choose a base weapon to copy its current layout into this preset and use it immediately. Changing the base replaces this preset's saved layout; it does not limit which weapon can use it.",
+        "Outside quests, switch between Melee layout 2 and Ranged layout. In quests, use the selected preset regardless of weapon.",
+        "Edit the active layout during quests. Outside quests, edit 20 presets and two general layouts: Melee layout 2 and Ranged layout. Presets 1-15 start from individual weapons and Prowler; preset 16 uses traditional virtual buttons. Presets 17-20 copy a base weapon's layout. Save and use selects any preset for quests, regardless of weapon.",
+        "Choose a base weapon to copy its layout; Save and use confirms.",
+        "Save and use selects this preset for quests, regardless of weapon.",
+    };
+    for (size_t i = 0; i < sizeof preset_messages / sizeof *preset_messages; i++) {
+        assert(!strcmp(settings_text(0, preset_messages[i]), preset_messages[i]));
+        assert(strcmp(settings_text(1, preset_messages[i]), preset_messages[i]));
+        assert(strcmp(settings_text(2, preset_messages[i]), preset_messages[i]));
+    }
     assert(!strcmp(settings_text(1, "Duplicate quest ID."), "ID de misión repetido."));
     char *text = read_file(path);
     assert(strstr(text, "; Keep this comment\r\n"));
@@ -162,6 +183,7 @@ int main(int argc, char **argv) {
     assert(!config_restart_key("AutoR"));
     assert(!config_restart_key("PersistentLockOn"));
     assert(!config_restart_key("FloatingStick"));
+    assert(!config_restart_key("ShowDpad"));
     assert(config_restart_key("framerate") == config_restart_key("FPS") && !config_restart_key("NoSuchKey"));
     // The menu's help: the default ini's comments, wrapped lines joined, the default last (none when empty)
     char help[2048];
@@ -287,6 +309,7 @@ int main(int argc, char **argv) {
     config_toggle_touch_dpad();
     assert(config_live_touch_show(TB_DPAD) == !dpad && config_editable().touch_show[TB_DPAD] == !dpad);
     touch = config_editable();
+    assert(!config_restart_required(&touch));
     assert(config_save(&touch, error, sizeof error) && config_live_touch_show(TB_DPAD) == !dpad);
     g_config = initial; config_load();
     assert(config_editable().touch_auto_r && config_live_touch_auto_r());

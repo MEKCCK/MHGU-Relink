@@ -21,6 +21,13 @@ bool touch_drawn(void);  // (something of them is on the screen: the settings bu
 void touch_draw(float display_w, float display_h);
 void touch_edit_begin(void);  // the layout editor (settings menu: Controls), once the menu is closed
 void touch_edit_cancel(void);  // (the settings menu's unsaved-changes dialog cancelled: it stays open)
+enum { TOUCH_PRESET_COUNT = 20, TOUCH_UNIVERSAL_PRESET = 15 };
+// UI preset indices exclude ordinary village layouts. Names are translation keys.
+const char *touch_preset_name(int preset);
+int touch_preset_binding(int preset);  // base controls 0..14; -1 for universal or uninitialized
+int touch_preset_current(void);  // selected quest preset 0..19, or -1 before a selection outside quests
+bool touch_preset_use(int preset, int weapon);  // -1 uses saved contents; 0..14 copies a reserved slot's base weapon
+void touch_edit_preset(int preset);  // starts after the settings overlay has fully closed
 void touch_lock_toggle(void);  // the lock-on (a controller's right stick click in a hunt: runtime/host_input.c)
 // the lock-on's L presses, given every button pressed now and whether the camera is being turned (host_input.c)
 uint64_t touch_lock_buttons(uint64_t buttons, bool cam_input);
