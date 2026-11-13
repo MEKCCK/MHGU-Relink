@@ -29,6 +29,7 @@ jobs:
             mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-opus
             mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-vulkan-memory-allocator
       - name: Rust link and crossplay libraries
