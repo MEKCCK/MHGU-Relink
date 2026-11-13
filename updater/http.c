@@ -7,7 +7,7 @@
 
 #include "updater.h"
 
-#define USER_AGENT "MHGURecomp-updater/" MHGU_VERSION
+#define USER_AGENT "mhgu-relink-updater/" MHGU_VERSION
 #define GITHUB_JSON "application/vnd.github+json"
 
 #ifdef _WIN32

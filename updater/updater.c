@@ -1,4 +1,4 @@
-// MHGU Recomp updater: started in place of the game (a shortcut, or Steam's non-Steam game entry), it asks GitHub for
+// MHGU Relink updater: started in place of the game (a shortcut, or Steam's non-Steam game entry), it asks GitHub for
 // the latest release, installs it over the game folder it sits in when it is newer than this build, and starts the game
 // (with the arguments it was given). The game itself never updates: it starts as ever without this.
 //
@@ -34,7 +34,7 @@
 #include <tlhelp32.h>
 #define GAME_EXE "mhgu-relink.exe"
 #define GAME_LIB "mhgugame.dll"
-#define ASSET_PREFIXES "Windows-"
+#define ASSET_PREFIXES "mhgu-relink-"
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -44,7 +44,7 @@
 #define GAME_LIB "mhgugame.so"
 #define ASSET_PREFIXES "Linux-,ArchLinux-"  // (ArchLinux-: up to 0.11.4)
 #endif
-#define LATEST_URL "https://api.github.com/repos/morerokk/MHGURecomp/releases/latest"
+#define LATEST_URL "https://api.github.com/repos/MEKCCK/MHGU-Relink/releases/latest"
 
 // what the archive must never write (first path component, any case): the player's
 static const char *const KEEP[] = {"data", "mods", "engine_modules", "cheats", "bonus", "cache", "shots", "save", "update",
@@ -553,7 +553,7 @@ static int SDLCALL worker(void *arg) {
     set_state(ST_INSTALLING);
     if (game_running()) {
         no_launch = true;
-        return failed("MHGU Recomp is running: close it, then press Try again.");  // (the download is kept)
+        return failed("MHGU Relink is running: close it, then press Try again.");  // (the download is kept)
     }
 #ifdef _WIN32
     // (an antivirus scan or a sync tool may hold one of the files for a moment: wait for it, then go on: the install
@@ -626,7 +626,7 @@ static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
     SDL_SetRenderDrawColor(rd, 24, 26, 32, 255);
     SDL_RenderClear(rd);
     SDL_SetRenderDrawColor(rd, 240, 180, 60, 255);
-    text(rd, 32, 28, "MHGU Recomp updater", 3);
+    text(rd, 32, 28, "MHGU Relink updater", 3);
     SDL_SetRenderDrawColor(rd, 230, 230, 235, 255);
     char msg[512];
     SDL_LockMutex(lock);
@@ -719,7 +719,7 @@ static bool run_window(SDL_Thread *th) {
     SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgu-relink");
 #endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) &&
-        SDL_CreateWindowAndRenderer("MHGU Recomp updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd)) {
+        SDL_CreateWindowAndRenderer("MHGU Relink updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd)) {
         SDL_SetRenderVSync(rd, 1);
         set_window_icon(win);
     }
@@ -842,7 +842,7 @@ static int launch(int argc, char **argv) {
     if (!CreateProcessW(wexe, wcmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         char msg[1300];
         snprintf(msg, sizeof msg, "Can't start %s (error %lu).", exe, GetLastError());
-        MessageBoxA(NULL, msg, "MHGU Recomp updater", MB_ICONERROR);
+        MessageBoxA(NULL, msg, "MHGU Relink updater", MB_ICONERROR);
         return 1;
     }
     free(wcmd);
@@ -881,7 +881,7 @@ int main(int argc, char **argv) {
     SDL_CreateDirectory(p);
     path(p, sizeof p, "update/updater.log");
     logf = SDL_IOFromFile(p, "w");
-    ulog("[update] MHGU Recomp updater %s in %s\n", MHGU_VERSION, root);
+    ulog("[update] MHGU Relink updater %s in %s\n", MHGU_VERSION, root);
     // leftovers of the last update (Windows can't remove a running program's files)
     path(p, sizeof p, "update/backup");
     rm_tree(p);
@@ -893,7 +893,7 @@ int main(int argc, char **argv) {
         ulog("[update] %s is not here\n", p);
         char msg[1300];
         snprintf(msg, sizeof msg, "%s was not found: the updater belongs in the game folder, next to it.", p);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MHGU Recomp updater", msg, NULL);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MHGU Relink updater", msg, NULL);
         return 1;
     }
     mode = read_mode();
