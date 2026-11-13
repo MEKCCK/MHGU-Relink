@@ -43,6 +43,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "hle/chat.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
+#include "voice.h"
 
 extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
 
@@ -645,6 +646,39 @@ static bool battery_text(uint64_t now, char *out, size_t size) {
     return true;
 }
 
+
+// Voice chat (runtime/voice.c): who is talking now, at the left edge. Names come from the voice name messages; until
+// one arrives (or when the other game is older) the player's virtual address is shown.
+static void draw_voice(float scale) {
+    if (!voice_sending() && voice_talking() <= 0) return;
+    uint32_t ids[8];
+    int n = voice_speakers(ids, 8);
+    bool me = voice_sending();
+    if (!me && !n) return;
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+    ImGui::SetNextWindowPos(ImVec2(10 * scale, 70 * scale), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.62f);
+    if (!ImGui::Begin("Voice##speakers", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+    if (me) {
+        char own[33];
+        voice_own_name(own);
+        ImGui::TextColored(ImVec4(.55f, .9f, 1.0f, 1.0f), "Mic  %s", own[0] ? own : "You");
+    }
+    for (int i = 0; i < n; i++) {
+        char name[33];
+        if (!voice_player_name(ids[i], name)) {
+            uint32_t ip = ids[i];
+            snprintf(name, sizeof name, "Player %u.%u.%u.%u", ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255);
+        }
+        ImGui::TextColored(ImVec4(.55f, .9f, 1.0f, 1.0f), "Mic  %s", name);
+    }
+    ImGui::End();
+}
+
 // The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
 // its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
 // forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
@@ -891,7 +925,8 @@ void overlay_frame(void *cpu) {
     bool fps = config_show_fps();
 #endif
     float loading = loading_alpha(now);
-    if (!open && !free_render && !notice && !chat && !touch && !stats && !fps && !loading) {  // (nothing to draw)
+    bool voice = voice_sending() || voice_talking() > 0;
+    if (!open && !free_render && !notice && !chat && !touch && !stats && !fps && !loading && !voice) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -972,6 +1007,7 @@ void overlay_frame(void *cpu) {
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);
+    if (voice) draw_voice(scale);
     if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
     if (touch) touch_draw((float)w, (float)h);  // (the touch controls: runtime/touch.cpp)
     if (loading) draw_loading(now, scale, loading);

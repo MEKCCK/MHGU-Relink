@@ -19,7 +19,11 @@ void voice_tick(void);  // each frame, on the host's thread, after host_input_up
 // VOICE_UDP_PORT (net/vsock.c). Another magic number's message is left alone; so is this game's own voice.
 void voice_aux_received(const void *data, uint32_t len);
 int voice_talking(void);                     // the players heard in the last frame
-int voice_speakers(uint32_t *ids, int max);  // their network addresses, up to max; how many were written
+int voice_speakers(uint32_t *ids, int max);
+// A player's hunter name as their game sent it, false until heard.
+bool voice_player_name(uint32_t id, char out[33]);
+// Our own hunter name, "" when the game is not in a hunt/town yet.
+void voice_own_name(char out[33]);  // their network addresses, up to max; how many were written
 bool voice_sending(void);                    // this game's microphone is going out
 int voice_selftest(void);                    // a tone through Opus: the last packet's size, -1: no Opus / it failed
 void voice_shutdown(void);                   // (at exit: the devices closed and the encoder freed)

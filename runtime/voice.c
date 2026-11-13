@@ -32,6 +32,8 @@ int voice_speakers(uint32_t *ids, int max) { (void)ids, (void)max; return 0; }
 bool voice_sending(void) { return false; }
 int voice_selftest(void) { return -1; }
 void voice_shutdown(void) {}
+bool voice_player_name(uint32_t id, char out[33]) { (void)id; (void)out; return false; }
+void voice_own_name(char out[33]) { out[0] = 0; }
 #else
 #include <math.h>
 #include <string.h>
@@ -53,7 +55,8 @@ bool host_talk_held(void);  // (host_input.c: the V key, or the controller's MIS
 #define VOICE_BITRATE    24000
 #define VOICE_MAX_PACKET 400      // Opus payload bytes (30 at 24 kbit/s)
 #define VOICE_HDR        8        // {magic, 0, seq LE16, sender address LE32}: then the Opus packet
-#define VOICE_MAGIC      0xE9u    // (F_AUX: emsync.c's is 0xE5, hpscale.c's 0xE6, hitsync.c's 0xE7, MHXX's names 0xE8)
+#define VOICE_MAGIC      0xE9u
+#define VOICE_NAME_MAGIC 0xEAu   // {magic, len, 0, 0, id LE32, name}: every 2 s    // (F_AUX: emsync.c's is 0xE5, hpscale.c's 0xE6, hitsync.c's 0xE7, MHXX's names 0xE8)
 #define VOICE_SPEAKERS   8        // players whose voice is kept apart (each has its own decoder and jitter buffer)
 #define VOICE_RING       16       // packets kept per player (160 ms)
 #define VOICE_START      3        // buffered before a player starts (30 ms)
@@ -92,6 +95,8 @@ static SDL_AtomicInt g_run, g_talk, g_sending, g_ptt;
 static bool g_failed;  // (an open that failed: not tried again until voice chat was off)
 static float g_agc = 1.0f;  // (the microphone's automatic raise: the voice thread's)
 static Speaker g_spk[VOICE_SPEAKERS];
+static struct { uint32_t id; char name[33]; } g_names[VOICE_SPEAKERS];
+static char g_own_name[33];
 
 static int16_t clamp16(float v) {
     v *= 32767.0f;
@@ -131,6 +136,52 @@ static bool encoder_open(void) {
     if (!g_enc) return LOG("[voice] Opus encoder: %s\n", opus_strerror(err)), false;
     encoder_setup(g_enc);
     return true;
+}
+
+// ---- names: our hunter's name from the game (the presence addresses), and each player's from their message
+#define G_GAMECONTROL 0x1a8ca48u
+#define G_SPLAYER     0x1a85b58u
+#define GC_SLOT       0x30u
+#define PL_DATA       0x13c4u
+#define PD_NAME       0x514u
+static bool guest_ok(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
+static bool read_own_name(char out[33]) {
+    uint32_t gc = LD32(G_GAMECONTROL), sp = LD32(G_SPLAYER);
+    uint32_t slot = guest_ok(gc) ? LD32(gc + GC_SLOT) : 9;
+    uint32_t pl = guest_ok(sp) && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0;
+    uint32_t pd = guest_ok(pl) ? LD32(pl + PL_DATA) : 0;
+    if (!guest_ok(pd)) return false;
+    memcpy(out, G2H(pd + PD_NAME), 32), out[32] = 0;
+    return out[0] != 0;
+}
+static void name_received(const uint8_t *m, uint32_t len) {
+    if (len < 9 || m[1] > 32 || len < 8u + m[1]) return;
+    uint32_t id = (uint32_t)m[4] | (uint32_t)m[5] << 8 | (uint32_t)m[6] << 16 | (uint32_t)m[7] << 24;
+    if (!id) return;
+    pthread_mutex_lock(&g_rx_mu);
+    int at = -1, free_at = -1;
+    for (int i = 0; i < VOICE_SPEAKERS; i++) {
+        if (g_names[i].id == id) at = i;
+        if (!g_names[i].id && free_at < 0) free_at = i;
+    }
+    if (at < 0) at = free_at >= 0 ? free_at : (int)(id % VOICE_SPEAKERS);
+    g_names[at].id = id;
+    memcpy(g_names[at].name, m + 8, m[1]), g_names[at].name[m[1]] = 0;
+    pthread_mutex_unlock(&g_rx_mu);
+}
+static void names_tick(void) {
+    static uint64_t next_ns;
+    uint64_t now = SDL_GetTicksNS();
+    if (now < next_ns || config_voice_mode() == VOICE_OFF || !ldn_net_up()) return;
+    next_ns = now + 2000000000ull;
+    char name[33];
+    if (!read_own_name(name)) return;
+    memcpy(g_own_name, name, sizeof name);
+    uint8_t m[8 + 32] = {VOICE_NAME_MAGIC, (uint8_t)strlen(name), 0, 0};
+    uint32_t id = ldn_own_ip();
+    m[4] = (uint8_t)id, m[5] = (uint8_t)(id >> 8), m[6] = (uint8_t)(id >> 16), m[7] = (uint8_t)(id >> 24);
+    memcpy(m + 8, name, strlen(name));
+    ldn_send_voice(m, 8 + (uint32_t)strlen(name));
 }
 
 // ---- receiving: a player's packet into their ring (any thread)
@@ -173,6 +224,7 @@ static void received(uint32_t id, uint16_t seq, const uint8_t *data, int len) {
 void voice_aux_received(const void *data, uint32_t len) {
     if (len <= VOICE_HDR || len > VOICE_HDR + VOICE_MAX_PACKET) return;
     const uint8_t *m = data;
+    if (m[0] == VOICE_NAME_MAGIC) { name_received(m, len); return; }
     uint16_t seq;
     uint32_t id;
     if (!hdr_get(m, &seq, &id)) return;
@@ -312,7 +364,9 @@ static void close_all(void) {  // (g_open_mu held)
     for (int i = 0; i < VOICE_SPEAKERS; i++) {
         if (g_spk[i].dec) opus_decoder_destroy(g_spk[i].dec);
         memset(&g_spk[i], 0, sizeof g_spk[i]);
+        memset(&g_names[i], 0, sizeof g_names[i]);
     }
+    g_own_name[0] = 0;
     pthread_mutex_unlock(&g_rx_mu);
     SDL_SetAtomicInt(&g_talk, 0);
     SDL_SetAtomicInt(&g_sending, 0);
@@ -391,6 +445,7 @@ static bool mic_allowed(void) {
 #endif
 
 void voice_tick(void) {
+    names_tick();
     // (read here, on the host's thread, beside the game's own input)
     SDL_SetAtomicInt(&g_ptt, host_talk_held() ? 1 : 0);
     bool want = config_voice_mode() != VOICE_OFF && ldn_net_up();
@@ -408,6 +463,23 @@ void voice_tick(void) {
     pthread_mutex_unlock(&g_open_mu);
 }
 
+bool voice_player_name(uint32_t id, char out[33]) {
+    bool found = false;
+    pthread_mutex_lock(&g_rx_mu);
+    for (int i = 0; i < VOICE_SPEAKERS; i++)
+        if (g_names[i].id == id && g_names[i].name[0]) {
+            memcpy(out, g_names[i].name, 33);
+            found = true;
+            break;
+        }
+    pthread_mutex_unlock(&g_rx_mu);
+    return found;
+}
+void voice_own_name(char out[33]) {
+    pthread_mutex_lock(&g_rx_mu);
+    memcpy(out, g_own_name, 33);
+    pthread_mutex_unlock(&g_rx_mu);
+}
 int voice_talking(void) { return SDL_GetAtomicInt(&g_talk); }
 bool voice_sending(void) { return SDL_GetAtomicInt(&g_sending) != 0; }
 int voice_speakers(uint32_t *ids, int max) {
