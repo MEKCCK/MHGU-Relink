@@ -516,6 +516,10 @@ bool equal(const Config &a, const Config &b) {
     SAME(combo_window);
     SAME(volume);
     SAME(mute_in_background);
+    SAME(voice_mode);
+    SAME(mic_volume);
+    SAME(voice_volume);
+    SAME(noise_suppression);
     SAME(touch_vibration);
     SAME(phone_rumble);
     SAME(show_stats);
@@ -1831,6 +1835,10 @@ void reset_section() {
         c.fxaa_mode = f.fxaa_mode;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
+        c.voice_mode = f.voice_mode;
+        c.mic_volume = f.mic_volume;
+        c.voice_volume = f.voice_volume;
+        c.noise_suppression = f.noise_suppression;
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -2301,6 +2309,18 @@ std::vector<Row> main_rows() {
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
 #endif
+        header(r, "voice.header", tr("Voice chat"));
+        add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
+                   [](int v) { c.voice_mode = v; }, ini("VoiceChat"));
+        r.back().help = tr("Talk to the other hunters while you play, when their game has voice chat on too. Always: the microphone is open for the whole hunt. Push to talk: it is open while you hold the voice key.");
+        number(r, "voice.mic", "Mic volume", &c.mic_volume, (int)lo("MicVolume"), (int)hi("MicVolume"), 1, ini("MicVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud the other hunters hear you.");
+        number(r, "voice.level", "Voice volume", &c.voice_volume, (int)lo("VoiceVolume"), (int)hi("VoiceVolume"), 1, ini("VoiceVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud you hear the other hunters. Doubled, as in MHXX: 50 is the game's own sound's level.");
+        add_bool(r, "voice.noise", "Noise suppression", &c.noise_suppression, ini("NoiseSuppression"));
+        r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.hdr) {
             r.back().enabled = false;

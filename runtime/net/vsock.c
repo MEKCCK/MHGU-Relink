@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "../hle.h"
+#include "../voice.h"
 #include "net.h"
 
 void netrate_udp(uint32_t len);  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
@@ -145,6 +146,10 @@ static void send_tcp(VSock *s, int kind, const void *data, uint32_t len) {  // (
 
 // ---- from the network
 void vsock_deliver(const VPacket *p, const void *data, uint32_t len) {
+    if (p->proto == VPROTO_UDP && p->dst_port == VOICE_UDP_PORT) {  // (crossplay: voice.c's, not a socket's)
+        voice_aux_received(data, len);
+        return;
+    }
     if (p->proto == VPROTO_UDP && p->dst_port == HITSYNC_UDP_PORT) hitsync_aux_received(data, len);  // (crossplay: hitsync.c)
     VPacket reply = {0};
     bool send_reply = false;

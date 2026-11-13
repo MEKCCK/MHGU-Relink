@@ -132,3 +132,12 @@ adb install -r -i com.mhgu.relink MHGU-0.2.0.apk
 ## 法律
 
 本项目不包含游戏代码、ROM、密钥或存档。请使用自己拥有的游戏副本；不要分发 `libmhgugame.so` / `.id`。
+
+
+## 游戏内语音
+
+设置 → 图形与音频 → **语音聊天**：`Off / Always / Push to talk`。首次开启会请求麦克风权限；Opus 48 kHz
+单声道，10 ms 一帧，24 kbps。局域网/互联网 hub 走 `F_AUX`，Crossplay 走虚拟 UDP `47319`。
+
+只有同样运行本项目（或同一语音协议）的玩家能听到；原版 Switch 不支持该语音协议。Push to talk 目前需要
+键盘 `V` 或手柄 MISC1；Android 触屏暂无独立语音键。

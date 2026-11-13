@@ -21,6 +21,7 @@ static SDL_AtomicInt live_touch_floating;
 static SDL_AtomicInt grass_switch = {1}, motion_mode, motion_flip_x, motion_flip_y, motion_gain = {0x3f800000};
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, menu_chord = {1}, show_battery;
+static SDL_AtomicInt voice_mode, voice_noise, voice_mic = {100}, voice_level = {70};  // [Voice] (runtime/voice.c)
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
@@ -128,6 +129,10 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->motion_gain != saved.motion_gain) set_float(&motion_gain, c->motion_gain);
     if (all || c->bloom != saved.bloom) SDL_SetAtomicInt(&live_bloom, c->bloom);
     if (all || c->reverb != saved.reverb) SDL_SetAtomicInt(&live_reverb, c->reverb);
+    if (all || c->voice_mode != saved.voice_mode) SDL_SetAtomicInt(&voice_mode, c->voice_mode);
+    if (all || c->mic_volume != saved.mic_volume) SDL_SetAtomicInt(&voice_mic, c->mic_volume);
+    if (all || c->voice_volume != saved.voice_volume) SDL_SetAtomicInt(&voice_level, c->voice_volume);
+    if (all || c->noise_suppression != saved.noise_suppression) SDL_SetAtomicInt(&voice_noise, c->noise_suppression);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
     if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
     if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
@@ -363,6 +368,11 @@ float config_audio_gain(void) {
     if (SDL_GetAtomicInt(&mute_in_background) && !SDL_GetAtomicInt(&window_focused)) return 0.0f;
     return SDL_GetAtomicInt(&volume) / 100.0f;
 }
+// [Voice]: MicVolume and VoiceVolume as gains; the other hunters' voices are doubled (MHXX's boost)
+int config_voice_mode(void) { return SDL_GetAtomicInt(&voice_mode); }
+float config_voice_mic_gain(void) { return SDL_GetAtomicInt(&voice_mic) / 100.0f; }
+float config_voice_play_gain(void) { return SDL_GetAtomicInt(&voice_level) / 100.0f * 2.0f; }
+int config_voice_noise(void) { return SDL_GetAtomicInt(&voice_noise); }
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }

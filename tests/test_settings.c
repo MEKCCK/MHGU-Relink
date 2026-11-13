@@ -224,6 +224,8 @@ int main(int argc, char **argv) {
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);
     assert(config_defaults().touch_auto_r==1);
     assert(config_defaults().touch_floating==0);
+    assert(config_defaults().voice_mode==VOICE_OFF && config_defaults().mic_volume==100);
+    assert(config_defaults().voice_volume==70 && !config_defaults().noise_suppression);
     fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.fsr_upscaler=FSR_UP_4;  // (FSR 4 is a setting again: runtime/nvn/vulkan/fsr4.c)
@@ -348,6 +350,31 @@ int main(int argc, char **argv) {
     assert(!strcmp(roundtrip.room_server, "localhost:24873") && !strcmp(roundtrip.room_name, "roundtrip-room"));
     assert(!strcmp(roundtrip.room_password, "room-test"));
     assert(roundtrip.touch_auto_r && !roundtrip.touch_floating && roundtrip.touch_show[TB_DPAD] == dpad);
+    // [Voice]: the defaults, then the values saved for runtime/voice.c's gain getters
+    Config voice = config_editable();
+    assert(voice.voice_mode == VOICE_OFF && voice.mic_volume == 100 && voice.voice_volume == 70 && !voice.noise_suppression);
+    assert(config_voice_mode() == VOICE_OFF && !config_voice_noise());
+    assert(fabsf(config_voice_mic_gain() - 1.0f) < 0.001f && fabsf(config_voice_play_gain() - 1.4f) < 0.001f);
+    voice.voice_mode = VOICE_PTT; voice.mic_volume = 80; voice.voice_volume = 50; voice.noise_suppression = 1;
+    assert(config_save(&voice, error, sizeof error));
+    assert(config_voice_mode() == VOICE_PTT && config_voice_noise());
+    assert(fabsf(config_voice_mic_gain() - 0.8f) < 0.001f && fabsf(config_voice_play_gain() - 1.0f) < 0.001f);
+    text = read_file(path);
+    assert(strstr(text, "VoiceChat = PushToTalk") && strstr(text, "MicVolume = 80"));
+    assert(strstr(text, "VoiceVolume = 50") && strstr(text, "NoiseSuppression = On"));
+    free(text);
+    g_config = initial; config_load();
+    Config voice_loaded = config_editable();
+    assert(voice_loaded.voice_mode == VOICE_PTT && voice_loaded.mic_volume == 80);
+    assert(voice_loaded.voice_volume == 50 && voice_loaded.noise_suppression == 1);
+    assert(config_voice_mode() == VOICE_PTT && config_voice_noise());
+    assert(fabsf(config_voice_mic_gain() - 0.8f) < 0.001f && fabsf(config_voice_play_gain() - 1.0f) < 0.001f);
+    bad = voice_loaded; bad.voice_mode = 3;
+    assert(!config_save(&bad, error, sizeof error) && config_voice_mode() == VOICE_PTT);
+    bad = voice_loaded; bad.mic_volume = 101; assert(!config_save(&bad, error, sizeof error));
+    bad = voice_loaded; bad.voice_volume = -1; assert(!config_save(&bad, error, sizeof error));
+    bad = voice_loaded; bad.noise_suppression = 2;
+    assert(!config_save(&bad, error, sizeof error) && config_voice_noise());
     remove(path);
     puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish/Chinese, icons, hot settings, keybinds and restart classification.");
     return 0;

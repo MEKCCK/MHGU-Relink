@@ -152,6 +152,14 @@ UPDATER  := $(B)/mhgu-relink-updater
 UPD_LDFLAGS := $(LINKER) $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
 endif
 
+# Voice chat (runtime/voice.c): Opus, where the system has it (pkg-config's, as on Linux and in MSYS2's mingw-w64
+# packages). Without it the module is a stub and voice chat stays off; Android's CMake links its own opus build.
+OPUS_LIBS   := $(shell pkg-config --exists opus 2>/dev/null && pkg-config --libs opus 2>/dev/null)
+OPUS_CFLAGS := $(shell pkg-config --exists opus 2>/dev/null && pkg-config --cflags opus 2>/dev/null)
+ifneq ($(OPUS_LIBS),)
+LDFLAGS += $(OPUS_LIBS)
+endif
+
 # GAMELIB_ID: shared by runtime and generated game code; keep it in sync with the Android app asset.
 GAMELIB_ID := $(strip $(file < android/app/src/main/assets/gamelib_id.txt))
 # GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match.
@@ -195,6 +203,7 @@ FONT_TTF := $(O)/font.ttf
 FONT_OBJ := $(O)/font.o
 LD ?= ld
 RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -Ithird_party/ffx-api -I$(IMGUI) -I$(MHGU_LINK_INC) $(OSFLAGS) $(LIB_INC)
+RTFLAGS  += $(OPUS_CFLAGS)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.

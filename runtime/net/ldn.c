@@ -37,6 +37,7 @@
 #include "../kernel.h"
 #include "../overlay.h"
 #include "../settings_locale.h"
+#include "../voice.h"
 #include "net.h"
 #include "mhgu_link.h"  /* the Rust online module (crates/mhgu-link-ffi) */
 // Each caller thread owns one snapshot of the saved crossplay settings.
@@ -430,6 +431,20 @@ void ldn_send_aux(const void *data, uint32_t len) {
     } else if (L.state == ST_STATION_CONNECTED) {
         mhgu_ldn_send_aux(data, len);
     }
+}
+
+// Voice chat (runtime/voice.c) to every other game: in crossplay F_AUX doesn't travel, so the packets go as a UDP
+// broadcast on VOICE_UDP_PORT of the local play network, as the game's own datagrams do (vsock.c takes them out of
+// the game's sockets on arrival). Packets from the same address as ours are dropped there: a room relays a broadcast
+// to its members and back to the sender.
+void ldn_send_voice(const void *data, uint32_t len) {
+    if (!ldn_net_up() || len == 0) return;
+    if (!ldn_crossplay()) {
+        ldn_send_aux(data, len);
+        return;
+    }
+    VPacket p = {ldn_own_ip(), ldn_broadcast_ip(), VOICE_UDP_PORT, VOICE_UDP_PORT, VPROTO_UDP, 0, 0};
+    ldn_send(&p, data, len);
 }
 
 // ---- MHGU_LDN_LAG=<ms>: received packets wait that long before they go on (testing high ping: set it on both
@@ -1209,6 +1224,7 @@ static void link_aux(const uint8_t *data, uint32_t len) {
     emsync_aux_received(data, len);
     hpscale_aux_received(data, len);
     hitsync_aux_received(data, len);
+    voice_aux_received(data, len);  // (runtime/voice.c: its own magic number)
 }
 
 static void *link_poll_thread(void *arg) {

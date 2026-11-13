@@ -226,6 +226,14 @@ void host_input_set_mouse_free(bool free) {
 
 bool host_input_mouse_free(void) { return SDL_GetAtomicInt(&mods_free) != 0; }
 
+// Voice chat's push to talk (runtime/voice.c): the V key, or the controller's MISC1 (the Share / mic button, on the
+// pads that have one). Read each frame whatever has the input (the menu or the game: talking doesn't depend on it), and
+// nothing else reads V, so it takes nothing away from the game.
+bool host_talk_held(void) {
+    if (keys[SDL_SCANCODE_V]) return true;
+    return pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_MISC1);
+}
+
 // ---- scripted input
 typedef struct { uint64_t start, len; uint64_t buttons; int stick, x, y; } ScriptStep;
 #define MAX_STEPS 4096

@@ -20,6 +20,7 @@
 #include "perfstats.h"
 #include "rt.h"
 #include "touch.h"
+#include "voice.h"
 #include "hle/input.h"
 
 static int launch_argc;
@@ -462,6 +463,7 @@ int ui_run(void) {
             SDL_SetAtomicInt(&action_failed, 1);
         }
         host_input_update();
+        voice_tick();  // (voice chat: opened or closed with the network and the mode, the microphone and the speakers)
         cheats_frame();
         perfstats_poll();  // ([Performance] ShowStats: the phone's temperature, every 2 s at most)
     }

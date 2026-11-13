@@ -181,3 +181,15 @@ F1 设置菜单，Alt+Enter / F11 全屏，F7 切换 MSAA，F12 截图。手柄�
 ## 许可
 
 MIT；第三方组件见 `THIRD_PARTY_NOTICES`。运行时的内核、IPC、NVN 与着色器翻译派生自 LAS Recomp（MIT）。
+
+
+## 游戏内语音（Voice）
+
+设置菜单的 **语音聊天** 支持 `Off / Always / Push to talk`：Opus 48 kHz 单声道，10 ms 一帧，24 kbps，
+走联机层的 `F_AUX`；Crossplay 时走本地虚拟网络的 UDP `47319`，不会进入游戏自己的 socket。
+双方都必须是本项目（或同一套语音协议）的客户端；原版 Switch 不解析该协议。
+
+- `MicVolume` / `VoiceVolume`：麦克风与对方语音音量；`VoiceVolume` 默认 70，内部有 2 倍增益。
+- `NoiseSuppression`：更严格的麦克风门限（并非 RNNoise）。
+- Push to talk：键盘 `V`，或手柄的 MISC1 按钮。
+- PC 构建需要 `libopus`（Arch：`pacman -S opus`）；没有它时构建仍可完成，但语音关闭。

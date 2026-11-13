@@ -1,7 +1,9 @@
 package com.mhgu.relink;
 
+import android.Manifest;
 import android.app.Dialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -122,6 +124,30 @@ public class GameActivity extends SDLActivity {
     }
 
     private static native boolean nativeIsMultiplayerActive();
+
+    /**
+     * [Voice] el chat de voz (runtime/voice.c, por JNI desde el hilo de SDL): pide el micrófono si todavía no está
+     * concedido. La petición se hace en el hilo de la interfaz; el chat consulta hasMicrophonePermission() antes de
+     * abrir la captura, también tras la respuesta.
+     */
+    public static void requestMicrophone() {
+        SDLActivity activity = mSingleton;
+        if (!(activity instanceof GameActivity)) return;
+        GameActivity game = (GameActivity) activity;
+        game.runOnUiThread(() -> {
+            if (hasMicrophonePermission()) return;
+            game.requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, MICROPHONE_REQUEST);
+        });
+    }
+
+    /** El micrófono está concedido ahora (no lo pide): lo consulta el chat de voz al empezar a hablar. */
+    public static boolean hasMicrophonePermission() {
+        SDLActivity activity = mSingleton;
+        return activity != null
+                && activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static final int MICROPHONE_REQUEST = 0x4d43;  // (el requestCode de requestPermissions: "MC")
 
     /**
      * "Guardar y reiniciar" del menú de opciones (runtime/ui.c restart_application, por JNI desde el hilo de SDL):

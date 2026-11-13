@@ -171,6 +171,11 @@
     .volume = 100,                                                                                  \
     .mute_in_background = 0,                                                                        \
     .reverb = 1,                                                                                    \
+    /* [Voice] */                                                                                   \
+    .voice_mode = VOICE_OFF,                                                                        \
+    .mic_volume = 100,                                                                              \
+    .voice_volume = 70,                                                                             \
+    .noise_suppression = 0,                                                                         \
     /* [Application] */                                                                             \
     .confirm_exit = 1,                                                                              \
     .pause_background = 1,                                                                          \
@@ -782,6 +787,26 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "Reverb = On\n"
     "\n"
+    "[Voice]\n"
+    "; Talk to the other hunters in a hunt, if their game has voice chat on too\n"
+    "; Off, Always (the microphone is open for the whole hunt), PushToTalk (it is open while you hold the voice key)\n"
+    "; Default: Off\n"
+    "VoiceChat = Off\n"
+    "\n"
+    "; How loud the other hunters hear you, in percent\n"
+    "; Between 0 (silent) and 100\n"
+    "; Default: 100\n"
+    "MicVolume = 100\n"
+    "\n"
+    "; How loud you hear the other hunters, in percent. Doubled, as in MHXX: 50 is the game's own sound's level\n"
+    "; Between 0 (silent) and 100\n"
+    "; Default: 70\n"
+    "VoiceVolume = 70\n"
+    "\n"
+    "; Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor\n"
+    "; Default: Off\n"
+    "NoiseSuppression = Off\n"
+    "\n"
     "[Application]\n"
     "; The game stops while the app is in the background (a phone: another app or the home screen), so it uses no\n"
     "; battery there; it goes on where it was when you come back\n"
@@ -1135,6 +1160,11 @@ const ConfigSetting g_settings[] = {
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Audio", "Reverb", reverb, false),
+    {"Voice", "VoiceChat", SET_CHOICE, F(voice_mode), 0, 0, 0, "Off,Always,PushToTalk|ptt|push",
+     NULL, false, ERR_MISC},
+    {"Voice", "MicVolume", SET_INT, F(mic_volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
+    {"Voice", "VoiceVolume", SET_INT, F(voice_volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
+    {"Voice", "NoiseSuppression", SET_BOOL, F(noise_suppression), 0, 0, 0, NULL, NULL, false, ERR_MISC},
     ON_OFF("Application", "PauseInBackground", pause_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
     {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0,

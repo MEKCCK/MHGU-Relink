@@ -60,7 +60,10 @@ add_custom_target(font_obj DEPENDS ${FONT_OBJ})
 add_library(main SHARED ${RT_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
                         ${S}/runtime/perfstats.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
 
-set(LIB_INC ${DEPS}/sdl3/include ${DEPS}/shaderc/include ${DEPS}/ffmpeg/include)
+# (Opus's own pkg-config, which the PC build uses, gives -I<prefix>/include/opus: keep both forms resolvable, so
+#  #include <opus.h> and #include <opus/opus.h> compile the same here and there)
+set(LIB_INC ${DEPS}/sdl3/include ${DEPS}/shaderc/include ${DEPS}/opus/include ${DEPS}/opus/include/opus
+            ${DEPS}/ffmpeg/include)
 target_include_directories(main PRIVATE ${S}/runtime ${S}/third_party/vk_mem_alloc ${IMGUI} ${IMGUI}/imgui
                            ${FSR}/include ${S}/third_party/ffx-api ${LIB_INC}
                            ${MHGU_LINK_INC})  # mhgu_link.h: the Rust Local Play link (crates/mhgu-link-ffi)
@@ -112,7 +115,9 @@ target_compile_options(main PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-include 
 add_dependencies(main font_obj)
 target_link_libraries(main PRIVATE ${FONT_OBJ} SDL3 mhguffmpeg adrenotools
   ${MHGU_LINK_LIB} ${MHGU_XP_LIB}
-  ${DEPS}/shaderc/lib/libshaderc_combined.a android log dl m z)
+  ${DEPS}/shaderc/lib/libshaderc_combined.a ${DEPS}/opus/lib/libopus.a android log dl m z)
+set_target_properties(main PROPERTIES LINK_DEPENDS  # (a new build of it must relink: it is a plain archive path)
+  "${DEPS}/opus/lib/libopus.a")
 # The game code library binds the runtime's functions (rt_dispatch, the NEON helpers...) by name: all exported.
 # The static libraries stay inside.
 target_link_options(main PRIVATE -Wl,--exclude-libs,ALL -Wl,--export-dynamic -Wl,-z,nostart-stop-gc)

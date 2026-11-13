@@ -42,6 +42,10 @@ uint32_t ldn_own_ip(void);        // 0 without a network
 uint32_t ldn_broadcast_ip(void);
 void ldn_send(const VPacket *p, const void *data, uint32_t len);  // from a local socket: into the network
 void ldn_send_aux(const void *data, uint32_t len);  // the port's own message to every other game (reliable)
+// runtime/voice.c's message: the link's F_AUX (reliable), or in crossplay a UDP broadcast on VOICE_UDP_PORT of the
+// local play network (the emulators' voice port; the game's own sockets know no such port).
+void ldn_send_voice(const void *data, uint32_t len);
+#define VOICE_UDP_PORT 47319
 // The hub server (internet hubs) for the settings menu: its last known state for these settings (ini Server, Key),
 // from a search, a hosted hub or a check; ms: the answer's round trip, hubs: listed for the key (-1: not known).
 enum { HUB_UNKNOWN, HUB_CHECKING, HUB_OFF, HUB_ONLINE, HUB_NOT_FOUND, HUB_UNREACHABLE, HUB_LOST, HUB_NO_ANSWER,

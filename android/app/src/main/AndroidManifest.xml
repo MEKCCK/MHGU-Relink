@@ -11,6 +11,8 @@
     <uses-feature android:name="android.hardware.type.pc" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- chat de voz (runtime/voice.c): el micrófono, que el sistema pregunta la primera vez (GameActivity.requestMicrophone) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- leer los archivos del juego desde la carpeta que elija el jugador (rutas normales, como el resto del runtime):
          Android 11 en adelante pide el acceso a todos los archivos, Android 10 el de lectura -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
