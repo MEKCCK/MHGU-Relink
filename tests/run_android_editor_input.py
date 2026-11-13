@@ -6,7 +6,8 @@ import os
 import subprocess
 
 project = Path(__file__).resolve().parents[1]
-output = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件/analysis/controller-ip-0.2.2-20261113/host-editor')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
+output = workspace / 'analysis/controller-ip-0.2.2-20261113/host-editor'
 output.mkdir(parents=True, exist_ok=True)
 java = Path(os.environ['JAVA_HOME']) / 'bin'
 stubs = {

@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 project = Path(__file__).resolve().parents[1]
-workspace = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 output = workspace / 'analysis' / 'bow-charge-drag-0.2.2-r14-20261113'
 output.mkdir(parents=True, exist_ok=True)
 deps = workspace / 'analysis' / 'host-test-deps'
@@ -48,7 +48,7 @@ try:
         if before[name] != expected:
             raise RuntimeError(f'Prior input source changed: {name}')
 
-    vcvars = r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+    vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
     setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True,
                            text=True, check=True, timeout=60)
     env = os.environ.copy()
@@ -56,7 +56,7 @@ try:
         key, sep, value = line.partition('=')
         if sep and key:
             env[key] = value
-    compiler = Path(r'C:\Users\a9726\AppData\Local\Android\Sdk\ndk\30.0.16248370\toolchains\llvm\prebuilt\windows-x86_64\bin\clang.exe')
+    compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
     exe = output / 'test-bow-reticle.exe'
     build = subprocess.run([
         str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=gnu11',

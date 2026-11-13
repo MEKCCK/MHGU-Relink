@@ -5,16 +5,17 @@ import os
 import subprocess
 
 project = Path(__file__).resolve().parents[1]
-output = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件/analysis/relink-0.2.2-20261113/host-sync')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
+output = workspace / 'analysis/relink-0.2.2-20261113/host-sync'
 output.mkdir(parents=True, exist_ok=True)
-vcvars = r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True, text=True, check=True)
 env = os.environ.copy()
 for line in setup.stdout.splitlines():
     key, sep, value = line.partition('=')
     if sep and key:
         env[key] = value
-compiler = Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/ndk/30.0.16248370/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/30.0.16248370'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
 
 def section(source, start, end):
     a = source.index(start)

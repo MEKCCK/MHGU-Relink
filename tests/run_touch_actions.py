@@ -5,12 +5,12 @@ import shutil
 import subprocess
 
 project = Path(__file__).resolve().parents[1]
-workspace = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis/host-test-deps'
 output = workspace / 'analysis/relink-touch-actions-build'
 output.mkdir(parents=True, exist_ok=True)
 (output / 'obj/settings-test').mkdir(parents=True, exist_ok=True)
-vcvars = r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True, text=True, check=True)
 env = os.environ.copy()
 for line in setup.stdout.splitlines():
@@ -31,7 +31,7 @@ call_end = host.index('\n    input_set(', call_start)
     '    int lx = 0, ly = 0, rx = 0, ry = 0;\n' + host[touch_start:touch_end] +
     '    b &= allowed;\n' + host[call_start:call_end] + '\n}\n', encoding='utf-8')
 
-compiler = Path(r'C:\Users\a9726\AppData\Local\Android\Sdk\ndk\30.0.16248370\toolchains\llvm\prebuilt\windows-x86_64\bin\clang.exe')
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
 sdl = deps / 'SDL3-3.4.18'
 common = [str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=gnu11',
           '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE', '-DW_OK=2',

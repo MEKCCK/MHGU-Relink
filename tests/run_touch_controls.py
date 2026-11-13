@@ -5,18 +5,18 @@ import shutil
 import subprocess
 
 project = Path(__file__).resolve().parents[1]
-workspace = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis' / 'host-test-deps'
 output = workspace / 'analysis' / 'relink-touch-build' / 'host-touch-compatible'
 output.mkdir(parents=True, exist_ok=True)
-vcvars = r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True, text=True, check=True)
 env = os.environ.copy()
 for line in setup.stdout.splitlines():
     key, sep, value = line.partition('=')
     if sep and key:
         env[key] = value
-compiler = Path(r'C:\Users\a9726\AppData\Local\Android\Sdk\ndk\30.0.16248370\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe')
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe'
 sdl = deps / 'SDL3-3.4.18'
 imgui = project / 'third_party' / 'cimgui' / 'imgui'
 exe = output / 'test-touch-controls.exe'

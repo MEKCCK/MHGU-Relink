@@ -11,18 +11,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--compare-ref')
 args = parser.parse_args()
 project = Path(__file__).resolve().parents[1]
-workspace = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件')
+workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis/host-test-deps'
 output = workspace / 'analysis/startup-0.2.1-20261113/host-romfs'
 output.mkdir(parents=True, exist_ok=True)
-vcvars = Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
+vcvars = Path(os.environ.get('VCVARS64', 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat'))
 setup = subprocess.run('call "' + str(vcvars) + '" >nul && set', shell=True, capture_output=True, text=True, check=True)
 env = os.environ.copy()
 for line in setup.stdout.splitlines():
     key, sep, value = line.partition('=')
     if sep and key:
         env[key] = value
-compiler = Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/ndk/30.0.16248370/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/30.0.16248370'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
 # Force the existing serial fallback; this test has no concurrent file reads or archive merges.
 (output / 'pthread.h').write_text('''#pragma once
 typedef int pthread_t;

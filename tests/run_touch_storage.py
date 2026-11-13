@@ -14,7 +14,7 @@ import tempfile
 
 
 PROJECT = Path(__file__).resolve().parents[1]
-OUTPUT = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件/analysis/relink-touch-build/host-touch-storage')
+OUTPUT = PROJECT / 'analysis/relink-touch-build/host-touch-storage'
 
 
 def function(source, name):
