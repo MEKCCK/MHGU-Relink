@@ -141,7 +141,7 @@ LDFLAGS  := $(LINKER) -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -l
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.
 GLIBC_MAX  := 2.39
-GLIBC_WRAP := sqrtf acosf asinf atan2f log10f sinh cosh
+GLIBC_WRAP := sqrtf acosf asinf atan2f log10f sinh cosh remainderf
 GLIBC_WRAP_FLAGS := $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
 LDFLAGS  += $(GLIBC_WRAP_FLAGS)
 GAMELIB  := $(B)/mhgugame.so

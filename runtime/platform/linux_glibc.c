@@ -6,13 +6,14 @@
 // GLIBC_WRAP: -Wl,--wrap), and these call the versions every x86-64 glibc has. The Makefile checks after the link that
 // nothing newer than GLIBC_MAX is left.
 float glibc_old_sqrtf(float), glibc_old_acosf(float), glibc_old_asinf(float), glibc_old_atan2f(float, float);
-float glibc_old_log10f(float);
+float glibc_old_log10f(float), glibc_old_remainderf(float, float);
 double glibc_old_sinh(double), glibc_old_cosh(double);
 __asm__(".symver glibc_old_sqrtf, sqrtf@GLIBC_2.2.5");
 __asm__(".symver glibc_old_acosf, acosf@GLIBC_2.2.5");
 __asm__(".symver glibc_old_asinf, asinf@GLIBC_2.2.5");
 __asm__(".symver glibc_old_atan2f, atan2f@GLIBC_2.2.5");
 __asm__(".symver glibc_old_log10f, log10f@GLIBC_2.2.5");
+__asm__(".symver glibc_old_remainderf, remainderf@GLIBC_2.2.5");
 __asm__(".symver glibc_old_sinh, sinh@GLIBC_2.2.5");
 __asm__(".symver glibc_old_cosh, cosh@GLIBC_2.2.5");
 float __wrap_sqrtf(float x) { return glibc_old_sqrtf(x); }
@@ -20,5 +21,6 @@ float __wrap_acosf(float x) { return glibc_old_acosf(x); }
 float __wrap_asinf(float x) { return glibc_old_asinf(x); }
 float __wrap_atan2f(float y, float x) { return glibc_old_atan2f(y, x); }
 float __wrap_log10f(float x) { return glibc_old_log10f(x); }
+float __wrap_remainderf(float x, float y) { return glibc_old_remainderf(x, y); }
 double __wrap_sinh(double x) { return glibc_old_sinh(x); }
 double __wrap_cosh(double x) { return glibc_old_cosh(x); }
