@@ -1,5 +1,8 @@
 MHGU Relink 0.2.2 · 2026-11-13
 
+r4: Bow charge reticle
+The native bow screen reticle appears while charging and closes outside charging. Firing, canceling and non-charging follow-up moves do not extend its display. Uses the game's charge query rather than treating held Fire or every weapon action as charging. Reticle display is independent of lock-on, left-stick movement and action rebinding; retains r3's automatic facing when the left stick is centered.
+
 r3: Automatic turning with the left stick centered
 Locked ranged attacks and charges turn toward the selected monster only while the left stick is centered. Pushing it leaves direction to the player; releasing it during a valid charge resumes assistance without a new standing start or attack press. Cancel, dodge, sheathe and manual-aim checks remain. Persistent scoped tracking uses the same left-stick condition; it does not open aiming mode or change move inputs.
 

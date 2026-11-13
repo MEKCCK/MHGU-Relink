@@ -1,5 +1,8 @@
 MHGU Relink 0.2.2 · 2026-11-13
 
+r4: Retícula de carga del arco
+La retícula original en pantalla del arco aparece durante la carga y se cierra fuera de ella. Disparar, cancelar y las continuaciones sin carga no prolongan su visualización. Se usa la consulta de carga del juego, sin tratar mantener Disparo ni todas las acciones del arma como carga. La retícula es independiente de la fijación, el movimiento del stick izquierdo y la reasignación de acciones; se conserva el giro automático de r3 con el stick izquierdo centrado.
+
 r3: Giro automático con el stick izquierdo centrado
 Los disparos y las cargas con fijación giran hacia el monstruo seleccionado solo cuando el stick izquierdo está centrado. Al moverlo, el jugador controla la dirección; al soltarlo durante una carga válida, la ayuda vuelve sin empezar desde parado ni pulsar de nuevo el ataque. Se mantienen las comprobaciones de cancelación, evasión, envainado y apuntado manual. El seguimiento persistente al apuntar usa la misma condición; no abre la mira ni cambia las entradas de los movimientos.
 
