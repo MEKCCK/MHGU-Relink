@@ -1,4 +1,4 @@
-"""Run the independent native-screen-reticle contract against the actual production module."""
+"""Run the native Bow world-guide gate contract against the actual production module."""
 from pathlib import Path
 import hashlib
 import json
@@ -8,16 +8,15 @@ import sys
 
 project = Path(__file__).resolve().parents[1]
 workspace = Path('D:/a9726/Documents/ChatGPT/安卓移植GU汉化软件')
-output = workspace / 'analysis' / 'bow-reticle-0.2.2-20261113'
+output = workspace / 'analysis' / 'bow-charge-drag-0.2.2-r14-20261113'
 output.mkdir(parents=True, exist_ok=True)
 deps = workspace / 'analysis' / 'host-test-deps'
-report_path = output / 'reticle-regression-results.json'
+report_path = output / 'guide-regression-results.json'
 frozen_inputs = {
-    'runtime/hle/mousecam.c': '5206e282d3f5047cdc29d0aa57b465f8ec6329eb90a7af626a6c90f6c94a3736',
     'runtime/hle/weapon.c': '39cc465e98ab1ab52ee5edae8b09e6489a1fd76fea09906b30c2dad3fd9b6f98',
-    'tests/test_ranged_input.c': '37ad82b47a18f8c944b9d566d266e14b049ce51a90af58ba83d4f6d44c53afdf',
 }
-sources = [*frozen_inputs, 'runtime/hle/bow_reticle.c', 'tests/test_bow_reticle.c', 'tests/run_bow_reticle.py']
+sources = [*frozen_inputs, 'runtime/hle/mousecam.c', 'tests/test_ranged_input.c',
+           'runtime/hle/bow_reticle.c', 'tests/test_bow_reticle.c', 'tests/run_bow_reticle.py']
 
 
 def digests():
@@ -26,7 +25,7 @@ def digests():
 
 before = digests()
 report = {
-    'contract': 'bow-charge-reticle-v1',
+    'contract': 'bow-charge-guide-v1',
     'passed': False,
     'baseline_failed_expected': False,
     'source_frozen': False,
@@ -34,11 +33,11 @@ report = {
     'source_root': str(project),
     'source_sha256': before,
     'logs': {},
-    'method': 'Host regression of actual production UI hooks and weapon resolver with synthetic guest memory; native charge predicate fixture from local static guest evidence',
+    'method': 'Host regression of production world-guide visibility hook and weapon resolver with synthetic guest memory; native charge predicate fixture from local static guest evidence',
     'native_main_build_id': 'fb08f1d20fd1204fe7070672777f869b',
     'native_main_sha256': 'b3935415499549adaf4c0e89822831daa175cfd456a7990791c79be3997645ef',
     'limits': [
-        'Native 2D screen-reticle path only; no claim to a verified world-space ballistic arc.',
+        'Tests the exact effect-4 gate; downstream native motion, geometry and rendering are not executed.',
         'No target game, save, Android device or visual run was executed by this regression.',
         'The pure native charging query is simulated from the independently decoded action set in this host test.',
     ],
@@ -77,9 +76,9 @@ try:
     baseline_log.write_bytes(baseline.stdout + baseline.stderr)
     report['logs']['baseline'] = str(baseline_log)
     report['baseline_exit_code'] = baseline.returncode
-    report['baseline_failed_expected'] = baseline.returncode == 1 and b'EXPECTED_BASELINE_CONTRACT_FAILURES=2' in baseline.stdout
+    report['baseline_failed_expected'] = baseline.returncode == 1 and b'EXPECTED_BASELINE_CONTRACT_FAILURES=1' in baseline.stdout
     if not report['baseline_failed_expected']:
-        raise RuntimeError('Unhooked baseline did not fail the two expected contract cases')
+        raise RuntimeError('Unhooked baseline did not fail the expected charge-guide case')
 
     fixed = subprocess.run([str(exe)], env=env, cwd=output, capture_output=True, timeout=30)
     fixed_log = output / 'reticle-fixed.log'

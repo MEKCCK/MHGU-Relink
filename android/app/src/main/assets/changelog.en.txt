@@ -1,5 +1,17 @@
 MHGU Relink 0.2.2 · 2026-11-13
 
+r14: Drag the bow charge button to set direction
+While charging the bow, hold Fire and drag left, right, up or down to change the native yellow direction guide's horizontal and vertical angles and the actual direction of this arrow. This does not open the scope automatically. Without a drag, existing lock-on behavior is retained; after a drag, your manual direction takes priority for this charge and arrow so lock-on does not immediately pull it back.
+In the non-classic outside-quest ranged layout and quest Bow, Heavy Bowgun and Light Bowgun layouts, the crosshair button always sends R instead of changing to X when sheathed, drawn or using a different Bow Controls type. Remove the duplicate independent R at the upper right. The crosshair R follows the R visibility setting under Buttons on the screen for drawing, touch hit testing and editing. Bow Fire still charges according to the game's Type 1/Type 2 setting.
+
+r13: Bow charge guide and one-finger item/ammo sliding
+Bow charging now admits the native yellow direction guide and removes automatic visibility when charging ends, instead of opening the large screen reticle. Manual aiming keeps its native behavior; camera, lock-on, arc-shot landing markers and other weapons retain their existing rules.
+Hold to expand the item/ammo bar and slide repeatedly in either direction with one finger. A gesture is no longer limited to one selection; release and start again as needed. Quick item-use taps and stationary ammo-arrow repeat remain available. Releasing an expanded or dragged bar does not use the item; menus, backgrounding and preset changes release touch bar input.
+
+r12: Ranged R visibility and quest HUD editing
+Restore an independent R button in the outside-quest ranged layout and the quest Heavy Bowgun, Light Bowgun and Bow layouts. It follows its corresponding Buttons on the screen visibility setting for drawing, touch hit testing and editing. Move the default R away from the ammo arrows; migrate only the unchanged old default position and size, preserving custom placements. Aim and X+A mappings remain unchanged.
+During quests, the target, item bar and Hunter Arts regions can be dragged and saved. HUD regions take priority over enlarged button hit areas while editing, and their edit boxes remain available when HUD data ages or a frame is missing. Manual HUD offsets remain independent of automatic HUD rearrangement.
+
 r11: Use any saved preset regardless of weapon
 During quests, selecting any saved preset immediately uses its own control positions, sizes, HUD offsets, style and combos, regardless of the equipped weapon. The choice is saved separately and remains through weapon changes, menus, backgrounding, restarts and later quests. The base weapon for presets 17-20 is an initialization template, not a usage restriction; selecting an existing preset does not copy the template again. The list highlights the actual selection. Save and use selects the edited preset; Cancel preserves the earlier explicit choice. Outside quests, ordinary switching still uses Melee layout 2 and Ranged layout. Older configurations without a manual selection retain their original weapon mappings.
 

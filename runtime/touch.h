@@ -44,7 +44,9 @@ enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_COUNT };
 // where the player put them in the layout editor: an offset from their default place, in the game's 16:9 canvas
 // units (1280 x 720); the render thread adds it (nvn/vulkan/exec.c)
 extern volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];
-void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y);
+// offset_x/y are the scaled manual displacement actually applied to this piece, excluding automatic MoveHUD.
+void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
+                     float offset_x, float offset_y);
 void touch_hud_frame(void);
 void touch_hud_menu(void);  // (render thread) a menu window of the game's was drawn this frame: the menu layout
 

@@ -14,6 +14,13 @@ bool weapon_moving(uint32_t hunter);
 unsigned weapon_action(uint32_t hunter);  // st << 16 | no
 int weapon_bow_type(void);
 void mousecam_lock_shot(void);         // (each update of the hunter, hle/itembar.c)
+// A single touch on the Bow's charge key; counts never enter the camera/gyro accumulator.
+void mousecam_bow_drag_begin(uint32_t hunter, int type);
+void mousecam_bow_drag_add(float dx, float dy);
+void mousecam_bow_drag_end(bool cancel);
+void mousecam_bow_drag_reset(void);
+struct Cpu;
+void mousecam_bow_charge_tick(struct Cpu *c);  // local hunter, before native action dispatch
 
 void mousecam_init(void);              // hooks the quest camera's stick handler
 bool mousecam_active(void);            // the hunt camera takes the mouse now (its stick handler ran just now)

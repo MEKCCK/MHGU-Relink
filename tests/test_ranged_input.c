@@ -29,6 +29,9 @@ static uint64_t clock_ns = 1000000000ull, buttons;
 static int32_t stick_state[4];
 static bool locked = true, persistent, native_aim = true;
 static float aim_up = 45, aim_down = 30;
+static bool clobber_query;
+static int query_race;
+static float bow_up = 60, bow_down = 40;
 uint64_t plat_now_ns(void) { return clock_ns; }
 bool touch_lock_on(void) { return locked; }
 bool touch_lock_active(void) { return locked; }
@@ -40,12 +43,43 @@ float config_live_mouse_sensitivity_y(void) { return 1; }
 int config_live_mouse_invert_y(void) { return 0; }
 float config_motion_gain(void) { return 1; }
 void fnhook_call_original(Cpu *c, uint32_t fn) { (void)c; (void)fn; }
+// Independent fixture of the original 0x13b93dc action switch (same local main as the guide regression).
+static bool charging_fixture(uint32_t h) {
+    unsigned st = LD16(h + PL_ACT_ST), no = LD16(h + PL_ACT_NO);
+    if (st == 1) return no == 0x80 || no == 0x81 || no == 0x82;
+    if (st == 4) return no == 0xa;
+    if (st != 0x10) return false;
+    switch (no) {
+        case 2: case 3: case 4: case 5: case 6: case 7: case 0xd: case 0x13: case 0x1b:
+        case 0x2d: case 0x35: case 0x3b: case 0x3c: case 0x43: case 0x44: return true;
+        default: return false;
+    }
+}
 void guest_call(Cpu *c, uint32_t fn) {
     if (fn == FN_AIMING) {
         assert(c->r[0] == 0x08004000u);
         assert(c->r[1] == 1 && c->r[2] == 0);
+        if (clobber_query) memset(c, 0xa5, sizeof *c);
         c->r[0] = native_aim;
-    } else c->v.f[0] = c->r[1] == QC_PARAM_AIM_DOWN ? aim_down : aim_up;
+    } else if (fn == FN_BOW_CHARGING) {
+        assert(c->r[0] == 0x08004000u);
+        bool charge = charging_fixture(c->r[0]);
+        if (query_race) {
+            int race = query_race; query_race = 0;
+            mousecam_bow_drag_reset();
+            if (race == 2) { mousecam_bow_drag_begin(0x08004000u, 0); mousecam_bow_drag_add(-10, 10); }
+        }
+        if (clobber_query) memset(c, 0xb6, sizeof *c);
+        c->r[0] = charge;
+    } else if (fn == FN_BOW_AIM_LIMIT) {
+        assert(c->r[0] == 0x08004000u && c->r[1] < 2);
+        float limit = c->r[1] ? bow_down : bow_up;
+        if (clobber_query) memset(c, 0xc7, sizeof *c);
+        c->v.f[0] = limit;
+    } else {
+        assert(fn == FN_CAM_PARAM);
+        c->v.f[0] = c->r[1] == QC_PARAM_AIM_DOWN ? aim_down : aim_up;
+    }
 }
 uint32_t hle_register(const char *name, HostFn fn) { (void)name; (void)fn; return 0; }
 bool fnhook_set(uint32_t fn, uint32_t detour) { (void)fn; (void)detour; return true; }
@@ -416,12 +450,135 @@ static void relative_gyro(void) {
     assert(!take_turn(0, &yaw, &pitch));  // consumed once
 }
 
+static void drag_world(int type) {
+    world(); mousecam_bow_drag_reset();
+    ST32(0x08009000 + EN_JOINTS, 0); ST32(0x0800b000 + EN_JOINTS, 0);
+    g_lock_en = g_target_id = 0; g_lock_slot = -1; g_cycle_req = 0;
+    ST32(hunter, VT_BOW); ST8(LD32(G_GAMECONTROL) + 0x6c, type);
+    ST8(LD32(G_OPTIONS) + OPT_AIM_INVERT, 0);
+    g_aim_seen_ns = 0; native_aim = false; persistent = false;
+    reset_shot(); action(0x10, 2);
+    buttons = 1ull << (type ? BTN_R : BTN_X);
+    ST32(hunter + PL_AIM_YAW, 10000); ST32(hunter + PL_BOW_YAW, 10000);
+    STF(hunter + PL_AIM_PITCH, 0); STF(hunter + PL_AIM_PITCH2, 0); ST16(hunter + PL_AIM_LEAN, 0);
+    g_dx = g_dy = g_mot_yaw = g_mot_pitch = 0;
+    bow_up = 60; bow_down = 40; clobber_query = false; query_race = 0;
+}
+
+static void drag_tick(void) {
+    Cpu cpu; memset(&cpu, 0x59, sizeof cpu);
+    Cpu expected = cpu;
+    clock_ns += 16000000;
+    mousecam_bow_charge_tick(&cpu);
+    assert(memcmp(&cpu, &expected, sizeof cpu) == 0);
+}
+
+static void bow_charge_drag_angles(void) {
+    const unsigned states[][2] = {{1,0x80},{1,0x81},{1,0x82},{4,0xa},
+        {0x10,2},{0x10,3},{0x10,4},{0x10,5},{0x10,6},{0x10,7},{0x10,0xd},{0x10,0x13},
+        {0x10,0x1b},{0x10,0x2d},{0x10,0x35},{0x10,0x3b},{0x10,0x3c},{0x10,0x43},{0x10,0x44}};
+    for (int type = 0; type < 2; ++type)
+        for (unsigned i = 0; i < sizeof states / sizeof *states; ++i) {
+            drag_world(type); action(states[i][0], states[i][1]);
+            clobber_query = true;
+            unsigned char cam_before[0xb00]; memcpy(cam_before, G2H(camera), sizeof cam_before);
+            uint64_t keys = buttons;
+            uint32_t input_word = LD32(hunter + 0x1414); uint8_t aim_toggle = LD8(hunter + 0x3334);
+            mousecam_bow_drag_begin(hunter, type); mousecam_bow_drag_add(20, -30);
+            mousecam_add(7, -9); mousecam_motion_add(.02f, -.01f);
+            drag_tick();
+            assert(LD32(hunter + PL_AIM_YAW) < 10000 && LD32(hunter + PL_BOW_YAW) == LD32(hunter + PL_AIM_YAW));
+            assert(fabsf(LDF(hunter + PL_AIM_PITCH) - 4.0f) < .001f);
+            assert(LDF(hunter + PL_AIM_PITCH2) == LDF(hunter + PL_AIM_PITCH));
+            assert((int16_t)LD16(hunter + PL_AIM_LEAN) > 0 && bow_drag_manual(hunter));
+            assert(!g_aim_seen_ns && !memcmp(cam_before, G2H(camera), sizeof cam_before));
+            assert(g_dx == 7 && g_dy == -9 && g_mot_yaw == .02f && g_mot_pitch == -.01f);
+            assert(buttons == keys && LD32(hunter + 0x1414) == input_word && LD8(hunter + 0x3334) == aim_toggle);
+            mousecam_lock_shot(); uint32_t yaw = LD32(hunter + PL_AIM_YAW);
+            assert(yaw != 8192);  // selected target cannot replace a dragged shot
+            ST16(hunter + PL_AIM_LEAN, 0); drag_tick();  // native charge-entry animation clears this field
+            assert(LD32(hunter + PL_AIM_YAW) == yaw && (int16_t)LD16(hunter + PL_AIM_LEAN) > 0);
+            mousecam_bow_drag_add(-40, 60); drag_tick();
+            assert(LD32(hunter + PL_AIM_YAW) > 10000);
+            assert(fabsf(LDF(hunter + PL_AIM_PITCH) + 6.0f) < .001f);  // zero crossing uses the different down limit
+            mousecam_bow_drag_add(0, 100000); drag_tick(); assert(LDF(hunter + PL_AIM_PITCH) == -100);
+            mousecam_bow_drag_add(0, -200000); drag_tick(); assert(LDF(hunter + PL_AIM_PITCH) == 100);
+        }
+    // Native invert options affect only this channel's direction, not the source buttons or other accumulators.
+    drag_world(0); ST8(LD32(G_OPTIONS) + OPT_AIM_INVERT, 3);
+    mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -30); drag_tick();
+    assert(LD32(hunter + PL_AIM_YAW) > 10000 && LDF(hunter + PL_AIM_PITCH) < 0);
+    puts("PASS: Bow Type 1/2 charge dragging turns guide and saved shot yaw in all 19 native charge states; native pitch limits, zero crossing, lean refresh, inversion, CPU/camera/gyro isolation.");
+}
+
+static void bow_charge_drag_lifecycle(void) {
+    const unsigned not_charge[][2] = {{1,0},{1,0x55},{2,0},{0x10,0},{0x10,1},{0x10,8},{0x10,0x45},{0x8010,0xd}};
+    for (unsigned i = 0; i < sizeof not_charge / sizeof *not_charge; ++i) {
+        drag_world(0); action(not_charge[i][0], not_charge[i][1]);
+        mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -20); drag_tick();
+        assert(LD32(hunter + PL_AIM_YAW) == 10000 && !bow_drag_manual(hunter));
+        clock_ns += BOW_DRAG_NS; action(0x10, 2); drag_tick();
+        assert(LD32(hunter + PL_AIM_YAW) == 10000 && !bow_drag_manual(hunter));
+    }
+    drag_world(0); action(1, 0);
+    mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -20); drag_tick();
+    action(0x10, 2); drag_tick(); assert(LD32(hunter + PL_AIM_YAW) < 10000);  // one-frame charge startup delay
+    mousecam_bow_drag_add(10, -10); mousecam_bow_drag_end(false); buttons = 0;
+    uint32_t before_up = LD32(hunter + PL_AIM_YAW); drag_tick();
+    uint32_t last = LD32(hunter + PL_AIM_YAW); assert(last < before_up);
+    mousecam_bow_drag_add(-100, -100); drag_tick(); assert(LD32(hunter + PL_AIM_YAW) == last);
+    action(0x10, 1); mousecam_lock_shot(); assert(LD32(hunter + PL_AIM_YAW) == last && bow_drag_manual(hunter));
+    clock_ns += SHOT_NS; drag_tick(); mousecam_lock_shot();
+    assert(!bow_drag_manual(hunter) && LD32(hunter + PL_AIM_YAW) == last);
+
+    for (int mode = 0; mode < 10; ++mode) {
+        drag_world(0); mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -20);
+        if (mode == 0) mousecam_bow_drag_end(true);
+        else if (mode == 1) mousecam_bow_drag_reset();
+        else if (mode == 2) ST32(hunter, VT_HEAVY);
+        else if (mode == 3) ST8(hunter + PL_FLAGS, 0);
+        else if (mode == 4) ST8(LD32(G_GAMECONTROL) + 0x6c, 1);
+        else if (mode == 5) buttons |= 1ull << BTN_B;
+        else if (mode == 6) native_aim = true;
+        else if (mode == 7) bow_up = NAN;
+        else if (mode == 8) ST32(LD32(G_SPLAYER) + 0x1c, 0);
+        else mousecam_bow_drag_begin(hunter, 0);  // a new DOWN drops the previous pending sample
+        drag_tick(); assert(LD32(hunter + PL_AIM_YAW) == 10000 && !bow_drag_manual(hunter));
+        world(); ST32(hunter, VT_BOW); action(0x10, 2); native_aim = false; bow_up = 60;
+        ST8(LD32(G_GAMECONTROL) + 0x6c, 0); buttons = 1ull << BTN_X;
+        drag_tick(); assert(LD32(hunter + PL_AIM_YAW) == 10000);  // no stale replay after restoring context
+    }
+    // No existing lock episode is inherited by the next press; not moving the finger retains automatic facing.
+    drag_world(0); mousecam_bow_drag_begin(hunter, 0); mousecam_lock_shot();
+    assert(LD32(hunter + PL_AIM_YAW) == 8192 && !bow_drag_manual(hunter));
+    mousecam_bow_drag_add(40, -15); drag_tick(); last = LD32(hunter + PL_AIM_YAW);
+    for (int i = 0; i < 40; ++i) { drag_tick(); mousecam_lock_shot(); assert(LD32(hunter + PL_AIM_YAW) == last); }
+    mousecam_bow_drag_end(false); buttons = 0; action(0x10, 1); drag_tick(); mousecam_lock_shot();
+    assert(LD32(hunter + PL_AIM_YAW) == last);
+    mousecam_bow_drag_begin(hunter, 0); buttons = 1ull << BTN_X; action(0x10, 2); mousecam_lock_shot();
+    assert(LD32(hunter + PL_AIM_YAW) == 8192);
+    puts("PASS: charge drag waits for native charging, expires stale samples, preserves final UP without extending fire, clears cancellation/context changes, and owns this charge/release without changing the next lock shot.");
+}
+
+static void bow_charge_drag_races(void) {
+    for (int race = 1; race <= 2; ++race) {
+        drag_world(0); mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -20);
+        query_race = race; drag_tick();
+        assert(LD32(hunter + PL_AIM_YAW) == 10000 && !bow_drag_manual(hunter));
+        drag_tick();
+        assert(race == 1 ? LD32(hunter + PL_AIM_YAW) == 10000 : LD32(hunter + PL_AIM_YAW) > 10000);
+    }
+    mousecam_bow_drag_reset(); clobber_query = false; native_aim = true;
+    puts("PASS: a cancel/new finger during a native query invalidates the old charge write and leaves only the new gesture pending.");
+}
+
 int main(void) {
     world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
     shot_left_stick(VT_HEAVY, 0); shot_left_stick(VT_LIGHT, 0); shot_left_stick(VT_BOW, 0); shot_left_stick(VT_BOW, 1);
     shot_identity_reset();
     actual_aim(); persistent_scope(); scope_left_stick(VT_HEAVY); scope_left_stick(VT_LIGHT); scope_left_stick(VT_BOW);
     no_unscoped_steering(); relative_gyro();
+    bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races();
     puts("PASS: sticky target/cycle, standing bowgun fire, manual aim/crouch, bow charge gates, actual aim states, relative gyro.");
     return 0;
 }

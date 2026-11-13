@@ -446,6 +446,46 @@ static void combo_layout_regression() {
     frame();
     puts("PASS: real settings-panel combo selector: 15 unchanged weapon slots plus UI 15->profile 16 and UI 16->profile 18; retired profiles 15/17 preserved and safely defaulted (host stubs)");
 }
+static void touch_button_rows_regression() {
+    for (int legacy_aim = 0; legacy_aim < 2; legacy_aim++) {
+        Config fixture = config_editable();
+        fixture.touch_show[TB_AIM] = legacy_aim;
+        fixture.touch_show[TB_GUARD] = legacy_aim;
+        const std::string legacy = std::string("ShowAim = ") + (fixture.touch_show[TB_AIM] ? "On\n" : "Off\n");
+        std::ofstream("obj/settings-test/panel-settings.ini", std::ios::binary) << "[Touch]\n" << legacy;
+        config_store_loaded(&fixture);
+        config_runtime_init(&fixture);
+        opened = true;
+        idle();
+        seek_row("touch.buttons");
+        confirm();
+        seek_row("tb.0");
+        for (int i = 0; i < TB_COUNT; i++) {
+            if (i == TB_AIM) continue;
+            const std::string row = "tb." + std::to_string(i);
+            assert(focused_row(row.c_str()));
+            down();
+        }
+        assert(focused_row("tc.0") && !settings_panel_dirty());
+        const std::string guard = "tb." + std::to_string(TB_GUARD);
+        seek_row(guard.c_str());
+        confirm();
+        assert(settings_panel_dirty());
+        back();
+        seek_row("save");
+        confirm();
+        assert(!settings_panel_dirty());
+        const Config saved = config_editable();
+        for (int i = 0; i < TB_COUNT; i++)
+            assert(saved.touch_show[i] == (i == TB_GUARD ? !fixture.touch_show[i] : fixture.touch_show[i]));
+        std::ifstream in("obj/settings-test/panel-settings.ini", std::ios::binary);
+        const std::string ini((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        assert(ini.find(legacy) != std::string::npos);
+        opened = false;
+        frame();
+    }
+    puts("PASS: real touch-button rows retain Guard, omit Aim, and save Guard without changing either legacy ShowAim value or other touch visibility settings");
+}
 // Capture the actual phone-style settings draw lists on the host, not a mockup or an Android/game screenshot.
 static void preset_previews() {
     assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS));
@@ -581,6 +621,7 @@ int main(int argc, char **argv) {
     if (touch_presets_only) {
         preset_regression();
         combo_layout_regression();
+        touch_button_rows_regression();
         preset_previews();
         ImGui::DestroyContext();
         remove("obj/settings-test/panel-settings.ini");

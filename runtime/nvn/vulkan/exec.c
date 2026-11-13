@@ -156,11 +156,8 @@ void vk_trace_frame(NvnTexture *t) {
 #define ARTS_DX (311.0f)            // (x 709..957 -> 1020..1268, then anchored to the screen's right edge)
 #define ARTS_TOP 41.0f              // the top row's first piece goes to this y (two rows: 631 -> 41; three: the same)
 #define TARGET_DX (-250.0f)         // (x 1200 -> 950, from the right edge: left of the arts)
-// The target selector's full hit area on the game's 1280x720 HUD, not just its centre transform.
-#define TARGET_X0 1170.0f
-#define TARGET_X1 1230.0f
-#define TARGET_Y0 16.0f
-#define TARGET_Y1 95.0f
+_Static_assert(HUD_TOUCH_ITEM == TZ_ITEM && HUD_TOUCH_ARTS == TZ_ARTS && HUD_TOUCH_TARGET == TZ_TARGET &&
+               HUD_TOUCH_COUNT == TZ_COUNT, "HUD touch zones must match the touch editor");
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_snapshots;
 // (MHGU_VK_STATS) time spent: translating command lists, waiting for the GPU, guest memory copied per submission
@@ -3689,6 +3686,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // target camera answer a finger (runtime/touch.cpp), moved or not; with the touch controls they move
                 bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !ui_title_pass &&
                                 !ui_meownster_pass;
+                int touch_zone = hud_touch_zone(pos_x, pos_y, pos_z, hunt_hud);
                 bool item_bar_part = false, arts_part = false, target_part = false;
                 bool grouped = false;
                 int vgroup = 1;
@@ -3758,6 +3756,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         if (hud_menu_panel_allowed(pos_x, pos_y, aiming, ui_stamp_pass) && fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) {
                             ui_menu_pass = true, ui_menu_frame = g_present_count;
                             hunt_hud = false;
+                            touch_zone = HUD_TOUCH_NONE;
                             touch_hud_menu();
                         }
                         menu_canvas = !aiming && ui_menu_pass && !ui_stamp_pass;
@@ -3772,10 +3771,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         vanchor = ((pos_x > 1000.0f && pos_y < 360.0f) || pos_y < 10.0f || (ui_menu_pass && pos_x < 630.0f && pos_y < 560.0f)) ? V_TOP : V_BOTTOM;
                         // Touch controls (runtime/touch.cpp): the hunt's Hunter Arts panels (x 726..842, y 560..720: up
                         // to three rows) to the top right, the target camera's icons (x 1200, y < 100) left of them
-                        if (hunt_hud && pos_x >= 700.0f && pos_x <= 900.0f && pos_y > 560.0f) {
+                        if (touch_zone == HUD_TOUCH_ARTS) {
                             arts_part = true;
                             if (g_touch_hud) vanchor = V_TOP, arts_move = true;
-                        } else if (hunt_hud && pos_x >= TARGET_X0 && pos_x <= TARGET_X1 && pos_y >= TARGET_Y0 && pos_y <= TARGET_Y1) {
+                        } else if (touch_zone == HUD_TOUCH_TARGET) {
                             target_part = true;
                             target_move = g_touch_hud != 0;
                         }
@@ -3867,10 +3866,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     }
                     if (menu_canvas && s < 1.0f) ui_scissor_h = anchor;
                     if (status_edge) new_pos_x = pos_x * s;
-                    // (each moved part where the player put it in the touch layout editor, runtime/touch.cpp)
-                    if (item_bar_move) new_pos_x += (ITEM_BAR_DX + g_touch_zone_dx[TZ_ITEM]) * s;
-                    if (arts_move) new_pos_x = 1280.0f - (1280.0f - (pos_x + ARTS_DX + g_touch_zone_dx[TZ_ARTS])) * s;
-                    if (target_move) new_pos_x = 1280.0f - (1280.0f - (pos_x + TARGET_DX + g_touch_zone_dx[TZ_TARGET])) * s;
+                    if (item_bar_move) new_pos_x += ITEM_BAR_DX * s;
+                    if (arts_move) new_pos_x = 1280.0f - (1280.0f - (pos_x + ARTS_DX)) * s;
+                    if (target_move) new_pos_x = 1280.0f - (1280.0f - (pos_x + TARGET_DX)) * s;
                     int v = vanchor == V_TOP ? 0 : vanchor == V_BOTTOM ? 2 : 1;
                     ui_recent[ui_nrecent % UI_RECENT].x = pos_x, ui_recent[ui_nrecent % UI_RECENT].y = pos_y;
                     ui_recent[ui_nrecent % UI_RECENT].z = pos_z;
@@ -3890,17 +3888,19 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     else if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
                     else new_pos_y = 360.0f + (pos_y - 360.0f) * sy;
-                    if (item_bar_move) new_pos_y += g_touch_zone_dy[TZ_ITEM] * sy;
-                    if (arts_move) new_pos_y += g_touch_zone_dy[TZ_ARTS] * sy;
-                    if (target_move) new_pos_y += g_touch_zone_dy[TZ_TARGET] * sy;
-                    if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y);
-                    if (arts_part) touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y);
-                    if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y);
+                    HudTouchOffset offset = hud_touch_offset(touch_zone, touch_visible(), g_touch_zone_dx, g_touch_zone_dy, s, sy);
+                    new_pos_x += offset.x;
+                    new_pos_y += offset.y;
+                    ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
+                    if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    if (arts_part) touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     // One anchor per window (ui_group_end), on a picture narrower than 16:9. Not for the hunt's status HUD
                     // and item bar (103), the minimap (105), the loading screen, or the bars that belong to an edge (a
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
                     grouped = sy < 1.0f && !(ui_loading_pass && pos_z >= 94.0f && pos_z < 109.5f) && fabsf(pos_z - 103.0f) >= 0.5f &&
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f && !arts_move && !target_move;
+                    grouped = hud_touch_group_allowed(grouped, offset);
                     vgroup = v;
                     if (g_hudtrace_active)
                         LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],

@@ -2715,6 +2715,7 @@ void touch_button_rows(std::vector<Row> &r) {
     if (profile < 0 || profile >= TOUCH_LAYOUT_PROFILES) profile = 0;
     header(r, "tb.head", tr("Buttons on the screen"));
     for (int i = 0; i < TB_COUNT; i++) {
+        if (i == TB_AIM) continue;
         add_bool(r, ("tb." + std::to_string(i)).c_str(), TB_TITLES[i], &c.touch_show[i], nullptr);
         r.back().key = TB_KEYS[i];
     }
@@ -3046,6 +3047,9 @@ const PhoneHelp PHONE_HELP[] = {
      "按猎人人数设置集会所任务中大型怪物的体力。加入他人集会所时使用主机的设置。"},
     {"FOV", "How much of the scene you see: higher shows more.", "Cuánto se ve de la escena: un valor mayor muestra más.",
      "镜头可见的场景范围。数值越大，能看到的范围越广。"},
+    {"ShowGuard", "Shows or hides the game's native R touch button. In non-classic ranged layouts, this controls the single R at the former Aim position. Its action follows the game's control settings.",
+     "Muestra u oculta el botón táctil R nativo del juego. En los diseños a distancia no clásicos, controla el único R en la antigua posición de Apuntar. Su función depende de los controles del juego.",
+     "显示或隐藏游戏原生 R 触屏键。非传统远程布局仅保留原瞄准位置的 R，由此开关控制；按键作用遵循游戏内操作设置。"},
     {"ShowRanged", "With a bow or a bowgun in hand, in a hunt, the touch controls change to a layout of their own. Its buttons are moved in the editor.",
      "Con un arco o una ballesta en la mano, en una cacería, los controles táctiles pasan a un layout propio. Sus botones se mueven en el editor.",
      "任务中使用弓或弩炮时，切换为专用触控布局。可在触控编辑器中调整按钮位置。"},

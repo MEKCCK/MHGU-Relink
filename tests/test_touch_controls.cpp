@@ -16,14 +16,23 @@ static constexpr int UNKNOWN_WEAPON = -2;
 static bool in_quest = true;
 static bool aiming, lock_on, persistent_lock_on, hunt_camera = true;
 static int target_cycles;
+static uint32_t local_hunter;
+static struct {
+    uint32_t hunter;
+    int type, begins, ends, cancels, resets, adds;
+    bool held;
+    float dx, dy;
+} bow_drag;
 static std::vector<int> item_steps;
+static int touch_item_pending;
 static int screen_w = 1280, screen_h = 720;
 extern "C" {
 volatile uint64_t g_town_ns;
 float g_render_aspect = 16.0f / 9.0f;
+float g_ui_anchor_aspect = 16.0f / 9.0f;
 uint64_t plat_now_ns(void) { return SDL_GetTicksNS(); }
 SDL_Window *ui_window(void) { return window; }
-uint32_t weapon_hunter(void) { return 0; }
+uint32_t weapon_hunter(void) { return local_hunter; }
 int weapon_drawn(void) { return drawn; }
 int weapon_ranged(uint32_t) { return ranged; }
 int weapon_type(void) { return weapon_override == UNKNOWN_WEAPON ? -1 : weapon_override >= 0 ? weapon_override : ranged == WEAPON_BOWGUN ? 4 : ranged == WEAPON_BOW ? 10 : 0; }
@@ -34,7 +43,25 @@ unsigned weapon_action(uint32_t) { return 0; }
 int weapon_bow_type(void) { return bow_type; }
 bool mousecam_active(void) { return hunt_camera; }
 void mousecam_target_cycle(void) { ++target_cycles; }
+void mousecam_bow_drag_begin(uint32_t hunter, int type) {
+    assert(hunter && !bow_drag.held);
+    bow_drag.hunter=hunter; bow_drag.type=type; bow_drag.held=true;
+    bow_drag.dx=bow_drag.dy=0; ++bow_drag.begins;
+}
+void mousecam_bow_drag_add(float dx, float dy) {
+    assert(bow_drag.held && std::isfinite(dx) && std::isfinite(dy));
+    bow_drag.dx+=dx; bow_drag.dy+=dy; ++bow_drag.adds;
+}
+void mousecam_bow_drag_end(bool cancel) {
+    assert(bow_drag.held); bow_drag.held=false; ++bow_drag.ends;
+    if(cancel) { bow_drag.dx=bow_drag.dy=0; ++bow_drag.cancels; }
+}
+void mousecam_bow_drag_reset(void) {
+    bow_drag.held=false; bow_drag.dx=bow_drag.dy=0; ++bow_drag.resets;
+}
 void itembar_scroll(int dir) { item_steps.push_back(dir); }
+void itembar_touch_scroll(int dir) { item_steps.push_back(dir); touch_item_pending=dir>0?1:-1; }
+void itembar_touch_cancel(void) { touch_item_pending=0; }
 void haptics_tap(void) {}
 bool overlay_menu_open(void) { return settings_open; }
 void overlay_toggle_settings(void) { settings_open = !settings_open; }
@@ -42,7 +69,7 @@ bool overlay_event(const SDL_Event *) { return true; }
 Config config_editable(void) { return cfg; }
 int config_language(void) { return cfg.language; }
 int config_live_touch_controls(void) { return cfg.touch_controls; }
-int config_live_touch_hud(void) { return 0; }
+int config_live_touch_hud(void) { return cfg.touch_hud; }
 int config_live_touch_auto_r(void) { return cfg.touch_auto_r; }
 int config_live_touch_floating(void) { return cfg.touch_floating; }
 int config_live_touch_show(int b) { assert(b >= 0 && b < TB_COUNT); return cfg.touch_show[b]; }
@@ -95,6 +122,7 @@ static void at(Uint32 type, int ctl, SDL_FingerID id = 1, float ux = 0, float uy
 static void fresh(int w = 1280, int h = 720) {
     screen_w = w; screen_h = h; assert(SDL_SetWindowSize(window, w, h)); SDL_PumpEvents();
     g_render_aspect=(float)w/h;
+    g_ui_anchor_aspect=16.0f/9.0f;
     touch_reset(); g_s = {}; g_s.loaded = true; g_s.layout = defaults(0); g_s.saved = g_s.layout;
     g_s.presets_loaded = true;
     for (int p=0;p<TOUCH_WEAPON_LAYOUTS;++p) g_s.weapon_layout[p]=p;
@@ -103,10 +131,13 @@ static void fresh(int w = 1280, int h = 720) {
     cfg = {}; cfg.touch_controls = TOUCH_ON; cfg.touch_auto_r = 1;
     const int shown[] = TOUCH_SHOW_DEFAULT; std::copy(shown, shown + TB_COUNT, cfg.touch_show);
     settings_open = false; drawn = 0; ranged = 0; bow_type = 0; aiming = lock_on = persistent_lock_on = false; hunt_camera = true;
+    local_hunter=0; bow_drag={};
     target_cycles = 0; item_steps.clear();
     g_lock_follow = g_lock_shots = false;
     g_visible = false; g_gear_only = false; g_style = g_s.layout.style; g_ranged = 0;
     g_zones = {}; g_build = {}; g_build_menu = false; g_menu_ns = 0; g_press_ns = 0;
+    std::fill(std::begin(g_editor_zones),std::end(g_editor_zones),EditorZone{});
+    std::fill(std::begin(g_build_editor),std::end(g_build_editor),EditorZone{});
     g_play_ns = SDL_GetTicksNS(); g_window_open = g_window_asked = false; g_town_ns = 0;
     update(); assert(!g_s.menu);
 }
@@ -116,12 +147,13 @@ static void game_menu_state(bool menu) {
     update(); assert(g_s.menu == menu);
 }
 static ImVec2 hud(int zone, float x, float y) {
-    touch_hud_piece(zone, x, y, x, y); touch_hud_frame();
+    touch_hud_piece(zone, x, y, x, y, 0, 0); touch_hud_frame();
     Rect r = zone_rect(zones(), zone, (float)screen_w, (float)screen_h); assert(r.ok);
     return ImVec2((r.x0 + r.x1) * .5f, (r.y0 + r.y1) * .5f);
 }
 static int pulses(uint64_t buttons) {
     int n = 0; for (const Pulse &p : g_s.pulse) if (p.until > SDL_GetTicksNS() && p.buttons == buttons) ++n;
+    if (g_s.ammo_pulse.until > SDL_GetTicksNS() && g_s.ammo_pulse.buttons == buttons) ++n;
     return n;
 }
 static void touch_button_sources() {
@@ -148,29 +180,50 @@ static void item_gestures() {
     fresh(); ImVec2 p = hud(TZ_ITEM, 640, 620);
     event(SDL_EVENT_FINGER_DOWN, 1, p.x, p.y); assert(finger(g_s, 1)->kind == F_ITEM);
     event(SDL_EVENT_FINGER_MOTION, 1, p.x + 240, p.y); assert(item_steps == std::vector<int>{1});
+    assert(update().touch_b == B(BTN_L) && !finger(g_s, 1)->done);
+    finger(g_s, 1)->step_at = 0;
     event(SDL_EVENT_FINGER_MOTION, 1, p.x + 400, p.y);
+    assert(item_steps == (std::vector<int>{1,1}));
+    finger(g_s, 1)->step_at = 0;
     event(SDL_EVENT_FINGER_MOTION, 1, p.x - 300, p.y);
-    event(SDL_EVENT_FINGER_UP, 1, p.x - 500, p.y); assert(item_steps == std::vector<int>{1});
-    assert(!(update().b & B(BTN_Y)));
+    assert(item_steps == (std::vector<int>{1,1,-1}));
+    finger(g_s, 1)->step_at = 0;
+    event(SDL_EVENT_FINGER_UP, 1, p.x - 500, p.y);
+    assert(item_steps == (std::vector<int>{1,1,-1,-1}));
+    assert(!update().b && touch_item_pending==-1); // normal up leaves one short-lived native request
     event(SDL_EVENT_FINGER_DOWN, 2, p.x, p.y);
-    event(SDL_EVENT_FINGER_UP, 2, p.x - 200, p.y); assert(item_steps == (std::vector<int>{1,-1}));
+    assert(!touch_item_pending); // a new selection starts with no previous gesture's pending step
+    event(SDL_EVENT_FINGER_UP, 2, p.x - 200, p.y);
+    assert(item_steps == (std::vector<int>{1,1,-1,-1,-1}) && !update().b);
     event(SDL_EVENT_FINGER_DOWN, 3, p.x, p.y);
     event(SDL_EVENT_FINGER_MOTION, 3, p.x + 25, p.y);
-    event(SDL_EVENT_FINGER_UP, 3, p.x + 30, p.y); assert(item_steps.size() == 2); // no lower release threshold
+    event(SDL_EVENT_FINGER_UP, 3, p.x + 30, p.y); assert(item_steps.size() == 5); // no lower release threshold
     event(SDL_EVENT_FINGER_DOWN, 4, p.x, p.y); event(SDL_EVENT_FINGER_UP, 4, p.x, p.y);
-    assert(update().b & B(BTN_Y));
+    assert(update().b == B(BTN_Y));
+    fresh(); p = hud(TZ_ITEM, 640, 620);
+    event(SDL_EVENT_FINGER_DOWN, 1, p.x, p.y);
+    finger(g_s, 1)->t0 = SDL_GetTicksNS() - 250 * MS;
+    assert(update().b == B(BTN_L) && update().touch_b == B(BTN_L));
+    event(SDL_EVENT_FINGER_UP, 1, p.x, p.y); assert(!update().b && !pulses(B(BTN_Y)));
+    event(SDL_EVENT_FINGER_DOWN, 2, p.x, p.y); event(SDL_EVENT_FINGER_UP, 2, p.x, p.y);
+    assert(update().b == B(BTN_Y));
     fresh(); ranged = WEAPON_BOWGUN; update(); p = hud(TZ_ITEM, 640, 620);
     event(SDL_EVENT_FINGER_DOWN, 5, p.x, p.y);
     event(SDL_EVENT_FINGER_MOTION, 5, p.x, p.y - 180); assert(pulses(B(BTN_X)) == 1);
     const uint64_t ready = g_s.ammo_ready;
     event(SDL_EVENT_FINGER_MOTION, 5, p.x, p.y + 200);
-    event(SDL_EVENT_FINGER_UP, 5, p.x + 350, p.y - 300);
-    assert(pulses(B(BTN_X)) == 1 && pulses(B(BTN_B)) == 0 && item_steps.empty() && g_s.ammo_ready == ready);
-    assert(update().b & B(BTN_L));
+    assert(pulses(B(BTN_X)) == 0 && pulses(B(BTN_B)) == 1 && g_s.ammo_ready == ready);
+    g_s.ammo_pulse = {}; g_s.ammo_ready = 0;
+    event(SDL_EVENT_FINGER_MOTION, 5, p.x, p.y - 180);
+    assert(pulses(B(BTN_X)) == 1 && pulses(B(BTN_B)) == 0 && item_steps.empty());
+    g_s.ammo_pulse.from = 0; g_s.ammo_pulse.until = SDL_GetTicksNS() + 80 * MS;
+    Input ammo = update(B(BTN_L) | B(BTN_X));
+    assert(ammo.b == (B(BTN_L) | B(BTN_X)) && ammo.touch_b == ammo.b);
+    event(SDL_EVENT_FINGER_UP, 5, p.x, p.y - 180); assert(!pulses(B(BTN_Y)));
     fresh(); ranged = WEAPON_BOWGUN; update(); p = hud(TZ_ITEM, 640, 620);
     event(SDL_EVENT_FINGER_DOWN, 6, p.x, p.y); event(SDL_EVENT_FINGER_UP, 6, p.x, p.y + 150);
-    assert(pulses(B(BTN_B)) == 1 && item_steps.empty());
-    puts("PASS: item horizontal/vertical gestures latch one step, reversal and lift, quick down/up flick, tap use");
+    assert(pulses(B(BTN_B)) == 1 && item_steps.empty() && update().b == B(BTN_L));
+    puts("PASS: continuous item and ammo slides reverse under the same finger, lift and reenter, long hold opens L, short tap uses Y, and native touch sources include L/X/B");
 }
 static void auto_r() {
     fresh(); at(SDL_EVENT_FINGER_DOWN, C_STICK);
@@ -1395,6 +1448,132 @@ static void fixed_quest_menus() {
     fresh();
     puts("PASS: all 15 quest profiles at 16:9/21:9/32:9 keep button visibility/geometry and held input through menu transitions; navigation works and editor cannot switch presets");
 }
+static int bow_drag_fixture(int type=0, bool classic=false, int w=1280, int h=720) {
+    if(classic) classic_fixture(w,h); else fresh(w,h);
+    local_hunter=0x08004000; ranged=WEAPON_BOW; drawn=1; bow_type=type;
+    if(!classic) assert(save_layout(defaults(profile_for_weapon(10)),profile_for_weapon(10)));
+    update(); bow_drag={};
+    return classic ? (type ? C_R : C_LIGHT) : C_RFIRE;
+}
+static void bow_drag_counts(float x,float y) {
+    float k=CAMERA_COUNTS/(float)screen_h;
+    assert(fabsf(bow_drag.dx-x*k)<.01f && fabsf(bow_drag.dy-y*k)<.01f);
+}
+static void bow_charge_drag() {
+    for(int type=0;type<2;++type) for(bool classic:{false,true}) for(int w:{1280,2520,3840}) {
+        int control=bow_drag_fixture(type,classic,w,w==1280?720:1080);
+        const uint64_t charge=B(type?BTN_R:BTN_X);
+        Geo g=place(g_s.layout,control,(float)screen_w,(float)screen_h);
+        event(SDL_EVENT_FINGER_DOWN,1,g.c.x,g.c.y);
+        assert(bow_drag.held && bow_drag.begins==1 && bow_drag.hunter==local_hunter && bow_drag.type==type);
+        assert(update().b==charge && !bow_drag.adds);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+5,g.c.y-4);
+        assert(!bow_drag.adds && !update().dx);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+30,g.c.y-20);
+        bow_drag_counts(30,-20); // The first accepted drag includes the earlier subthreshold movement.
+        Input held=update(); assert(held.b==charge && held.touch_b==charge && !held.dx && !held.dy);
+        for(int i=0;i<3;++i) update(); // The native charge may start after touch ownership; no new samples appear.
+        assert(bow_drag.adds==1);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+45,g.c.y-35); bow_drag_counts(45,-35);
+        finger(g_s,1)->t0=SDL_GetTicksNS()-100*MS;
+        event(SDL_EVENT_FINGER_UP,1,g.c.x+55,g.c.y-40); bow_drag_counts(55,-40);
+        assert(!bow_drag.held && bow_drag.ends==1 && !bow_drag.cancels && !update().b);
+        assert(!g_s.cam_dx && !g_s.cam_dy && g_s.bow_drag_finger<0);
+        event(SDL_EVENT_FINGER_DOWN,2,g.c.x,g.c.y); assert(bow_drag.begins==2);
+        bow_drag_counts(0,0); event(SDL_EVENT_FINGER_CANCELED,2,g.c.x+150,g.c.y);
+        assert(!bow_drag.held && bow_drag.cancels==1); bow_drag_counts(0,0);
+    }
+    puts("PASS: drawn Bow Type 1/2 fire and classic X/R own a separate charge-drag channel; first threshold keeps DOWN displacement, UP keeps its last delta, cancel clears, and no aim key is synthesized");
+}
+static void bow_drag_sources() {
+    int control=bow_drag_fixture(); Geo g=place(g_s.layout,control,(float)screen_w,(float)screen_h);
+    event(SDL_EVENT_FINGER_DOWN,1,g.c.x,g.c.y);
+    event(SDL_EVENT_FINGER_DOWN,2,g.c.x,g.c.y);
+    event(SDL_EVENT_FINGER_MOTION,2,g.c.x+100,g.c.y-80);
+    assert(bow_drag.begins==1 && !bow_drag.adds && !update().dx);
+    event(SDL_EVENT_FINGER_CANCELED,2,g.c.x+100,g.c.y-80); assert(bow_drag.held);
+    event(SDL_EVENT_FINGER_DOWN,3,screen_w*.5f,screen_h*.3f); assert(finger(g_s,3)->kind==F_CAMERA);
+    event(SDL_EVENT_FINGER_MOTION,3,screen_w*.5f+50,screen_h*.3f-25);
+    Input camera=update(); assert(camera.dx>0 && camera.dy<0 && !bow_drag.adds);
+    event(SDL_EVENT_FINGER_CANCELED,3,screen_w*.5f+50,screen_h*.3f-25);
+    event(SDL_EVENT_FINGER_MOTION,1,g.c.x+35,g.c.y-25); bow_drag_counts(35,-25);
+    event(SDL_EVENT_FINGER_CANCELED,1,g.c.x+35,g.c.y-25);
+
+    for(int type=0;type<2;++type) {
+        bow_drag_fixture(type); at(SDL_EVENT_FINGER_DOWN,C_RAIM);
+        at(SDL_EVENT_FINGER_MOTION,C_RAIM,1,2,-1);
+        Input aim=update(); assert(aim.dx>0 && aim.dy<0 && aim.b==B(BTN_R) && !bow_drag.begins);
+        at(SDL_EVENT_FINGER_CANCELED,C_RAIM,1,2,-1);
+    }
+    for(int mode=0;mode<5;++mode) {
+        bow_drag_fixture();
+        if(mode==0) local_hunter=0;
+        else if(mode==1) drawn=0;
+        else if(mode==2) { ranged=WEAPON_BOWGUN; weapon_override=4; g_s.selected_layout=profile_for_weapon(10); }
+        else if(mode==3) { ranged=0; weapon_override=0; g_s.selected_layout=profile_for_weapon(10); }
+        else { // An actual Bow using a bowgun preset's Fire sends A, not the charge button.
+            assert(save_layout(defaults(profile_for_weapon(6)),profile_for_weapon(6)));
+            g_s.selected_layout=profile_for_weapon(6); load_selected_layout(g_s,g_s.selected_layout);
+        }
+        update(); at(SDL_EVENT_FINGER_DOWN,C_RFIRE); at(SDL_EVENT_FINGER_MOTION,C_RFIRE,1,2,-1);
+        assert(!bow_drag.begins && !bow_drag.adds && update().dx>0);
+        at(SDL_EVENT_FINGER_CANCELED,C_RFIRE,1,2,-1);
+    }
+    bow_drag_fixture(); at(SDL_EVENT_FINGER_DOWN,C_RSPECIAL);
+    at(SDL_EVENT_FINGER_MOTION,C_RSPECIAL,1,2,-1);
+    assert(!bow_drag.begins && update().b==(B(BTN_X)|B(BTN_A)));
+    at(SDL_EVENT_FINGER_CANCELED,C_RSPECIAL,1,2,-1);
+    // Same X bit on another preset's ordinary attack is outside the dedicated/classic charge controls.
+    assert(save_layout(defaults(0),0)); g_s.selected_layout=0; load_selected_layout(g_s,0); update();
+    at(SDL_EVENT_FINGER_DOWN,C_LIGHT); at(SDL_EVENT_FINGER_MOTION,C_LIGHT,1,-2,-1);
+    assert(!bow_drag.begins); at(SDL_EVENT_FINGER_CANCELED,C_LIGHT,1,-2,-1);
+    puts("PASS: one owning charge finger stays isolated from free camera, RAIM, ordinary attacks and combos; actual weapon and emitted button override selected preset identity");
+}
+static void bow_drag_lifecycle() {
+    for(int mode=0;mode<14;++mode) {
+        bow_drag_fixture(); Geo g=place(g_s.layout,C_RFIRE,(float)screen_w,(float)screen_h);
+        event(SDL_EVENT_FINGER_DOWN,1,g.c.x,g.c.y);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+50,g.c.y-30); assert(bow_drag.held && bow_drag.adds==1);
+        if(mode==0) { settings_open=true; event(SDL_EVENT_FINGER_MOTION,1,g.c.x+70,g.c.y-30); }
+        else if(mode==1) game_menu_state(true);
+        else if(mode==2) { cfg.touch_controls=TOUCH_OFF; update(); }
+        else if(mode==3) update(0,false,true);
+        else if(mode==4) touch_reset();
+        else if(mode==5) load_selected_layout(g_s,g_s.layout_profile);
+        else if(mode==6) { touch_edit_begin(); update(); }
+        else if(mode==7) { in_quest=false; update(); }
+        else if(mode==8) { local_hunter+=0x1000; update(); }
+        else if(mode==9) { bow_type=1; update(); }
+        else if(mode==10) { drawn=0; update(); }
+        else if(mode==11) { ranged=WEAPON_BOWGUN; update(); }
+        else if(mode==12) { cfg.touch_show[TB_FIRE]=0; update(); }
+        else { finger(g_s,1)->done=true; update(); }
+        assert(!bow_drag.held && bow_drag.resets && g_s.bow_drag_finger<0); bow_drag_counts(0,0);
+        const int starts=bow_drag.begins;
+        event(SDL_EVENT_FINGER_UP,1,g.c.x+180,g.c.y-90);
+        assert(bow_drag.begins==starts); bow_drag_counts(0,0);
+    }
+    puts("PASS: charge drag and pending displacement clear on menus, editor, hidden controls, typing, background, preset, scene, hunter, type, drawn, actual weapon and control changes; an old UP cannot revive them");
+}
+static void bow_drag_manual_aim() {
+    for(int type=0;type<2;++type) {
+        bow_drag_fixture(type); Geo g=place(g_s.layout,C_RFIRE,(float)screen_w,(float)screen_h);
+        event(SDL_EVENT_FINGER_DOWN,1,g.c.x,g.c.y);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+40,g.c.y-20); assert(bow_drag.adds==1);
+        aiming=true; update(); assert(!bow_drag.held); bow_drag_counts(0,0);
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+70,g.c.y-50);
+        Input aim=update(); assert(aim.dx>0 && aim.dy<0 && bow_drag.begins==1);
+        aiming=false; update();
+        event(SDL_EVENT_FINGER_MOTION,1,g.c.x+100,g.c.y-70);
+        assert(bow_drag.begins==2 && bow_drag.held); bow_drag_counts(30,-20);
+        Input charge=update(); assert(!charge.dx && !charge.dy && charge.b==B(type?BTN_R:BTN_X));
+        event(SDL_EVENT_FINGER_CANCELED,1,g.c.x+100,g.c.y-70);
+        aiming=true; at(SDL_EVENT_FINGER_DOWN,C_RFIRE); at(SDL_EVENT_FINGER_MOTION,C_RFIRE,1,2,-1);
+        assert(update().dx>0 && bow_drag.begins==2);
+        at(SDL_EVENT_FINGER_CANCELED,C_RFIRE,1,2,-1);
+    }
+    puts("PASS: manual scope keeps original Fire camera dragging; entering aim cancels charge pending data and leaving it can re-own the same finger using only new displacement");
+}
 static void ranged_controls() {
     fresh(); ranged=WEAPON_BOWGUN; drawn=1; update();
     g_s.layout.style=STYLE_SEPARATE; g_style=STYLE_SEPARATE;
@@ -1435,11 +1614,260 @@ static void ranged_controls() {
         bow_type=type; update();
         at(SDL_EVENT_FINGER_DOWN,C_RFIRE); assert(update().b==(type?B(BTN_R):B(BTN_X)));
         at(SDL_EVENT_FINGER_CANCELED,C_RFIRE);
-        at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(update().b==(type?B(BTN_X):B(BTN_R)));
+        at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(update().b==B(BTN_R));
         at(SDL_EVENT_FINGER_MOTION,C_RAIM,1,2,-1); assert(update().dx>0);
         at(SDL_EVENT_FINGER_CANCELED,C_RAIM,1,2,-1); assert(update().b==0);
     }
     puts("PASS: fire stays A without forced scope/seam, native X+A in either order, aim tap/drag/release, scoped menu suppression, draw press cannot reload");
+}
+static void ranged_guard_migration() {
+    fresh(); const int hbg=profile_for_weapon(4),lbg=profile_for_weapon(6),bow=profile_for_weapon(10);
+    const int sources[]={hbg,lbg,bow,TOUCH_WEAPON_LAYOUTS+3,RESERVED_LAYOUT_BASE};
+    for (int show=0;show<2;++show) {
+        cfg.touch_show[TB_RANGED]=show;
+        for (int slot:sources) {
+            Layout old=defaults(reserved_layout(slot)?lbg:slot);
+            old.x[C_R]=DEFS[C_R].x; old.y[C_R]=DEFS[C_R].y; old.scale[C_R]=1;
+            old.style=STYLE_CORNER;
+            assert(save_layout(old,slot)); Layout loaded; assert(load_layout(&loaded,slot));
+            assert(loaded.x[C_R]==.58f && loaded.y[C_R]==.78f && loaded.scale[C_R]==1);
+            const std::string original=stored_layout_text(slot);
+            assert(load_layout(&loaded,slot) && stored_layout_text(slot)==original);
+            for (int custom=0;custom<3;++custom) {
+                Layout placed=old;
+                if (custom==0) placed.x[C_R]=.317f;
+                if (custom==1) placed.y[C_R]=.271f;
+                if (custom==2) placed.scale[C_R]=1.17f;
+                assert(save_layout(placed,slot) && load_layout(&loaded,slot));
+                assert(loaded.x[C_R]==placed.x[C_R] && loaded.y[C_R]==placed.y[C_R] && loaded.scale[C_R]==placed.scale[C_R]);
+            }
+            Layout classic=old; classic.style=STYLE_CLASSIC;
+            assert(save_layout(classic,slot) && load_layout(&loaded,slot));
+            assert(loaded.style==STYLE_CLASSIC && loaded.x[C_R]==classic.x[C_R] && loaded.y[C_R]==classic.y[C_R]);
+        }
+    }
+    for (int p=0;p<TOUCH_WEAPON_LAYOUTS;++p) {
+        const Layout normal=defaults(p);
+        assert(normal.x[C_R]==(ranged_profile(p)? .58f:DEFS[C_R].x));
+        assert(normal.y[C_R]==(ranged_profile(p)? .78f:DEFS[C_R].y));
+    }
+    const Layout universal=defaults(UNIVERSAL_LAYOUT);
+    assert(universal.style==STYLE_CLASSIC && universal.x[C_R]==.12f && universal.y[C_R]==.84f);
+    puts("PASS: hidden ranged R's exact old default migrates for HBG/LBG/bow/village/reserved sources independently of ShowRanged; custom position/size and classic layouts are retained without rewriting files");
+}
+static void ranged_guard_input() {
+    const int profiles[]={profile_for_weapon(4),profile_for_weapon(6),profile_for_weapon(10),TOUCH_WEAPON_LAYOUTS+3};
+    for (const auto size:{ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080)}) {
+        for (int p:profiles) {
+            fresh((int)size.x,(int)size.y); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),1);
+            Layout saved=defaults(p);
+            saved.x[C_R]=.613f; saved.y[C_R]=.817f; saved.scale[C_R]=1.123f;
+            assert(save_layout(saved,p)); cfg.touch_show[TB_AIM]=0;
+            if (p<TOUCH_WEAPON_LAYOUTS) { weapon_override=PROFILE_WEAPON[p]; ranged=ranged_profile(p); drawn=1; update(); }
+            else { in_quest=false; update(); select_legacy_mode(g_s,3); update(); }
+            assert(g_s.layout_profile==p && in_mode(C_RAIM,false,g_s.in_quest) && in_editor(C_RAIM,g_s.in_quest,p));
+            assert(!in_mode(C_R,false,g_s.in_quest) && !in_editor(C_R,g_s.in_quest,p));
+            const Geo guard=place(g_s.layout,C_RAIM,(float)screen_w,(float)screen_h);
+            const Geo removed=place(g_s.layout,C_R,(float)screen_w,(float)screen_h);
+            assert(hit(g_s.layout,guard.c.x,guard.c.y,(float)screen_w,(float)screen_h,nullptr,1.22f,false,false,g_s.in_quest,false,p)==C_RAIM);
+            assert(hit(g_s.layout,removed.c.x,removed.c.y,(float)screen_w,(float)screen_h,nullptr,1.22f,false,false,g_s.in_quest,false,p)!=C_R);
+            for(int state:{-1,0,1}) for(int type=0;type<2;++type) {
+                drawn=state; bow_type=type; local_hunter=ranged==WEAPON_BOW?0x08004000:0; update();
+                Icon icon; char letter[8]; ranged_face(C_RAIM,ranged_layout_profile(p),state,&icon,letter,sizeof letter);
+                assert(icon==I_LETTER && !strcmp(letter,"R") && !strcmp(DEFS[C_RAIM].name,"R"));
+                assert(ranged_buttons(C_RAIM,state,ranged_layout_profile(p))==B(BTN_R));
+                at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(finger(g_s,1)->ctl==C_RAIM);
+                for(int frame=0;frame<3;++frame) {
+                    const Input held=update(); assert(held.b==B(BTN_R) && held.touch_b==B(BTN_R) && !held.dx && !held.dy);
+                }
+                assert(!bow_drag.begins); // R remains separate even when Bow Type 2 also charges with R.
+                at(SDL_EVENT_FINGER_CANCELED,C_RAIM); assert(!update().b && !pulses(B(BTN_R)));
+            }
+            at(SDL_EVENT_FINGER_DOWN,C_RAIM); at(SDL_EVENT_FINGER_UP,C_RAIM);
+            assert(update().touch_b==B(BTN_R) && pulses(B(BTN_R))==1); touch_reset(); assert(!update().b);
+            for (int target:{C_RFIRE,C_RSECOND,C_AMMO_DOWN}) {
+                at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(update().b==B(BTN_R));
+                const Geo other=place(g_s.layout,target,(float)screen_w,(float)screen_h);
+                event(SDL_EVENT_FINGER_MOTION,1,other.c.x,other.c.y);
+                const Input moved=update(); assert(finger(g_s,1)->ctl==C_RAIM && moved.b==B(BTN_R) && (moved.dx || moved.dy));
+                assert(!g_s.ammo_hold && !pulses(B(BTN_X)) && !pulses(B(BTN_B)));
+                event(SDL_EVENT_FINGER_CANCELED,1,other.c.x,other.c.y); assert(!update().b);
+            }
+            for(int type=0;type<2;++type) for(int other:{C_RFIRE,C_RSECOND}) {
+                bow_type=type; drawn=1; update();
+                const uint64_t b=ranged_buttons(other,drawn,ranged_layout_profile(p));
+                at(SDL_EVENT_FINGER_DOWN,C_RAIM,1); at(SDL_EVENT_FINGER_DOWN,other,2);
+                assert(update().b==(B(BTN_R)|b));
+                at(SDL_EVENT_FINGER_CANCELED,C_RAIM,1); assert(update().b==b);
+                at(SDL_EVENT_FINGER_CANCELED,other,2); assert(!update().b);
+            }
+            assert(drawn_vertices(guard.c,guard.r*.5f)>20);
+            at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(update().b==B(BTN_R));
+            cfg.touch_show[TB_GUARD]=0; const Input disabled=update();
+            assert(!disabled.b && !disabled.touch_b && !in_mode(C_RAIM,false,g_s.in_quest) && !in_editor(C_RAIM,g_s.in_quest,p));
+            assert(update(B(BTN_R)).b==B(BTN_R)); // Hiding touch R never releases a physical or other touch source.
+            cfg.touch_show[TB_AIM]=1; assert(!in_mode(C_RAIM,false,g_s.in_quest));
+            assert(drawn_vertices(guard.c,guard.r*.5f)==0);
+            assert(hit(g_s.layout,guard.c.x,guard.c.y,(float)screen_w,(float)screen_h,nullptr,1.22f,false,false,g_s.in_quest,false,p)!=C_RAIM);
+            at(SDL_EVENT_FINGER_UP,C_RAIM); touch_reset();
+            at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(finger(g_s,1)->kind!=F_BUTTON || finger(g_s,1)->ctl!=C_RAIM);
+            assert(!update().b); at(SDL_EVENT_FINGER_CANCELED,C_RAIM);
+            cfg.touch_show[TB_GUARD]=1; cfg.touch_show[TB_AIM]=0; assert(!update().b);
+            at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(update().b==B(BTN_R)); at(SDL_EVENT_FINGER_CANCELED,C_RAIM);
+            touch_edit_begin(); update(); at(SDL_EVENT_FINGER_DOWN,C_RAIM); assert(g_s.sel==C_RAIM);
+            event(SDL_EVENT_FINGER_MOTION,1,guard.c.x-18,guard.c.y+22);
+            event(SDL_EVENT_FINGER_UP,1,guard.c.x-18,guard.c.y+22);
+            editor_click(E_BIGGER); assert(g_s.layout.scale[C_RAIM]>1.09f);
+            editor_click(E_CANCEL); update();
+            const Geo restored=place(g_s.layout,C_RAIM,(float)screen_w,(float)screen_h);
+            assert(restored.c.x==guard.c.x && restored.c.y==guard.c.y && restored.r==guard.r);
+            Layout kept; assert(load_layout(&kept,p));
+            assert(kept.x[C_R]==saved.x[C_R] && kept.y[C_R]==saved.y[C_R] && kept.scale[C_R]==saved.scale[C_R]);
+        }
+    }
+    puts("PASS: four ranged layouts have one fixed R for drawn/away/unknown and Bow Type 1/2; ShowR alone controls draw/hit/editor/held, dragging keeps camera control, native combinations survive, removed R coordinates remain saved");
+}
+static void near_rect(const Rect &a,const Rect &b,float dx=0,float dy=0) {
+    assert(a.ok && b.ok);
+    assert(fabsf(b.x0-a.x0-dx)<.02f && fabsf(b.x1-a.x1-dx)<.02f);
+    assert(fabsf(b.y0-a.y0-dy)<.02f && fabsf(b.y1-a.y1-dy)<.02f);
+}
+static Rect editor_hud_rect(int zone) {
+    return editor_zone_rect(g_s.layout,zone,(float)screen_w,(float)screen_h);
+}
+static ImVec2 editor_hud_pick(int zone) {
+    const Rect r=editor_hud_rect(zone); assert(r.ok);
+    Rect panel,buttons[E_COUNT]; editor_panel((float)screen_w,(float)screen_h,&panel,buttons);
+    const float fractions[]={.5f,.25f,.75f,.1f,.9f,.02f,.98f};
+    for (float fy:fractions) for (float fx:fractions) {
+        const ImVec2 p(r.x0+(r.x1-r.x0)*fx,r.y0+(r.y1-r.y0)*fy);
+        if (p.x<0 || p.x>screen_w || p.y<0 || p.y>screen_h || panel.in(p.x,p.y)) continue;
+        if (hit(g_s.layout,p.x,p.y,(float)screen_w,(float)screen_h,nullptr,1.0f,true,false,g_s.in_quest,true,control_profile(g_s))>=0) continue;
+        bool covered=false;
+        for (int k=0;k<zone;++k) covered|=editor_hud_rect(k).in(p.x,p.y);
+        if (!covered) return p;
+    }
+    assert(false && "HUD test needs an exposed handle point outside visible buttons"); return {};
+}
+static void drag_editor_hud(int zone,float dx,float dy) {
+    const Rect before=editor_hud_rect(zone); const Layout layout=g_s.layout;
+    const ImVec2 point=editor_hud_pick(zone); const float x=point.x,y=point.y;
+    event(SDL_EVENT_FINGER_DOWN,1,x,y);
+    assert(g_s.sel==ZONE_SEL+zone && finger(g_s,1)->kind==F_EDIT && finger(g_s,1)->ctl==ZONE_SEL+zone);
+    event(SDL_EVENT_FINGER_MOTION,1,x+dx,y+dy);
+    near_rect(before,editor_hud_rect(zone),dx,dy);  // The handle follows before any renderer feedback arrives.
+    for (int k=0;k<TZ_COUNT;++k) {
+        assert(g_touch_zone_dx[k]==g_s.layout.zx[k] && g_touch_zone_dy[k]==g_s.layout.zy[k]);
+        if (k!=zone) assert(g_s.layout.zx[k]==layout.zx[k] && g_s.layout.zy[k]==layout.zy[k]);
+    }
+    for (int c=0;c<C_COUNT;++c) assert(g_s.layout.x[c]==layout.x[c] && g_s.layout.y[c]==layout.y[c] && g_s.layout.scale[c]==layout.scale[c]);
+    event(SDL_EVENT_FINGER_UP,1,x+dx,y+dy); const Input input=update();
+    assert(!input.b && !input.touch_b && !input.lx && !input.ly && !input.dx && !input.dy);
+}
+static void editor_hud_dragging() {
+    for (const auto size:{ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080),ImVec2(1280,800)}) {
+        for (int moved=0;moved<2;++moved) {
+            fresh((int)size.x,(int)size.y); cfg.touch_hud=moved;
+            assert(save_layout(defaults(0),0)); update(); touch_edit_begin(); update();
+            assert(g_s.edit);
+            for (int k=0;k<TZ_COUNT;++k) {
+                assert(!g_editor_zones[k].bounds.ok && !zone_rect(zones(),k,(float)screen_w,(float)screen_h).ok);
+                drag_editor_hud(k,-24,32); drag_editor_hud(k,13,-11);
+            }
+            const Layout saved=g_s.layout; editor_click(E_SAVE); update(); assert(!g_s.edit);
+            Layout stored; assert(load_layout(&stored,0)); same_layout(stored,saved);
+            touch_edit_begin(); update(); drag_editor_hud(TZ_TARGET,-20,18);
+            editor_click(E_CANCEL); update(); assert(!g_s.edit); same_layout(g_s.layout,saved);
+            touch_reset(); g_s={};
+            std::fill(std::begin(g_editor_zones),std::end(g_editor_zones),EditorZone{});
+            update(); same_layout(g_s.layout,saved);
+            for (int k=0;k<TZ_COUNT;++k) assert(g_touch_zone_dx[k]==g_s.layout.zx[k] && g_touch_zone_dy[k]==g_s.layout.zy[k]);
+        }
+    }
+    puts("PASS: all three HUD handles drag immediately without render feedback, including repeated drags at 16:9/21:9/32:9/16:10 with MoveHUD on/off; buttons stay fixed and offsets survive Save/Cancel/restart");
+}
+static void editor_hud_feedback() {
+    fresh(); cfg.touch_hud=1; update();
+    g_s.layout.zx[TZ_ITEM]=60; g_s.layout.zy[TZ_ITEM]=30;
+    const ImVec2 base[TZ_COUNT]={{600,500},{830,210},{1080,130}};
+    for (int k=0;k<TZ_COUNT;++k) {
+        const float ox=g_s.layout.zx[k]*squeeze(),oy=g_s.layout.zy[k]*squeeze_y();
+        touch_hud_piece(k,base[k].x,base[k].y,base[k].x+ox,base[k].y+oy,ox,oy);
+    }
+    touch_hud_frame(); Rect remembered[TZ_COUNT];
+    for (int k=0;k<TZ_COUNT;++k) { remembered[k]=editor_hud_rect(k); assert(g_editor_zones[k].bounds.ok); }
+    g_s.layout.zx[TZ_ITEM]+=20; g_s.layout.zy[TZ_ITEM]-=15; publish_zones(g_s.layout);
+    near_rect(remembered[TZ_ITEM],editor_hud_rect(TZ_ITEM),20,-15); remembered[TZ_ITEM]=editor_hud_rect(TZ_ITEM);
+    touch_hud_piece(TZ_ITEM,base[TZ_ITEM].x,base[TZ_ITEM].y,base[TZ_ITEM].x+80,base[TZ_ITEM].y+15,80,15);
+    touch_hud_frame();
+    for (int k=0;k<TZ_COUNT;++k) near_rect(remembered[k],editor_hud_rect(k));
+    assert(!zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
+    assert(!zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h).ok);
+    g_zones.ns=SDL_GetTicksNS()-stale_limit()-1;
+    assert(!zone_rect(zones(),TZ_ITEM,(float)screen_w,(float)screen_h).ok);
+    touch_hud_frame();  // A wholly empty render frame also keeps all editor handles.
+    for (int k=0;k<TZ_COUNT;++k) near_rect(remembered[k],editor_hud_rect(k));
+    touch_edit_begin(); update(); for (int k=0;k<TZ_COUNT;++k) drag_editor_hud(k,19,21);
+    editor_click(E_CANCEL); update();
+    for (int k=0;k<TZ_COUNT;++k) {
+        const Rect r=editor_hud_rect(k); const float x=(r.x0+r.x1)*.5f,y=(r.y0+r.y1)*.5f;
+        event(SDL_EVENT_FINGER_DOWN,1,x,y); const Finger *f=finger(g_s,1);
+        assert(f && f->kind!=F_ITEM && f->kind!=F_ARTS && f->kind!=F_TARGET);
+        event(SDL_EVENT_FINGER_CANCELED,1,x,y); touch_reset();
+    }
+    // A new preset uses its own offset, never the manual offset already included in cached renderer positions.
+    Layout other=defaults(profile_for_weapon(10)); other.zx[TZ_ITEM]=-35; other.zy[TZ_ITEM]=42;
+    const Layout previous=g_s.layout; const Rect old=editor_hud_rect(TZ_ITEM);
+    assert(save_layout(other,profile_for_weapon(10)) && touch_preset_use(profile_for_weapon(10),-1));
+    assert(g_s.layout_profile==profile_for_weapon(10) && profile==profile_for_weapon(10));
+    const Rect changed=editor_hud_rect(TZ_ITEM);
+    near_rect(old,changed,other.zx[TZ_ITEM]-previous.zx[TZ_ITEM],other.zy[TZ_ITEM]-previous.zy[TZ_ITEM]);
+    // Incompatible render modes/anchors/aspects use a fresh fallback rather than old-scene coordinates.
+    for (int mode=0;mode<3;++mode) {
+        if (mode==0) cfg.touch_hud=0;
+        if (mode==1) { cfg.touch_hud=1; g_ui_anchor_aspect=21.0f/9.0f; }
+        if (mode==2) { g_ui_anchor_aspect=16.0f/9.0f; g_render_aspect=32.0f/9.0f; }
+        for (int k=0;k<TZ_COUNT;++k) {
+            const Rect actual=editor_hud_rect(k); const EditorZone cache=g_editor_zones[k]; g_editor_zones[k]={};
+            const Rect fallback=editor_hud_rect(k); g_editor_zones[k]=cache; near_rect(actual,fallback);
+        }
+    }
+    puts("PASS: per-HUD editor caches subtract renderer-applied offsets, survive missing/empty/expired live frames, reapply another preset correctly and reject incompatible mode/anchor/aspect; ordinary gameplay never receives ghost HUD hit regions");
+}
+static void editor_hud_priority_and_multitouch() {
+    fresh(); assert(save_layout(defaults(0),0)); update(); touch_edit_begin(); update();
+    const Geo button=place(g_s.layout,C_HEAVY,(float)screen_w,(float)screen_h);
+    const float sx=squeeze(),sy=squeeze_y();
+    const ImVec2 point(button.c.x-1.3f*button.r,button.c.y);
+    assert(hit(g_s.layout,point.x,point.y,(float)screen_w,(float)screen_h,nullptr,1.0f,true,false,g_s.in_quest,true,control_profile(g_s))<0);
+    assert(hit(g_s.layout,point.x,point.y,(float)screen_w,(float)screen_h,nullptr,1.5f,true,false,g_s.in_quest,true,control_profile(g_s))==C_HEAVY);
+    touch_hud_piece(TZ_ITEM,600,500,point.x,point.y,0,0); touch_hud_frame();
+    assert(editor_hud_rect(TZ_ITEM).in(button.c.x,button.c.y));
+    event(SDL_EVENT_FINGER_DOWN,1,button.c.x,button.c.y); assert(g_s.sel==C_HEAVY && finger(g_s,1)->ctl==C_HEAVY);
+    event(SDL_EVENT_FINGER_MOTION,1,button.c.x-12,button.c.y+15);
+    const Geo moved=place(g_s.layout,C_HEAVY,(float)screen_w,(float)screen_h);
+    assert(fabsf(moved.c.x-button.c.x+12)<.02f && fabsf(moved.c.y-button.c.y-15)<.02f);
+    assert(!g_s.layout.zx[TZ_ITEM] && !g_s.layout.zy[TZ_ITEM]);
+    event(SDL_EVENT_FINGER_UP,1,button.c.x-12,button.c.y+15);
+    editor_click(E_CANCEL); update(); touch_edit_begin(); update();
+    const Layout before=g_s.layout;
+    event(SDL_EVENT_FINGER_DOWN,1,point.x,point.y);
+    assert(g_s.sel==ZONE_SEL+TZ_ITEM && finger(g_s,1)->ctl==ZONE_SEL+TZ_ITEM);
+    event(SDL_EVENT_FINGER_DOWN,2,point.x+100,point.y+50);
+    assert(!g_s.pinch && finger(g_s,2)->kind==F_MENU);
+    event(SDL_EVENT_FINGER_MOTION,2,point.x+140,point.y+90);
+    assert(g_s.layout.zx[TZ_ITEM]==before.zx[TZ_ITEM] && g_s.layout.zy[TZ_ITEM]==before.zy[TZ_ITEM]);
+    event(SDL_EVENT_FINGER_MOTION,1,point.x-32,point.y+24);
+    assert(fabsf(g_s.layout.zx[TZ_ITEM]-before.zx[TZ_ITEM]+32/sx)<.01f);
+    assert(fabsf(g_s.layout.zy[TZ_ITEM]-before.zy[TZ_ITEM]-24/sy)<.01f);
+    for (int c=0;c<C_COUNT;++c) assert(g_s.layout.scale[c]==before.scale[c] && g_s.layout.x[c]==before.x[c] && g_s.layout.y[c]==before.y[c]);
+    event(SDL_EVENT_FINGER_UP,2,point.x+140,point.y+90); event(SDL_EVENT_FINGER_UP,1,point.x-32,point.y+24);
+    Rect panel,buttons[E_COUNT]; editor_panel((float)screen_w,(float)screen_h,&panel,buttons);
+    const float x=(buttons[E_SMALLER].x0+buttons[E_SMALLER].x1)*.5f,y=(buttons[E_SMALLER].y0+buttons[E_SMALLER].y1)*.5f;
+    touch_hud_piece(TZ_TARGET,1200,55,x,y,0,0); touch_hud_frame();
+    event(SDL_EVENT_FINGER_DOWN,1,x,y); assert(finger(g_s,1)->kind==F_MENU);
+    event(SDL_EVENT_FINGER_UP,1,x,y); editor_click(E_CANCEL); update();
+    puts("PASS: visible button graphics stay draggable over HUD, HUD wins over expanded button hit slop, toolbar wins over HUD, and extra fingers cannot pinch a HUD or alter button arrays");
 }
 static void ammo_repeat() {
     fresh(); ranged=WEAPON_BOWGUN; drawn=1; update();
@@ -1447,7 +1875,7 @@ static void ammo_repeat() {
         uint64_t button=control==C_AMMO_UP?B(BTN_X):B(BTN_B);
         at(SDL_EVENT_FINGER_DOWN,control); assert(update().b==B(BTN_L));
         assert(pulses(button)==1);
-        for (Pulse &p:g_s.pulse) p={};
+        g_s.ammo_pulse={};
         g_s.ammo_ready=SDL_GetTicksNS()-1; g_s.ammo_hold=SDL_GetTicksNS()+300*MS;
         assert(update().b==B(BTN_L)); assert(pulses(button)==1);
         uint64_t ready=g_s.ammo_ready; update(); assert(g_s.ammo_ready==ready && pulses(button)==1);
@@ -1455,7 +1883,78 @@ static void ammo_repeat() {
         update(); assert(pulses(button)==1);  // No additional steps once the finger lifts.
         touch_reset(); assert(update().b==0 && !g_s.ammo_hold && !g_s.ammo_ready);
     }
-    puts("PASS: ammo arrows repeat while held, stop queueing on lift, background reset releases pending L and steps");
+    fresh(); ranged=WEAPON_BOWGUN; drawn=1; update();
+    Geo arrow=place(g_s.layout,C_AMMO_UP,(float)screen_w,(float)screen_h);
+    event(SDL_EVENT_FINGER_DOWN,1,arrow.c.x,arrow.c.y);
+    g_s.ammo_pulse.from=SDL_GetTicksNS()+2000*MS;
+    g_s.ammo_pulse.until=g_s.ammo_pulse.from+80*MS;
+    g_s.ammo_ready=g_s.ammo_pulse.from+170*MS;
+    g_s.ammo_hold=g_s.ammo_pulse.from+320*MS;
+    const uint64_t ready=g_s.ammo_ready;
+    event(SDL_EVENT_FINGER_MOTION,1,arrow.c.x,arrow.c.y+120);
+    assert(pulses(B(BTN_B))==1 && !pulses(B(BTN_X)) && finger(g_s,1)->moved);
+    for(int i=0;i<100;++i) {
+        event(SDL_EVENT_FINGER_MOTION,1,arrow.c.x,arrow.c.y+(i%2?120:-120));
+        assert(pulses(B(BTN_X))+pulses(B(BTN_B))==1 && g_s.ammo_ready==ready);
+    }
+    for(const Pulse &p:g_s.pulse) assert(!p.until);  // rapid arrows use no generic pulse slots
+    g_s.ammo_pulse={}; g_s.ammo_ready=0;
+    update(); assert(!pulses(B(BTN_X)) && !pulses(B(BTN_B))); // a drag stops blind repeat in the old direction
+    event(SDL_EVENT_FINGER_CANCELED,1,arrow.c.x,arrow.c.y);
+    assert(!update().b && !g_s.ammo_hold);
+    puts("PASS: stationary ammo arrows repeat, sliding reverses one bounded pending step, dragging stops old-direction repeat, lift stops queueing, cancel/background release touch-owned L and ammo");
+}
+static void item_gesture_lifecycle() {
+    for(int mode=0;mode<7;++mode) for(int ammo=0;ammo<2;++ammo) {
+        fresh(); ranged=WEAPON_BOWGUN; drawn=1; update();
+        ImVec2 p=hud(TZ_ITEM,640,620);
+        event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+        event(SDL_EVENT_FINGER_MOTION,1,p.x+(ammo?0:100),p.y-(ammo?100:0));
+        assert(update().b==B(BTN_L));
+        if(ammo) assert(pulses(B(BTN_X))==1);
+        else assert(touch_item_pending==1);
+        const size_t accepted=item_steps.size();
+        pulse(g_s,B(BTN_A),2000*MS);  // cancelling item input must not cancel another touch control
+        if(mode==0) {
+            settings_open=true;
+            event(SDL_EVENT_FINGER_MOTION,1,p.x+100,p.y-100); // opening settings cancels even before the next input sample
+        } else if(mode==1) game_menu_state(true);
+        else if(mode==2) cfg.touch_controls=TOUCH_OFF;
+        else if(mode==3) update(0,false,true);
+        else if(mode==4) touch_reset();
+        else if(mode==5) load_selected_layout(g_s,g_s.layout_profile);
+        else { touch_edit_begin(); update(); }
+        Input result=update(B(BTN_L)|B(BTN_X)|B(BTN_B),false,mode==3);
+        assert((result.b&(B(BTN_L)|B(BTN_X)|B(BTN_B)))==(B(BTN_L)|B(BTN_X)|B(BTN_B)));
+        assert(!(result.touch_b&(B(BTN_L)|B(BTN_X)|B(BTN_B))));
+        assert(!pulses(B(BTN_X)) && !pulses(B(BTN_B)) && !g_s.ammo_hold && !g_s.ammo_ready && !g_s.bar_since);
+        assert(!touch_item_pending);
+        assert(!finger(g_s,1));
+        if(mode==0 || mode==1 || mode==6) assert(pulses(B(BTN_A))==1);
+        event(SDL_EVENT_FINGER_UP,1,p.x+100,p.y-200);
+        assert(item_steps.size()==accepted && !pulses(B(BTN_Y)));
+    }
+    fresh(); cfg.touch_show[TB_ITEM_ARROWS]=1;
+    ImVec2 p=hud(TZ_ITEM,640,400);
+    Rect item=zone_rect(zones(),TZ_ITEM,(float)screen_w,(float)screen_h);
+    Geo arrow=item_arrow(item,1,(float)screen_h);
+    event(SDL_EVENT_FINGER_DOWN,1,arrow.c.x,arrow.c.y);
+    assert(finger(g_s,1)->kind==F_ITEM && item_steps==std::vector<int>{1});
+    finger(g_s,1)->step_at=0;
+    event(SDL_EVENT_FINGER_MOTION,1,arrow.c.x-100,arrow.c.y);
+    assert(item_steps==(std::vector<int>{1,-1}));
+    finger(g_s,1)->step_at=0;
+    event(SDL_EVENT_FINGER_MOTION,1,arrow.c.x+100,arrow.c.y);
+    assert(item_steps==(std::vector<int>{1,-1,1}));
+    event(SDL_EVENT_FINGER_UP,1,arrow.c.x+100,arrow.c.y); assert(!update().b && touch_item_pending==1);
+    event(SDL_EVENT_FINGER_DOWN,2,p.x,p.y);
+    assert(!touch_item_pending);
+    event(SDL_EVENT_FINGER_MOTION,2,p.x+10000,p.y);
+    const size_t count=item_steps.size();
+    for(int i=0;i<100;++i) update();
+    assert(item_steps.size()<=count+1); // no long selection tail from an oversized flick
+    event(SDL_EVENT_FINGER_CANCELED,2,p.x+10000,p.y); assert(!update().b && !touch_item_pending);
+    puts("PASS: item/ammo gestures cancel on settings, game menus, hidden controls, typing, background, preset and editor; physical buttons survive, item arrows slide and large flicks leave no action queue");
 }
 static void target_switch(int w,int h) {
     fresh(w,h); lock_on=true; ImVec2 p=hud(TZ_TARGET,950,55);
@@ -1536,7 +2035,7 @@ static void show_settings() {
     cfg.touch_show[TB_GUARD]=1; cfg.touch_show[TB_ATTACKS]=0;
     assert(!in_mode(C_CORNER,false,true)&&!in_mode(C_ATTACK,false,true)&&in_mode(C_R,false,true));
     cfg.touch_show[TB_ATTACKS]=1; g_style=STYLE_PILL; ranged=WEAPON_BOWGUN; update();
-    const Pair guns[]={{TB_FIRE,C_RFIRE,-1},{TB_SECOND,C_RSECOND,-1},{TB_AIM,C_RAIM,-1},
+    const Pair guns[]={{TB_FIRE,C_RFIRE,-1},{TB_SECOND,C_RSECOND,-1},{TB_GUARD,C_RAIM,-1},
         {TB_RSPECIAL,C_RSPECIAL,-1},{TB_AMMO,C_AMMO_UP,-1},{TB_AMMO,C_AMMO_DOWN,-1},
         {TB_DODGE,C_RDODGE,-1},{TB_SHEATHE,C_RSHEATHE,-1}};
     for(const Pair &p:guns){cfg.touch_show[p.setting]=1;assert(in_mode(p.hunt,false,true));
@@ -1632,7 +2131,10 @@ int main() {
     manual_preset_source_controls();manual_preset_persistence();manual_preset_editor_selection();
     classic_shortcut_compatibility();classic_show_settings();classic_dpad_shortcut();
     classic_controls();classic_sticks();classic_editor_roundtrip();classic_editor_hit_targets();classic_activation();classic_ranged_lock();
-    fixed_quest_menus();ranged_controls();ammo_repeat();target_switch(1280,720);target_switch(2520,1080);target_switch(3840,1080);persistent_target_lock();
+    fixed_quest_menus();ranged_controls();ranged_guard_migration();ranged_guard_input();
+    bow_charge_drag();bow_drag_sources();bow_drag_lifecycle();bow_drag_manual_aim();
+    editor_hud_dragging();editor_hud_feedback();editor_hud_priority_and_multitouch();
+    ammo_repeat();item_gesture_lifecycle();target_switch(1280,720);target_switch(2520,1080);target_switch(3840,1080);persistent_target_lock();
     ImGui::DestroyContext();
     fresh();cfg.touch_show[TB_DPAD]=0;preview("touch-host-dpad-hidden-1280x720.png");
     cfg.touch_show[TB_DPAD]=1;update();preview("touch-host-dpad-shown-1280x720.png");
@@ -1658,6 +2160,13 @@ int main() {
     std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0);update();preview("touch-host-classic-all-hidden-1280x720.png");
     classic_fixture(640,360);std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),1);cfg.language=2;touch_edit_begin();update();preview("touch-host-editor-classic-zh-640x360.png");
     editor_click(E_CANCEL);update();
+    fresh(2520,1080); cfg.touch_hud=1; update(); touch_edit_begin(); update();
+    drag_editor_hud(TZ_ITEM,-70,-80); drag_editor_hud(TZ_ARTS,-60,110); drag_editor_hud(TZ_TARGET,-80,130);
+    preview("touch-host-editor-hud-drag-2520x1080.png"); editor_click(E_CANCEL); update();
+    fresh(3840,1080); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),1);
+    assert(save_layout(defaults(profile_for_weapon(6)),profile_for_weapon(6)));
+    weapon_override=6; ranged=WEAPON_BOWGUN; drawn=1; cfg.touch_hud=1; update();
+    preview("touch-host-ranged-native-r-3840x1080.png");
     SDL_DestroyWindow(window);SDL_Quit();
     puts("PASS: all touch control regressions (host stubs, no APK/game execution)");return 0;
 }

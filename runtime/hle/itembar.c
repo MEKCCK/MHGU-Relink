@@ -10,6 +10,7 @@
 // animation. The handler is hooked: after it, a notch of
 // the wheel does the same, past the same checks. One notch per update, at most a few waiting; notches while the
 // handler doesn't run (towns, menus, cutscenes) are dropped; those while the player may not pick an item wait 0.6 s.
+// Touch has a separate replacement slot and 120 ms lifetime. Cancellation never clears wheel/controller notches.
 //
 // A Prowler (uOtomo) has a bar of its own: slot u16 at +0x3336 (0-8, wrapping around), turn bits at +0x3338, moved by
 // 0x1417d68 (r0 = the Palico; uOtomo's vtable +0x5c4, called right after the hunters' handler): the same logic without
@@ -42,6 +43,9 @@ static int g_steps;                  // notches waiting: < 0 left, > 0 right
 static volatile uint64_t g_seen_ns;  // when the handler last ran
 static uint64_t g_steps_ns;          // when the last one came
 #define KEEP_NS 600000000ull         // a notch the player may not take now (a swing, a roll) waits this long
+static int g_touch_dir;             // one touch-owned step: replacement, never an accumulating queue
+static uint64_t g_touch_ns, g_touch_serial;
+#define TOUCH_KEEP_NS 120000000ull   // enough for the next guest tick after finger-up, not a later completed attack
 
 bool itembar_active(void) {
     uint64_t seen = g_seen_ns;
@@ -56,6 +60,24 @@ void itembar_scroll(int steps) {
     g_steps += steps;
     if (g_steps > MAX_WAITING) g_steps = MAX_WAITING;
     if (g_steps < -MAX_WAITING) g_steps = -MAX_WAITING;
+    pthread_mutex_unlock(&g_lock);
+}
+
+void itembar_touch_scroll(int direction) {
+    uint64_t seen = g_seen_ns, now = plat_now_ns();
+    if (!direction || !seen || now - seen >= ACTIVE_NS) return;
+    pthread_mutex_lock(&g_lock);
+    g_touch_dir = direction > 0 ? 1 : -1;
+    g_touch_ns = now;
+    ++g_touch_serial;
+    pthread_mutex_unlock(&g_lock);
+}
+
+void itembar_touch_cancel(void) {
+    pthread_mutex_lock(&g_lock);
+    g_touch_dir = 0;
+    g_touch_ns = 0;
+    ++g_touch_serial;  // also invalidates a request whose guest permission/next-slot query is in flight
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -84,8 +106,12 @@ static void turn(Cpu *c, uint32_t pl, const Bar *b) {
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
     g_seen_ns = now;
     pthread_mutex_lock(&g_lock);
-    if (seen && now - seen >= ACTIVE_NS) g_steps = 0;  // (scrolled while it didn't run)
-    int dir = g_steps > 0 ? 1 : g_steps < 0 ? -1 : 0;
+    now = plat_now_ns();  // requests can arrive after the sample above while this thread waits for the lock
+    if (seen && now - seen >= ACTIVE_NS) g_steps = g_touch_dir = 0;  // (scrolled while it didn't run)
+    if (g_touch_dir && now - g_touch_ns >= TOUCH_KEEP_NS) g_touch_dir = 0;
+    bool touch = g_touch_dir != 0;
+    int dir = touch ? g_touch_dir : g_steps > 0 ? 1 : g_steps < 0 ? -1 : 0;
+    uint64_t serial = g_touch_serial;
     pthread_mutex_unlock(&g_lock);
     if (!dir || !sane(pl) || call(c, FN_PL_IS_LOCAL, pl, 0, 0) != 1) return;  // (another player's: not ours)
     uint32_t vt = LD32(pl);
@@ -93,21 +119,42 @@ static void turn(Cpu *c, uint32_t pl, const Bar *b) {
     bool may = (!b->busy_check || call(c, FN_PL_BUSY, pl, 0, 0) == 0) && can_select &&
                call(c, can_select, pl, b->select_arg, 0) == 1;
     pthread_mutex_lock(&g_lock);
-    // (not now: kept a moment, for the end of a swing, a roll; then dropped, not kept for when a long attack is over.
-    // Dropped at once, a swipe in a fight often did nothing)
-    if (may) g_steps -= dir;
-    else if (now - g_steps_ns > KEEP_NS) g_steps = 0;
+    if (!may) {
+        now = plat_now_ns();
+        if (g_touch_dir && now - g_touch_ns >= TOUCH_KEEP_NS) g_touch_dir = 0;
+        if (now - g_steps_ns > KEEP_NS) g_steps = 0;
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
     pthread_mutex_unlock(&g_lock);
-    if (!may) return;
     uint32_t slot = call(c, b->next, pl, LD16(pl + b->slot), dir > 0 ? 0 : 1);
+    pthread_mutex_lock(&g_lock);
+    // Cancellation/reversal can arrive while guest queries run. Commit only the request which was checked.
+    if (touch) {
+        if (g_touch_serial != serial || g_touch_dir != dir || plat_now_ns() - g_touch_ns >= TOUCH_KEEP_NS) {
+            pthread_mutex_unlock(&g_lock);
+            return;
+        }
+        g_touch_dir = 0;
+    } else {
+        if ((dir > 0 && g_steps <= 0) || (dir < 0 && g_steps >= 0)) {
+            pthread_mutex_unlock(&g_lock);
+            return;
+        }
+        g_steps -= dir;
+    }
     ST16(pl + b->slot, slot);
     ST32(pl + b->flags, LD32(pl + b->flags) | (dir > 0 ? 2u : 4u));
+    pthread_mutex_unlock(&g_lock);
 }
 
 static void item_bar(Cpu *c) {
     uint32_t pl = c->r[0];
     fnhook_call_original(c, FN_ITEM_BAR);
-    if (pl == weapon_hunter()) mousecam_lock_shot();  // (the hunt camera's handler doesn't run while a gun aims)
+    if (pl == weapon_hunter()) {
+        mousecam_bow_charge_tick(c);
+        mousecam_lock_shot();  // (the hunt camera's handler doesn't run while a gun aims)
+    }
     uint32_t vt = sane(pl) ? LD32(pl) : 0;
     if (vt && LD32(vt + VF_PROWLER_BAR) == FN_PROWLER_BAR) return;  // (a Palico: prowler_bar's, right after this)
     turn(c, pl, &HUNTER);

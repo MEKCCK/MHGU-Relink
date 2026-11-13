@@ -39,6 +39,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../config.h"
 #include "../hle.h"
@@ -48,6 +49,8 @@
 #define FN_CAMERA_STICK 0x2255ccu  // uQuestCamera's right stick handler: r0 = the camera, r1 = the invert bits
 #define FN_AIM_TURN     0x4a1738u  // the hunter's turn while aiming: r0 = the player, r1 = the mode
 #define FN_AIMING       0x4a05b8u  // the aim camera's own action query: (hunter, 1, 0), not merely an aim-turn call
+#define FN_BOW_CHARGING 0x13b93dcu // pure Bow action query, also used by the native yellow-guide gate
+#define FN_BOW_AIM_LIMIT 0x13b8fa4u // (hunter, 0=up/1=down), s0=degrees from the current Bow action's resource
 #define FN_CAM_PARAM    0x21eadcu  // (camera, parameter): s0 = the camera's parameter
 #define G_OPTIONS       0x1a8ca48u  // the game's options object *
 #define OPT_AIM_INVERT  0x66u      // options byte: the invert bits while aiming
@@ -61,6 +64,7 @@
 #define QC_PARAM_AIM_UP   0x1du
 #define QC_PARAM_AIM_DOWN 0x1eu
 #define PL_AIM_YAW      0x14a0u
+#define PL_BOW_YAW      0xfecu     // Bow charge/shot handlers restore the facing from this saved yaw
 #define PL_AIM_PITCH    0x14b8u    // (the float, and +4 the copy the camera reads)
 #define PL_AIM_PITCH2   0x14bcu
 #define PL_AIM_LEAN     0x2714u    // (mode 1's pitch: 16-bit units, +-AIM_LEAN_MAX)
@@ -135,6 +139,7 @@ bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doi
 #define MUZZLE_Y   110.0f        // (a shot leaves this far above the hunter's feet)
 #define PL_PLACE   0xa0u
 #define SHOT_NS    400000000ull  // (the fire button let go: the shot may leave a little later, on a bow always)
+#define BOW_DRAG_NS 150000000ull // allow the charge action to start; never replay an old drag after a pause
 #define LOCK_MOVE_DEADZONE 3000  // match host_input.c's per-axis gamepad drift filter
 #define G_SENEMY 0x1a51fe0u
 #define LOCK_TAU 0.12f       // seconds for the camera to turn ~63% of the way to the monster (eased)
@@ -142,6 +147,156 @@ bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doi
 #define LOCK_HEIGHT 90.0f    // (the camera aims this far above the monster's feet)
 #define LOCK_NEAR0 120.0f    // closer than this (under the monster) the camera holds its heading,
 #define LOCK_NEAR1 380.0f    // farther than this the full follow (eased between)
+
+// The touch owner is separate from ordinary camera movement and gyro. A serial guards against a cancel or
+// a new finger arriving while a native action query runs. The game thread alone writes hunter angles.
+static struct {
+    uint32_t hunter;
+    int type;
+    bool held, manual;
+    uint64_t serial, moved_ns, ended_ns, charge_ns;
+    float dx, dy, yaw_rest;
+} g_bow_drag;
+
+static void bow_drag_clear(void) {  // g_lock held
+    uint64_t serial = g_bow_drag.serial + 1;
+    memset(&g_bow_drag, 0, sizeof g_bow_drag);
+    g_bow_drag.serial = serial;
+}
+
+void mousecam_bow_drag_reset(void) {
+    pthread_mutex_lock(&g_lock);
+    bow_drag_clear();
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_bow_drag_begin(uint32_t hunter, int type) {
+    pthread_mutex_lock(&g_lock);
+    bow_drag_clear();
+    if (sane(hunter) && (type == 0 || type == 1)) {
+        g_bow_drag.hunter = hunter, g_bow_drag.type = type, g_bow_drag.held = true;
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_bow_drag_add(float dx, float dy) {
+    if (!isfinite(dx) || !isfinite(dy) || (dx == 0 && dy == 0)) return;
+    pthread_mutex_lock(&g_lock);
+    if (g_bow_drag.hunter && g_bow_drag.held) {
+        uint64_t now = plat_now_ns();
+        if (now - g_bow_drag.moved_ns >= BOW_DRAG_NS) g_bow_drag.dx = g_bow_drag.dy = 0;
+        g_bow_drag.dx += dx, g_bow_drag.dy += dy, g_bow_drag.moved_ns = now;
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+void mousecam_bow_drag_end(bool cancel) {
+    pthread_mutex_lock(&g_lock);
+    if (cancel) bow_drag_clear();
+    else if (g_bow_drag.held) g_bow_drag.held = false, g_bow_drag.ended_ns = plat_now_ns();
+    pthread_mutex_unlock(&g_lock);
+}
+
+static bool bow_drag_manual(uint32_t hunter) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t since = g_bow_drag.held ? g_bow_drag.charge_ns : g_bow_drag.ended_ns;
+    bool manual = hunter && hunter == g_bow_drag.hunter && g_bow_drag.manual &&
+                  since && plat_now_ns() - since < SHOT_NS;
+    pthread_mutex_unlock(&g_lock);
+    return manual;
+}
+
+void mousecam_bow_charge_tick(Cpu *c) {
+    pthread_mutex_lock(&g_lock);
+    uint32_t h = g_bow_drag.hunter;
+    int type = g_bow_drag.type;
+    uint64_t serial = g_bow_drag.serial;
+    pthread_mutex_unlock(&g_lock);
+    if (!h) return;
+
+    uint64_t buttons;
+    int32_t sticks[4];
+    input_get(&buttons, sticks);
+    bool valid = h == weapon_hunter() && weapon_ranged(h) == WEAPON_BOW &&
+                 weapon_bow_type() == type && weapon_drawn() == 1 &&
+                 !(buttons & ((1ull << BTN_A) | (1ull << BTN_B) | (1ull << BTN_Y)));
+    bool charging = false;
+    float up = 0, down = 0;
+    if (valid) {
+        // A native call may change all CPU/VFP registers. Neither query may alter the surrounding hook's result.
+        Cpu query = *c;
+        query.r[0] = h, query.r[1] = 1, query.r[2] = 0;
+        guest_call(&query, FN_AIMING);
+        valid = !query.r[0];  // a manually opened aim mode keeps the existing aim/gyro/lock path
+        if (valid) {
+            query = *c;
+            query.r[0] = h;
+            guest_call(&query, FN_BOW_CHARGING);
+            charging = query.r[0] != 0;
+            if (charging) {
+                query = *c;
+                query.r[0] = h, query.r[1] = 0;
+                guest_call(&query, FN_BOW_AIM_LIMIT);
+                up = query.v.f[0];
+                query = *c;
+                query.r[0] = h, query.r[1] = 1;
+                guest_call(&query, FN_BOW_AIM_LIMIT);
+                down = query.v.f[0];
+                valid = isfinite(up) && isfinite(down) && up > 0 && down > 0 && up <= 180 && down <= 180;
+            }
+        }
+    }
+    pthread_mutex_lock(&g_lock);
+    if (serial != g_bow_drag.serial) { pthread_mutex_unlock(&g_lock); return; }
+    uint64_t now = plat_now_ns();
+    if (!valid || (!g_bow_drag.held && now - g_bow_drag.ended_ns >= SHOT_NS)) {
+        bow_drag_clear();
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    if (now - g_bow_drag.moved_ns >= BOW_DRAG_NS) g_bow_drag.dx = g_bow_drag.dy = 0;
+    if (!charging) {
+        // After a real charge, do not carry a release/recovery drag into a later charge.
+        if (g_bow_drag.charge_ns) g_bow_drag.dx = g_bow_drag.dy = 0;
+        if (g_bow_drag.held && g_bow_drag.charge_ns && now - g_bow_drag.charge_ns >= SHOT_NS) bow_drag_clear();
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    g_bow_drag.charge_ns = now;
+    float dx = g_bow_drag.dx, dy = g_bow_drag.dy;
+    g_bow_drag.dx = g_bow_drag.dy = 0;
+    if (dx != 0 || dy != 0) {
+        uint32_t options = LD32(G_OPTIONS);
+        unsigned invert = sane(options) ? LD8(options + OPT_AIM_INVERT) : 0;
+        float scale = MOUSECAM_DEG_PER_COUNT * config_live_mouse_sensitivity();
+        float yaw = -dx * scale * UNITS_PER_DEG;
+        float pitch = -dy * scale * config_live_mouse_sensitivity_y();
+        if (invert & 2) yaw = -yaw;
+        if (config_live_mouse_invert_y()) pitch = -pitch;
+        if (invert & 1) pitch = -pitch;
+        yaw += g_bow_drag.yaw_rest;
+        int turn = (int)yaw;
+        g_bow_drag.yaw_rest = yaw - turn;
+        uint32_t heading = (LD32(h + PL_AIM_YAW) + (uint32_t)turn) & 0xffffu;
+        // Both the guide and the shot must turn. Several native Bow handlers reload +0xfec on release.
+        ST32(h + PL_AIM_YAW, heading), ST32(h + PL_BOW_YAW, heading);
+        float aim = LDF(h + PL_AIM_PITCH);
+        if (!isfinite(aim)) aim = 0;
+        float degrees = aim * (aim >= 0 ? up : down) / AIM_PITCH_MAX;
+        degrees = fminf(up, fmaxf(-down, degrees + pitch));
+        aim = AIM_PITCH_MAX * degrees / (degrees >= 0 ? up : down);
+        STF(h + PL_AIM_PITCH, aim), STF(h + PL_AIM_PITCH2, aim);
+        g_bow_drag.manual = true;
+    }
+    if (g_bow_drag.manual) {
+        // Bow mode 3 uses trunc(pitch)/100 * 60 degrees, not mode 1's +/-45-degree lean. A charge-entry
+        // animation clears lean after this hook; refresh next tick even when the finger has stopped moving.
+        float aim = LDF(h + PL_AIM_PITCH);
+        if (isfinite(aim))
+            ST16(h + PL_AIM_LEAN, (uint16_t)(int16_t)((float)(int)aim * (60.0f / 100.0f) * UNITS_PER_DEG + .5f));
+    }
+    pthread_mutex_unlock(&g_lock);
+}
 // A model's skeleton (the hunter's and every monster's, measured on a Motorola g06 in the arena): +0x490 the number of
 // joints, +0x494 their array, 0xa0 bytes each (+0x00 a vtable in main's image, +0x10 the world matrix's rows, its
 // translation at +0x40 with w = 1.0, +0x60 the rotation, +0x70 the scale, +0x91 the parent: 0xff the root). The root
@@ -332,6 +487,7 @@ void mousecam_lock_shot(void) {
     uint64_t aim_button = 1ull << (ranged == WEAPON_BOW && weapon_bow_type() ? BTN_X : BTN_R);
     bool cancel = lock_canceled(h, ranged, b) || weapon_aiming(h) || (b & aim_button);
     if (cancel) { fired = 0, canceled = fire; return; }
+    if (bow_drag_manual(h)) { fired = 0; return; }  // this dragged charge and its delayed release keep the manual direction
     if (!touch_lock_on()) { fired = 0; return; }
     if (canceled) return;  // centering the stick cannot undo a dodge, sheathe or manual-aim cancellation
     unsigned action = weapon_action(h);

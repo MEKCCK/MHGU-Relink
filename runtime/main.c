@@ -97,7 +97,7 @@ static void boot(const char *root) {
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
-    { void bow_reticle_init(void); bow_reticle_init(); }  // (the bow's native reticle only while charging)
+    { void bow_reticle_init(void); bow_reticle_init(); }  // (the bow's native direction guide while charging)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
     { void menuptr_init(void); menuptr_init(); }  // (the mouse in the pause menu: runtime/hle/menuptr.c)
     { void prompts_init(void); prompts_init(); }  // (keyboard and mouse button prompts: runtime/hle/prompts.c)
@@ -422,7 +422,7 @@ int main(int argc, char **argv) {
 #endif
     }
     LOG("MHGU Relink %s\n", MHGU_VERSION);
-    LOG("[build] 0.2.2-20261113-r11 (native-aim-gate, quest-fixed-controls, condvar-publish, decoder-retain, shader-lod-opt-in, android-surface-recovery, editor-motion-forward, render-trace, ranged-stick-auto-face, bow-charge-reticle, weapon-layout-presets, universal-virtual-controls, touch-layout-storage, touch-preset-picker, touch-toolbar-top, touch-universal-no-right-stick, touch-two-village-layouts, universal-show-controls, universal-dpad-shortcut, touch-preset-reload, touch-any-weapon-preset)\n");
+    LOG("[build] 0.2.2-20261113-r14 (native-aim-gate, quest-fixed-controls, condvar-publish, decoder-retain, shader-lod-opt-in, android-surface-recovery, editor-motion-forward, render-trace, ranged-stick-auto-face, bow-charge-guide, bow-charge-drag, touch-bar-slide, weapon-layout-presets, universal-virtual-controls, touch-layout-storage, touch-preset-picker, touch-toolbar-top, touch-universal-no-right-stick, touch-two-village-layouts, universal-show-controls, universal-dpad-shortcut, touch-preset-reload, touch-any-weapon-preset, ranged-r-show-controls, quest-hud-edit)\n");
     LOG("[boot] startup preflight ready in %.3f s\n", (plat_now_ns() - startup) / 1e9);
 #ifdef __ANDROID__
     void plat_log_device(void);

@@ -126,7 +126,7 @@ const Def DEFS[C_COUNT] = {
     // the dodge in the corner, the ammo arrows beside the item bar
     {"fire", "Fire / shoot", I_SHOT, "", 0, true, .215f, .26f, .115f},
     {"second", "Reload / melee", I_RELOAD, "", 0, true, .365f, .13f, .07f},
-    {"aim", "Aim", I_SCOPE, "", 0, true, .415f, .29f, .07f},
+    {"aim", "R", I_LETTER, "R", B(BTN_R), true, .415f, .29f, .07f},
     {"rspecial", "Crouching fire / coating", I_CROUCH, "", 0, true, .33f, .445f, .058f},
     {"rdodge", "Dodge  B", I_DODGE, "B", B(BTN_B), true, .085f, .10f, .056f},
     {"rsheathe", "Sheathe  Y", I_SHEATHE, "Y", B(BTN_Y), true, .175f, .47f, .046f},
@@ -209,7 +209,7 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
     case C_DODGE: case C_RDODGE: return TB_DODGE;
     case C_RFIRE: return TB_FIRE;
     case C_RSECOND: return TB_SECOND;
-    case C_RAIM: return TB_AIM;
+    case C_RAIM: return TB_GUARD;
     case C_RSPECIAL: return TB_RSPECIAL;
     case C_AMMO_UP: case C_AMMO_DOWN: return TB_AMMO;
     case C_RSHEATHE: case C_FY: return TB_SHEATHE;
@@ -259,14 +259,14 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
                      (i == C_HEAVY && !config_live_touch_show(TB_DODGE)) ||
                      (i == C_DODGE && !config_live_touch_show(TB_ATTACKS));
     if (is_ranged(i) ? !ranged : ranged && (i == C_ATTACK || i == C_HEAVY || i == C_LIGHT || i == C_CORNER ||
-                                                              i == C_R || i == C_DODGE || i == C_SHEATHE))
+                                                              i == C_DODGE || i == C_SHEATHE))
         return false;
     if (is_combo(i)) return config_live_touch_combo(config_live_touch_profile(), i - C_COMBO) != 0;
     int style = g_style.load();
     if (i == C_ATTACK) return style == STYLE_PILL || (style == STYLE_CORNER && !config_live_touch_show(TB_GUARD));
     if (i == C_HEAVY || i == C_LIGHT) return style == STYLE_SEPARATE;
     if (i == C_CORNER) return style == STYLE_CORNER && config_live_touch_show(TB_GUARD);
-    if (i == C_R) return style != STYLE_CORNER || !config_live_touch_show(TB_ATTACKS);
+    if (i == C_R) return !ranged && (style != STYLE_CORNER || !config_live_touch_show(TB_ATTACKS));
     return true;
 }
 bool in_editor(int i, bool in_quest, int profile) {
@@ -298,15 +298,15 @@ const uint64_t MS = 1000000ull;
 const uint64_t ART_FACE[3] = {B(BTN_UP), B(BTN_RIGHT), B(BTN_DOWN)};
 
 // What a control of the ranged layout presses. Out, a bowgun: A fires, X reloads, R aims (a tap the scope, held the quick
-// aim), X + A crouching fire; a bow: the game's Bow Controls say which of X and R draws (held, let go it shoots) and which
-// enters the aiming mode; A its melee attack, X + A its coating. Sheathed the large button brings the weapon out (X: R
+// aim), X + A crouching fire; a bow: the game's Bow Controls say which of X and R draws (held, let go it shoots).
+// The separate R control stays the native R in every state; A is bow melee, X + A its coating. Sheathed the large button brings the weapon out (X: R
 // would run) and the smaller one does what A does then: gather, carve, talk
 uint64_t ranged_buttons(int c, int drawn, int ranged) {
     bool bow = ranged == WEAPON_BOW, type2 = g_bow_type.load() != 0, out = drawn == 1;
     switch (c) {
     case C_RFIRE: return !out ? B(BTN_X) : !bow ? B(BTN_A) : type2 ? B(BTN_R) : B(BTN_X);
     case C_RSECOND: return !out || bow ? B(BTN_A) : B(BTN_X);
-    case C_RAIM: return !out || (bow && type2) ? B(BTN_X) : B(BTN_R);
+    case C_RAIM: return B(BTN_R);
     case C_RSPECIAL: return B(BTN_X) | B(BTN_A);
     default: return DEFS[c].buttons;
     }
@@ -320,6 +320,12 @@ struct Layout {
 };
 bool from_right(const Layout &l, int i) {
     return DEFS[i].right && !(l.style == STYLE_CLASSIC && (i == C_L || i == C_ZL));
+}
+void migrate_ranged_guard(Layout &l, int profile) {
+    if (l.style == STYLE_CLASSIC || (!ranged_profile(l.weapon_profile) && profile != TOUCH_WEAPON_LAYOUTS + 3)) return;
+    // R was hidden in ranged layouts; its old default overlaps the lower ammo arrow.
+    if (l.x[C_R] == DEFS[C_R].x && l.y[C_R] == DEFS[C_R].y && l.scale[C_R] == 1.0f)
+        l.x[C_R] = .58f, l.y[C_R] = .78f;
 }
 const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target"};
 Layout defaults(int profile) {
@@ -340,6 +346,7 @@ Layout defaults(int profile) {
         for (const auto &p : positions) l.x[p.ctl] = p.x, l.y[p.ctl] = p.y;
         l.scale[C_HEAVY] = l.scale[C_LIGHT] = .78f;
     }
+    migrate_ranged_guard(l, profile);
     return l;
 }
 const Layout MENU_LAYOUT = defaults(0);
@@ -376,6 +383,7 @@ bool load_layout(Layout *l, int profile) {
     if (profile == UNIVERSAL_LAYOUT) l->style = STYLE_CLASSIC;
     else if (fixed_quest_attack_style(l->weapon_profile) && (!reserved_layout(profile) || l->style != STYLE_CLASSIC))
         l->style = STYLE_SEPARATE;
+    migrate_ranged_guard(*l, profile);
     // The formerly hidden shortcut's old default overlaps L in classic layouts; keep custom placements.
     if (l->style == STYLE_CLASSIC && l->x[C_DPAD_TOGGLE] == DEFS[C_DPAD_TOGGLE].x &&
         l->y[C_DPAD_TOGGLE] == DEFS[C_DPAD_TOGGLE].y && l->scale[C_DPAD_TOGGLE] == 1.0f)
@@ -598,12 +606,55 @@ float squeeze(void) {  // (exec.c: the HUD keeps its 16:9 shape on a wider pictu
     float a = g_render_aspect;
     return a > 16.0f / 9.0f ? (16.0f / 9.0f) / a : 1.0f;
 }
+float squeeze_y(void) {
+    float a = g_render_aspect;
+    return a > 0 && a < 16.0f / 9.0f ? a / (16.0f / 9.0f) : 1.0f;
+}
 
 struct Rect {
     float x0, y0, x1, y1;
     bool ok;
     bool in(float x, float y) const { return ok && x >= x0 && x <= x1 && y >= y0 && y <= y1; }
 };
+struct EditorZone {
+    Rect bounds{};  // canvas bounds before the saved manual offset
+    float aspect{}, anchor{};
+    bool moved{};
+};
+EditorZone g_editor_zones[TZ_COUNT], g_build_editor[TZ_COUNT];
+
+Rect editor_zone_rect(const Layout &layout, int k, float w, float h) {
+    EditorZone z;
+    {
+        std::lock_guard<std::mutex> l(g_zone_lock);
+        z = g_editor_zones[k];
+    }
+    const float sx = squeeze(), sy = squeeze_y();
+    const bool moved = config_live_touch_hud() != 0;
+    Rect r = z.bounds;
+    if (!r.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != moved) {
+        // Keep an editable handle even before this HUD part has appeared in the current scene.
+        const float aspect = g_render_aspect > 0 ? g_render_aspect : w / h;
+        const float right = 640.0f * (1.0f + std::min(g_ui_anchor_aspect, aspect) / aspect);
+        if (k == TZ_ITEM) {
+            float x = moved ? 640.0f - 25.0f * sx : right - 190.0f * sx;
+            r = {x, 720.0f - 80.0f * sy, x, 720.0f - 80.0f * sy, true};
+        } else if (k == TZ_ARTS) {
+            r = moved ? Rect{1280.0f - 243.0f * sx, 41.0f * sy, 1280.0f - 127.0f * sx, 107.0f * sy, true}
+                      : Rect{right - 554.0f * sx, 720.0f - 89.0f * sy, right - 438.0f * sx, 720.0f - 23.0f * sy, true};
+        } else {
+            float x = moved ? 1280.0f - 330.0f * sx : right - 80.0f * sx;
+            r = {x, 55.0f * sy, x, 82.0f * sy, true};
+        }
+    }
+    Pic p = picture(w, h);
+    r.x0 = p.x0 + (r.x0 + (layout.zx[k] - MARGIN[k][0] - ZONE_SLOP) * sx) * p.w / 1280.0f;
+    r.x1 = p.x0 + (r.x1 + (layout.zx[k] + MARGIN[k][2] + ZONE_SLOP) * sx) * p.w / 1280.0f;
+    r.y0 = p.y0 + (r.y0 + (layout.zy[k] - MARGIN[k][1] - ZONE_SLOP) * sy) * p.h / 720.0f;
+    r.y1 = p.y0 + (r.y1 + (layout.zy[k] + MARGIN[k][3] + ZONE_SLOP) * sy) * p.h / 720.0f;
+    return r;
+}
+
 Rect zone_rect(const Zones &z, int k, float w, float h) {
     Rect r = {1e30f, 1e30f, -1e30f, -1e30f, false};
     if (!z.n[k] || stale(z)) return r;
@@ -650,11 +701,11 @@ enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ART
 struct Finger {
     SDL_FingerID id;
     Kind kind;
-    int ctl, part;       // the control (F_BUTTON, F_EDIT), the pill's part
+    int ctl, part;       // the control / pill part; item gestures: 0 undecided, 1 horizontal items, 2 vertical ammo
     float x, y, x0, y0;  // pixels: now, where it landed
-    uint64_t t0;
+    uint64_t t0, step_at;
     float swipe, swipe_y;  // the item bar, a menu's cursor: pixels swiped since the last step
-    bool moved, done;
+    bool moved, done, bar_open, bow_drag_blocked;
     uint64_t btn;          // a control of the ranged layout: what it pressed when it landed (the weapon may go out under it)
 };
 struct Pulse {
@@ -667,6 +718,11 @@ struct State {
     bool stick_on;
     float bx, by, kx, ky;    // the stick's base and knob, pixels
     float cam_dx, cam_dy;    // pixels dragged since the last touch_input
+    int bow_drag_finger = -1;
+    uint32_t bow_drag_hunter;
+    int bow_drag_type;
+    float bow_drag_x, bow_drag_y;
+    bool bow_drag_moved;
     uint64_t held;           // buttons held by fingers
     uint64_t last_ns;        // the last touch
     uint64_t cam_ns;         // the last camera drag
@@ -674,6 +730,7 @@ struct State {
     uint64_t step_ns;        // when a drag may move a menu's cursor again
     float tap_x, tap_y;
     Pulse pulse[6];
+    Pulse ammo_pulse;        // one touch-owned ammo press; sliding never fills the generic pulse queue
     bool run;                // the thumb is past the stick's rim: running (R held)
     uint64_t run_idle;
     float fx, fy;            // the stick's thumb where it is (the knob stops at the rim)
@@ -683,6 +740,7 @@ struct State {
     int item_dir, art_row;
     int drawn;               // weapon_drawn, at the last touch_input
     uint64_t ammo_ready, ammo_hold;  // the next press of the ammo may start then; L held for it until then
+    uint64_t bar_since;      // when touch began holding L, including a long item-bar press
     float w, h;              // the screen, pixels
     Layout layout, saved;
     int layout_profile;
@@ -727,6 +785,25 @@ std::atomic<bool> g_visible;
 std::atomic<bool> g_gear_only;  // (the controls hidden: only the settings button shows, and answers)
 const uint64_t LOCK_AFTER_DRAG = 400 * MS, MIN_PRESS = 70 * MS;
 void recompute_held(State &s);
+void reset_bow_drag(State &s, bool resume = false);
+bool item_gesture(const Finger &f) {
+    return f.kind == F_ITEM || (f.kind == F_BUTTON && (f.ctl == C_AMMO_UP || f.ctl == C_AMMO_DOWN));
+}
+bool bar_held(const State &s) {
+    for (const Finger &f : s.f) if (item_gesture(f) && !f.done && f.bar_open) return true;
+    return false;
+}
+void open_bar(State &s, Finger &f, uint64_t now) {
+    if (!bar_held(s) && now >= s.ammo_hold) s.bar_since = now;
+    f.bar_open = true;
+}
+void cancel_item_gestures(State &s) {
+    itembar_touch_cancel();
+    for (Finger &f : s.f) if (item_gesture(f)) f = {};
+    s.ammo_pulse = {};
+    s.bar_since = s.ammo_ready = s.ammo_hold = 0;
+    recompute_held(s);
+}
 
 void load_preset_selection(State &s) {
     if (s.presets_loaded) return;
@@ -826,6 +903,8 @@ void ensure_loaded(State &s) {
 }
 
 void load_selected_layout(State &s, int profile) {
+    reset_bow_drag(s);
+    itembar_touch_cancel();
     s.save_failed = false;
     s.layout_profile = profile;
     bool had = load_layout(&s.layout, profile);
@@ -838,7 +917,8 @@ void load_selected_layout(State &s, int profile) {
     s.saved = s.layout;
     s.held = 0, s.stick_on = false, s.run = false;
     s.cam_dx = s.cam_dy = 0;
-    s.ammo_ready = s.ammo_hold = 0;
+    s.ammo_ready = s.ammo_hold = s.bar_since = 0;
+    s.ammo_pulse = {};
     for (Finger &f : s.f) f = {};
     for (Pulse &p : s.pulse) p = {};
     publish_zones(s.layout);
@@ -880,12 +960,20 @@ void pulse(State &s, uint64_t buttons, uint64_t ns, uint64_t after = 0, bool dpa
 // A step of the ammo or the coating: L held, X the next one, B the one before, and L let go confirms it (the game's own).
 // The game takes L only after a while: X 220 ms after it reloaded or did nothing, 310 ms after it changed the ammo (a
 // Motorola g06). More steps while L is held need no wait
-void ammo_step(State &s, int dir) {
+bool ammo_step(State &s, int dir) {
     uint64_t now = SDL_GetTicksNS();
-    uint64_t at = now < s.ammo_hold ? std::max(now + 20 * MS, s.ammo_ready) : now + 380 * MS;
-    pulse(s, dir > 0 ? B(BTN_X) : B(BTN_B), 80 * MS, at - now);
+    uint64_t buttons = dir > 0 ? B(BTN_X) : B(BTN_B);
+    if (s.ammo_pulse.until > now) {
+        if (now >= s.ammo_pulse.from) return false;
+        s.ammo_pulse.buttons = buttons;  // a reversal replaces an unsent step, never queues behind it
+        return true;
+    }
+    if (now < s.ammo_ready) return false;
+    uint64_t at = std::max(now + 20 * MS, s.bar_since + 380 * MS);
+    s.ammo_pulse = {buttons, at, at + 80 * MS, false};
     s.ammo_ready = at + 170 * MS;
     s.ammo_hold = at + 320 * MS;
+    return true;
 }
 // The item bar's arrows ([Touch] ShowItemArrows): beside the bar, wherever it has been moved to
 Geo item_arrow(const Rect &item, int d, float h) {
@@ -928,10 +1016,71 @@ uint64_t finger_buttons(const Finger &f) {
                  : DEFS[f.ctl].buttons;
 }
 
+void reset_bow_drag(State &s, bool resume) {
+    mousecam_bow_drag_reset();
+    if (s.bow_drag_finger >= 0 && !resume) s.f[s.bow_drag_finger].bow_drag_blocked = true;
+    s.bow_drag_finger = -1;
+    s.bow_drag_hunter = 0;
+    s.bow_drag_moved = false;
+}
+
+bool bow_drag_control(const State &s, const Finger &f, int type) {
+    if (f.kind != F_BUTTON || f.done || f.bow_drag_blocked) return false;
+    if (s.layout.style == STYLE_CLASSIC ? f.ctl != (type ? C_R : C_LIGHT) : f.ctl != C_RFIRE) return false;
+    return finger_buttons(f) == B(type ? BTN_R : BTN_X) &&
+           in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(control_profile(s)));
+}
+
+bool bow_drag_context(const State &s, uint32_t hunter, bool allow_aim = false) {
+    return hunter && s.in_quest && !s.edit && !s.menu && !overlay_menu_open() &&
+           config_live_touch_controls() != TOUCH_OFF && (g_visible || s.auto_wait) && weapon_ranged(hunter) == WEAPON_BOW &&
+           weapon_drawn() == 1 && (allow_aim || !weapon_aiming(hunter));
+}
+
+void validate_bow_drag(State &s) {
+    if (!s.bow_drag_hunter) return;
+    uint32_t hunter = weapon_hunter();
+    int type = weapon_bow_type();
+    if (!bow_drag_context(s, hunter, true) || hunter != s.bow_drag_hunter || type != s.bow_drag_type ||
+        (s.bow_drag_finger >= 0 && !bow_drag_control(s, s.f[s.bow_drag_finger], type))) reset_bow_drag(s);
+    else if (weapon_aiming(hunter)) reset_bow_drag(s, true);
+}
+
+bool begin_bow_drag(State &s, Finger &f, float x, float y) {
+    uint32_t hunter = weapon_hunter();
+    int type = weapon_bow_type();
+    if (!bow_drag_context(s, hunter) || !bow_drag_control(s, f, type)) return false;
+    if (s.bow_drag_finger < 0) {
+        s.bow_drag_finger = (int)(&f - s.f);
+        s.bow_drag_hunter = hunter, s.bow_drag_type = type;
+        s.bow_drag_x = x, s.bow_drag_y = y, s.bow_drag_moved = false;
+        mousecam_bow_drag_begin(hunter, type);
+    }
+    return true;
+}
+
+bool move_bow_drag(State &s, Finger &f, float x, float y, uint64_t now) {
+    if (!begin_bow_drag(s, f, f.x, f.y)) return false;
+    if (s.bow_drag_finger != &f - s.f) return true;  // only the owning finger steers this charge
+    float dx = x - (s.bow_drag_moved ? f.x : s.bow_drag_x);
+    float dy = y - (s.bow_drag_moved ? f.y : s.bow_drag_y);
+    if (!s.bow_drag_moved && hypotf(dx, dy) <= .025f * s.h) return true;
+    s.bow_drag_moved = true;
+    if (s.h > 0 && (dx != 0 || dy != 0)) {
+        float k = CAMERA_COUNTS * config_live_touch_camera() / s.h;
+        mousecam_bow_drag_add(dx * k, dy * k);
+        s.cam_ns = now;
+    }
+    return true;
+}
+
 void recompute_held(State &s) {
     s.held = 0;
     for (Finger &f : s.f)
-        if (f.kind == F_BUTTON && !f.done) s.held |= finger_buttons(f);
+        if (!f.done) {
+            if (f.kind == F_BUTTON) s.held |= finger_buttons(f);
+            if (item_gesture(f) && f.bar_open) s.held |= B(BTN_L);
+        }
 }
 
 void release_dpad(State &s) {
@@ -945,15 +1094,36 @@ void release_dpad(State &s) {
 void item_swipe(State &s, Finger &f, uint64_t now) {
     if (f.done) return;
     float step = .055f * s.h, ax = fabsf(f.swipe), ay = fabsf(f.swipe_y);
-    if (g_ranged.load() && ay >= step * 1.3f && ay > ax) {
-        ammo_step(s, f.swipe_y < 0 ? 1 : -1);
-    } else if (ax >= step && ax >= ay) {
+    if (!f.part) {
+        if (g_ranged.load() && ay >= step * 1.3f && ay > ax) f.part = 2;
+        else if (ax >= step && ax >= ay) f.part = 1;
+        else return;
+    }
+    float &distance = f.part == 2 ? f.swipe_y : f.swipe;
+    step *= f.part == 2 ? 1.3f : 1;
+    distance = std::clamp(distance, -2 * step, 2 * step);  // at most one further step while the finger stays down
+    if (fabsf(distance) < step) return;
+    open_bar(s, f, now);
+    if (f.part == 2) {
+        if (!ammo_step(s, distance < 0 ? 1 : -1)) return;
+    } else {
+        if (now < f.step_at) return;
         s.item_dir = f.swipe > 0 ? 1 : -1;
-        itembar_scroll(s.item_dir);
+        itembar_touch_scroll(s.item_dir);
         s.item_flash = now + 200 * MS;
-    } else return;
-    f.done = true;  // One action owns the gesture, including its final finger-up coordinates.
+        f.step_at = now + 70 * MS;
+    }
+    distance = fmodf(distance, step);  // discard a large flick's excess instead of leaving delayed actions
+    if (f.part == 2) f.swipe = 0; else f.swipe_y = 0;
     tap_due();
+}
+
+void item_motion(State &s, Finger &f, float dx, float dy, uint64_t now) {
+    // A reversal follows the new movement immediately, including when a step was waiting for its cooldown.
+    if (dx * f.swipe < 0) f.swipe = 0;
+    if (dy * f.swipe_y < 0) f.swipe_y = 0;
+    f.swipe += dx, f.swipe_y += dy;
+    item_swipe(s, f, now);
 }
 
 // the port's settings menu takes the fingers as its mouse (overlay.cpp)
@@ -992,6 +1162,8 @@ void editor_panel(float w, float h, Rect *panel, Rect btn[E_COUNT]) {
 
 void edit_begin(State &s) {
     if (s.edit) { s.edit_request = false; return; }
+    reset_bow_drag(s);
+    cancel_item_gestures(s);
     s.edit = true, s.edit_request = false, s.sel = -1, s.pinch = false;
     s.save_failed = false;
     s.saved = s.layout;
@@ -1094,22 +1266,22 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
                 }
                 return;
             }
+        if (panel.in(x, y)) { f->kind = F_MENU; return; }
         Finger *drag = nullptr;
         for (Finger &g : s.f)
             if (&g != f && g.kind == F_EDIT && g.ctl >= 0) drag = &g;
-        if (drag && drag->ctl >= ZONE_SEL) drag = nullptr;  // (a HUD part has no size)
+        if (s.pinch || (drag && drag->ctl >= C_COUNT)) { f->kind = F_MENU; return; }  // HUD parts cannot be pinched
         if (drag) {  // a second finger: pinch the control being dragged
             s.pinch = true, s.pinch_d0 = std::max(1.0f, hypotf(x - drag->x, y - drag->y)), s.pinch_s0 = s.layout.scale[drag->ctl];
             f->kind = F_EDIT;
             return;
         }
-        int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.5f, true, false, s.in_quest, true, control_profile(s));
-        if (c < 0 && control_profile(s) >= 0) {  // (a HUD part of the game's: the item bar, the Hunter Arts, the target camera)
-            Zones z = zones();
+        int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.0f, true, false, s.in_quest, true, control_profile(s));
+        if (c < 0 && control_profile(s) >= 0) {  // Visible buttons stay editable; HUD handles beat only their enlarged touch areas.
             for (int k = 0; k < TZ_COUNT && c < 0; k++)
-                if (zone_rect(z, k, s.w, s.h).in(x, y)) c = ZONE_SEL + k;
+                if (editor_zone_rect(s.layout, k, s.w, s.h).in(x, y)) c = ZONE_SEL + k;
         }
-        if (c < 0 && panel.in(x, y)) { f->kind = F_MENU; return; }
+        if (c < 0) c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.5f, true, false, s.in_quest, true, control_profile(s));
         f->kind = F_EDIT, f->ctl = c;
         s.sel = c;
         return;
@@ -1125,12 +1297,12 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             for (Finger &g : s.f)
                 if (g.kind == F_EDIT) (a ? b : a) = &g;
             int c = a && a->ctl >= 0 ? a->ctl : b && b->ctl >= 0 ? b->ctl : -1;
-            if (a && b && c >= 0) s.layout.scale[c] = s.pinch_s0 * hypotf(a->x - b->x, a->y - b->y) / s.pinch_d0, clamp_place(s, c);
+            if (a && b && c >= 0 && c < C_COUNT) s.layout.scale[c] = s.pinch_s0 * hypotf(a->x - b->x, a->y - b->y) / s.pinch_d0, clamp_place(s, c);
         } else if (f->ctl >= ZONE_SEL) {  // a HUD part: in the canvas' units (the HUD keeps its 16:9 shape: squeeze)
             int k = f->ctl - ZONE_SEL;
             Pic pic = picture(s.w, s.h);
             s.layout.zx[k] = std::clamp(s.layout.zx[k] + dx * 1280.0f / pic.w / squeeze(), -1400.0f, 1400.0f);
-            s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h, -800.0f, 800.0f);
+            s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h / squeeze_y(), -800.0f, 800.0f);
             publish_zones(s.layout);
         } else if (f->ctl >= 0) {
             s.layout.x[f->ctl] += (from_right(s.layout, f->ctl) ? -dx : dx) / s.h;
@@ -1162,7 +1334,9 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (pw <= 0 || ph <= 0) return true;
     s.w = (float)pw, s.h = (float)ph;
     float x = e->tfinger.x * s.w, y = e->tfinger.y * s.h;
+    validate_bow_drag(s);
     if (s.edit && !overlay_menu_open()) { edit_event(s, e, x, y); return true; }
+    if (overlay_menu_open() || s.menu || (!g_visible && !s.auto_wait)) cancel_item_gestures(s);
     if (e->type == SDL_EVENT_FINGER_DOWN) {
         Finger *f = nullptr;
         for (Finger &g : s.f)
@@ -1221,12 +1395,21 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 f->done = true;
             }
             f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, ranged_layout_profile(control_profile(s))) : 0;
-            if (c == C_AMMO_UP || c == C_AMMO_DOWN) ammo_step(s, c == C_AMMO_UP ? 1 : -1);
+            if (c == C_AMMO_UP || c == C_AMMO_DOWN) {
+                itembar_touch_cancel();
+                f->part = 2;
+                if (s.menu) f->done = true;
+                else { open_bar(s, *f, now); ammo_step(s, c == C_AMMO_UP ? 1 : -1); }
+            }
             tap_due();
         } else if (arrow) {
-            f->kind = F_MENU;  // (nothing more of it until it lifts)
-            itembar_scroll(arrow), s.item_dir = arrow, s.item_flash = now + 200 * MS, tap_due();
+            itembar_touch_cancel();
+            f->kind = F_ITEM, f->part = 1;
+            open_bar(s, *f, now);
+            itembar_touch_scroll(arrow), s.item_dir = arrow, s.item_flash = now + 200 * MS, tap_due();
+            f->step_at = now + 70 * MS;
         } else if (!s.menu && item.in(x, y)) {
+            itembar_touch_cancel();
             f->kind = F_ITEM;
         } else if (!s.menu && target.in(x, y)) {
             f->kind = F_TARGET;
@@ -1249,6 +1432,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
         } else {
             f->kind = F_CAMERA;
         }
+        begin_bow_drag(s, *f, x, y);
         recompute_held(s);
         static int dbg = -1;  // (MHGU_TOUCH_LOG=1: what each finger landed on)
         if (dbg < 0) dbg = getenv("MHGU_TOUCH_LOG") != nullptr;
@@ -1279,13 +1463,14 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 f->swipe_y = across ? 0 : f->swipe_y - copysignf(step, f->swipe_y);
                 tap_due();
             }
+        } else if (move_bow_drag(s, *f, x, y, now)) {
+            // Charge direction has its own channel; ordinary camera/aim drags stay below.
         } else if (f->kind == F_CAMERA ||
                    (f->kind == F_BUTTON && (f->ctl == C_RFIRE || f->ctl == C_RAIM) && f->moved && !f->done)) {
             s.cam_dx += dx, s.cam_dy += dy, s.cam_ns = now;  // The aim or fire button also owns its camera drag until release.
         } else if (f->kind == F_STICK) stick_to(s, x, y);
-        else if (f->kind == F_ITEM) {  // One horizontal item or vertical ammo step owns this gesture.
-            f->swipe += dx, f->swipe_y += dy;
-            item_swipe(s, *f, now);
+        else if (item_gesture(*f)) {  // Keep the same finger for continuous selection and reversals.
+            item_motion(s, *f, dx, dy, now);
         } else if (f->kind == F_BUTTON && is_dpad(f->ctl)) {  // the d-pad: the direction the thumb is in now
             int part = dpad_part(place(s.layout, f->ctl, s.w, s.h), x, y, f->part);
             if (part != f->part) f->part = part, recompute_held(s), tap_due();
@@ -1305,10 +1490,15 @@ extern "C" bool touch_event(const SDL_Event *e) {
     // up / cancelled. (Where the finger lifted counts too: a quick flick can come with no motion between its down and
     // its up, and on the item bar that was a tap: the item used instead of the bar turned)
     if (hypotf(x - f->x0, y - f->y0) > .025f * s.h) f->moved = true;
-    if (f->kind == F_ITEM && e->type == SDL_EVENT_FINGER_UP && !f->done) {
-        f->swipe += x - f->x, f->swipe_y += y - f->y;
-        item_swipe(s, *f, now);
+    if (e->type == SDL_EVENT_FINGER_UP) move_bow_drag(s, *f, x, y, now);
+    if (s.bow_drag_finger == f - s.f) {
+        bool cancel = e->type == SDL_EVENT_FINGER_CANCELED;
+        mousecam_bow_drag_end(cancel);
+        s.bow_drag_finger = -1;
+        if (cancel) s.bow_drag_hunter = 0;
     }
+    if (item_gesture(*f) && e->type == SDL_EVENT_FINGER_UP && !f->done)
+        item_motion(s, *f, x - f->x, y - f->y, now);
     bool tap = !f->moved && now - f->t0 < 300 * MS && e->type == SDL_EVENT_FINGER_UP;
     bool cancel = e->type == SDL_EVENT_FINGER_CANCELED;
     if (f->kind == F_BUTTON && !f->done && !cancel && now - f->t0 < MIN_PRESS) {  // (a quick tap is held long enough for the game,
@@ -1317,7 +1507,9 @@ extern "C" bool touch_event(const SDL_Event *e) {
     }
     if (f->kind == F_STICK) s.stick_on = false;
     if (f->kind == F_EDIT) s.pinch = false;
-    if (f->kind == F_ITEM && tap && !f->done && fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
+    if (item_gesture(*f) && cancel) cancel_item_gestures(s);
+    if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && !f->part && now - f->t0 < 220 * MS &&
+        fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
         pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
     if (f->kind == F_ARTS && tap && f->part >= 0)  // a tap on a Hunter Art's panel: its d-pad direction
         pulse(s, ART_FACE[f->part], 120 * MS),  // (its d-pad direction)
@@ -1386,6 +1578,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         if (s.in_quest) select_layout(s, TOUCH_WEAPON_LAYOUTS + s.legacy_mode);
     }
     s.in_quest = quest;
+    validate_bow_drag(s);
     if (!quest) enforce_legacy_style(s);
     // (a bow or a gun being aimed draws on the layer of the game's menus, and it is the hunt's controls that it needs)
     bool game = game_menu() && !weapon_aiming(hunter);
@@ -1401,6 +1594,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     if (game != s.menu) {  // Menu input changes, but the quest's controls remain in place under held fingers.
         s.menu = game;
+        if (game) cancel_item_gestures(s);
         static int dbg = -1;
         if (dbg < 0) dbg = getenv("MHGU_TOUCH_LOG") != nullptr;
         if (dbg) fprintf(stderr, "[touch] game menu %s (last seen %.0f ms ago, limit %.0f)\n", game ? "open" : "closed",
@@ -1435,6 +1629,8 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     bool visible = s.edit || (!typing && (mode == TOUCH_ON || (mode == TOUCH_AUTO && !pad_connected && screen)));
     s.auto_wait = !s.edit && !typing && mode == TOUCH_AUTO && !pad_connected && !screen;
     bool was_visible = g_visible.exchange(visible);
+    if (!visible || menu || s.menu || s.edit) cancel_item_gestures(s);
+    if (!visible || menu || s.menu || s.edit) reset_bow_drag(s);
     if (was_visible && !visible) {
         for (Finger &f : s.f)
             if (f.kind == F_BUTTON || f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
@@ -1454,21 +1650,38 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         }
     }
     g_touch_hud = visible && config_live_touch_hud();
+    bool cancel_bar = false;
     for (Finger &f : s.f) {
         if (f.kind == F_RSTICK && !in_mode(C_RSTICK, s.menu, s.in_quest, ranged)) f.kind = F_NONE;
         if (f.kind == F_BUTTON && ((!visible && f.ctl != C_SETTINGS) ||
-                                 !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))))) f.done = true;
+                                 !in_mode(f.ctl, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))))) {
+            if (item_gesture(f)) cancel_bar = true;
+            f.done = true;
+        }
         // The press which draws a sheathed bowgun must end before X can become its reload action.
         if (f.kind == F_BUTTON && f.ctl == C_RFIRE && ranged == WEAPON_BOWGUN && s.drawn == 1 && f.btn == B(BTN_X))
             f.done = true;
     }
+    if (cancel_bar) cancel_item_gestures(s);
+    validate_bow_drag(s);
+    if (visible && !menu && !s.menu && !s.edit) {
+        for (Finger &f : s.f) {
+            if (!item_gesture(f) || f.done) continue;
+            if (f.kind == F_ITEM && !f.bar_open && now - f.t0 >= 220 * MS) open_bar(s, f, now);
+            item_swipe(s, f, now);
+            if (f.kind == F_BUTTON && !f.moved && now >= s.ammo_ready)
+                ammo_step(s, f.ctl == C_AMMO_UP ? 1 : -1);
+        }
+    }
+    if (!bar_held(s) && now >= s.ammo_hold) s.bar_since = s.ammo_ready = s.ammo_hold = 0;
     if (!config_live_touch_show(TB_DPAD)) release_dpad(s);
     if (!visible || !in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s)))) s.stick_on = false;
     recompute_held(s);
     if (!visible) {
         for (Pulse &p : s.pulse) p = {};
         for (Finger &f : s.f) if (f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
-        s.ammo_hold = s.ammo_ready = 0;
+        s.ammo_hold = s.ammo_ready = s.bar_since = 0;
+        s.ammo_pulse = {};
         s.run = false;
     }
     // (while a menu is open the fingers are its mouse: nothing of theirs reaches the game or the menu's controller)
@@ -1483,10 +1696,8 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     uint64_t touch_b = 0;
     for (Pulse &p : s.pulse)
         if (p.until > now && now >= p.from) touch_b |= p.buttons, *buttons |= p.buttons;
-    // Repeat while L stays held; releasing the arrow leaves time for the last step to confirm.
-    for (const Finger &f : s.f)
-        if (f.kind == F_BUTTON && !f.done && (f.ctl == C_AMMO_UP || f.ctl == C_AMMO_DOWN) && now >= s.ammo_ready)
-            ammo_step(s, f.ctl == C_AMMO_UP ? 1 : -1);
+    if (s.ammo_pulse.until > now && now >= s.ammo_pulse.from)
+        touch_b |= s.ammo_pulse.buttons, *buttons |= s.ammo_pulse.buttons;
     if (now < s.ammo_hold) touch_b |= B(BTN_L), *buttons |= B(BTN_L);
     if (s.h > 0 && !s.edit) {
         float k = CAMERA_COUNTS * config_live_touch_camera() / s.h;
@@ -1693,17 +1904,29 @@ extern "C" bool touch_lock_on(void) { return g_lock_shots.load(); }
 extern "C" void touch_reset(void) {
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
+    reset_bow_drag(s);
+    itembar_touch_cancel();
     for (Finger &f : s.f) f.kind = F_NONE;
     for (Pulse &p : s.pulse) p.until = 0;
     s.stick_on = false, s.held = 0, s.cam_dx = s.cam_dy = 0, s.pinch = false;
-    s.ammo_hold = s.ammo_ready = 0;
+    s.ammo_hold = s.ammo_ready = s.bar_since = 0;
+    s.ammo_pulse = {};
 }
 
-extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y) {
+extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
+                                 float offset_x, float offset_y) {
     (void)game_x;
     if (zone < 0 || zone >= TZ_COUNT || g_build.n[zone] >= 32) return;
     int i = g_build.n[zone]++;
     g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
+    EditorZone &z = g_build_editor[zone];
+    float x = canvas_x - offset_x, y = canvas_y - offset_y;
+    if (!z.bounds.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != (g_touch_hud != 0)) {
+        z = {{x, y, x, y, true}, g_render_aspect, g_ui_anchor_aspect, g_touch_hud != 0};
+    } else {
+        z.bounds.x0 = std::min(z.bounds.x0, x), z.bounds.x1 = std::max(z.bounds.x1, x);
+        z.bounds.y0 = std::min(z.bounds.y0, y), z.bounds.y1 = std::max(z.bounds.y1, y);
+    }
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
@@ -1735,8 +1958,12 @@ extern "C" void touch_hud_frame(void) {
         std::lock_guard<std::mutex> l(g_zone_lock);
         g_zones = g_build;
         g_zones.ns = SDL_GetTicksNS();
+        // Editing keeps each part independently; ordinary gameplay still expires its live hit regions.
+        for (int k = 0; k < TZ_COUNT; k++)
+            if (g_build_editor[k].bounds.ok) g_editor_zones[k] = g_build_editor[k];
     }
     memset(g_build.n, 0, sizeof g_build.n);
+    for (EditorZone &z : g_build_editor) z = {};
 }
 
 // ------------------------------------------------------------------ drawing (game thread)
@@ -2440,12 +2667,11 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 
 void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h) {
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 96));
-    Zones z = zones();
     static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
                                                     "Hunter Arts - drag to move", "Lock-on - drag to move"};
     for (int k = 0; k < TZ_COUNT; k++) {
         if (control_profile(s) < 0) break;
-        Rect r = zone_rect(z, k, w, h);
+        Rect r = editor_zone_rect(s.layout, k, w, h);
         if (!r.ok) continue;
         bool sel = s.sel == ZONE_SEL + k;
         dashed_rect(dl, r, sel ? GLOW : IM_COL32(222, 186, 96, 200), (sel ? .006f : .004f) * h);
