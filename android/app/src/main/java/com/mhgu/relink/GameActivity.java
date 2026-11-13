@@ -234,6 +234,12 @@ public class GameActivity extends SDLActivity {
         if (activity != null) activity.startActivity(new Intent(activity, LicensesActivity.class).putExtra(EXTRA_LANGUAGE, language));
     }
 
+    public static void showChangelog(int language) {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, LicensesActivity.class)
+                .putExtra(EXTRA_LANGUAGE, language).putExtra(LicensesActivity.EXTRA_CHANGELOG, true));
+    }
+
     /** Ajustes -> Importar partida. */
     public static void showSaveImport(int language) {
         SDLActivity activity = mSingleton;

@@ -99,6 +99,36 @@ static Dir *scan(const char *path, const char *name, int depth) {
     return dir;
 }
 
+static Dir *prepared_root;
+static char *prepared_path;
+
+static int tree_files(const Dir *d) {
+    int n = d->nfiles;
+    for (int i = 0; i < d->ndirs; i++) n += tree_files(d->dirs[i]);
+    return n;
+}
+
+static void free_tree(Dir *d) {
+    if (!d) return;
+    for (int i = 0; i < d->ndirs; i++) free_tree(d->dirs[i]);
+    for (int i = 0; i < d->nfiles; i++) {
+        File *f = d->files[i];
+        free(f->name); free(f->path); free(f->orig); free(f->rpath); free(f);
+    }
+    free(d->name); free(d->dirs); free(d->files); free(d);
+}
+
+int romfs_prepare_base(const char *base_dir) {
+    free_tree(prepared_root);
+    free(prepared_path);
+    uint64_t t = plat_now_ns();
+    prepared_root = scan(base_dir, "", 0);
+    prepared_path = prepared_root ? strdup(base_dir) : NULL;
+    int n = prepared_root ? tree_files(prepared_root) : 0;
+    LOG("[boot] base romfs: %d files scanned once in %.3f s\n", n, (plat_now_ns() - t) / 1e9);
+    return n;
+}
+
 static bool is_arc(const char *name) {
     size_t nl = strlen(name);
     return nl > 4 && !strcasecmp(name + nl - 4, ".arc");
@@ -266,7 +296,16 @@ static char *rel_path(File *f) {
 }
 
 static bool build(RomfsImage *im, const char *base_dir, const char *const *overlays, int noverlays, bool game) {
-    Dir *root = scan(base_dir, "", 0);
+    uint64_t started = plat_now_ns();
+    Dir *root = NULL;
+    if (game && prepared_root) {
+        if (!strcmp(base_dir, prepared_path)) root = prepared_root;
+        else free_tree(prepared_root);
+        prepared_root = NULL;
+        free(prepared_path);
+        prepared_path = NULL;
+    }
+    if (!root) root = scan(base_dir, "", 0);
     if (!root) { LOG("[romfs] cannot read %s\n", base_dir); return false; }
     // The game looks its files up by their exact names, and some dump tools (yuzu's) spell the top folder NativeNX:
     // the image calls it nativeNX whatever its spelling on disk (issue #147; main.c's game_files_problem catches
@@ -337,10 +376,9 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     for (int i = 0; i < l.nd; i++) {
         Dir *d = l.dirs[i];
         uint8_t *e = dtab + d->off;
-        uint32_t parent = d->parent ? d->parent->off : 0, nl = (uint32_t)strlen(d->name), sib = EMPTY;
-        if (d->parent)
-            for (int k = 0; k + 1 < d->parent->ndirs; k++)
-                if (d->parent->dirs[k] == d) sib = d->parent->dirs[k + 1]->off;
+        uint32_t parent = d->parent ? d->parent->off : 0, nl = (uint32_t)strlen(d->name);
+        // flatten keeps each parent's children together: the next sibling needs no directory-wide search.
+        uint32_t sib = i + 1 < l.nd && l.dirs[i + 1]->parent == d->parent ? l.dirs[i + 1]->off : EMPTY;
         uint32_t h = name_hash(parent, d->name) % nbd;
         put32(e, parent);
         put32(e + 4, sib);
@@ -354,9 +392,8 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     for (int i = 0; i < l.nf; i++) {
         File *f = l.files[i];
         uint8_t *e = ftab + f->off;
-        uint32_t nl = (uint32_t)strlen(f->name), sib = EMPTY;
-        for (int k = 0; k + 1 < f->parent->nfiles; k++)
-            if (f->parent->files[k] == f) sib = f->parent->files[k + 1]->off;
+        uint32_t nl = (uint32_t)strlen(f->name);
+        uint32_t sib = i + 1 < l.nf && l.files[i + 1]->parent == f->parent ? l.files[i + 1]->off : EMPTY;
         uint32_t h = name_hash(f->parent->off, f->name) % nbf;
         put32(e, f->parent->off);
         put32(e + 4, sib);
@@ -374,6 +411,7 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     im->nfiles = l.nf;
     free(l.dirs);
     LOG("[romfs] %d files, %d folders, image %.1f GB\n", l.nf, l.nd, im->size / 1e9);
+    LOG("[boot] romfs image ready in %.3f s (mods %.3f s)\n", (plat_now_ns() - started) / 1e9, mods_ns / 1e9);
     // (version 1.4.0's is 12.3 GB. A copy cut short, with every file there but some of them empty, starts and then fails in
     // ways that look like the port's: seen as a black picture and a call to nothing)
     if (im->size < 12000000000ull) LOG("[romfs] WARNING: smaller than the game's 12.3 GB: some files are probably incomplete\n");

@@ -19,6 +19,8 @@ public class SDLDummyEdit extends View implements View.OnKeyListener
         setFocusableInTouchMode(true);
         setFocusable(true);
         setOnKeyListener(this);
+        // Joystick axes must still reach SDL while the text editor owns focus.
+        setOnGenericMotionListener(SDLActivity.getMotionListener());
     }
 
     void setInputType(int input_type) {

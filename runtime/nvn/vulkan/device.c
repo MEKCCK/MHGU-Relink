@@ -811,7 +811,7 @@ static void surface_destroy(void) {
     }
     if (g_vk.swapchain) vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
     g_vk.swapchain = VK_NULL_HANDLE;
-    SDL_Vulkan_DestroySurface(g_vk.inst, g_vk.surface, NULL);
+    vkDestroySurfaceKHR(g_vk.inst, g_vk.surface, NULL);
     g_vk.surface = VK_NULL_HANDLE;
     surface_window = NULL;
 }
@@ -820,19 +820,22 @@ static void surface_destroy(void) {
 // given back while the app is away) and makes one on the window Android has now.
 static bool surface_ready(void) {
     void *win = android_window();
-    if (win && win == surface_window && !surface_lost) return true;
+    if (win && win == surface_window && !surface_lost) {
+        if (!g_vk.swapchain) create_swapchain();
+        return g_vk.swapchain && !surface_lost;
+    }
     if (g_vk.swapchain) LOG("[vk] the window went away: surface closed\n");
     if (g_vk.surface) surface_destroy();
     surface_lost = false;
     if (!win) return false;
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) {
+    if (!make_surface()) {
         LOG("[vk] no new surface yet: %s\n", SDL_GetError());
         g_vk.surface = VK_NULL_HANDLE;
         return false;
     }
     surface_window = win;
     create_swapchain();
-    return !surface_lost;
+    return g_vk.swapchain && !surface_lost;
 }
 #endif
 
@@ -847,18 +850,9 @@ volatile int g_android_window_state;
 static void android_window_check(void) {
     int st = __atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE);
     if (st != 2) return;
-    vk_wait_seq(vk_pending_seq() - 1);
-    vkDeviceWaitIdle(g_vk.dev);
-    if (g_vk.swapchain) vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
-    g_vk.swapchain = VK_NULL_HANDLE;
-    if (g_vk.surface) vkDestroySurfaceKHR(g_vk.inst, g_vk.surface, NULL);
-    g_vk.surface = VK_NULL_HANDLE;
-    if (!make_surface()) {
-        LOG("[vk] SDL_Vulkan_CreateSurface after resume: %s\n", SDL_GetError());
-        return;  // (tried again next frame)
-    }
-    create_swapchain();
-    if (g_vk.swapchain) {
+    // Android may reuse its window pointer. Use the same ordered teardown as surface loss.
+    surface_lost = true;
+    if (surface_ready()) {
         int was = 2;  // (unless it went to the background again meanwhile: that stays for frame_begin)
         __atomic_compare_exchange_n(&g_android_window_state, &was, 0, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
         LOG("[vk] window back: surface and swapchain made again\n");
@@ -911,11 +905,22 @@ static bool frame_begin(void) {
     if (!acquire_sem[slot]) acquire_sem[slot] = binary_semaphore();
     vk_wait_site(5);  // (exec.c W_PRESENT)
     vk_wait_seq(slot_seq[slot]);
-    VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
+    // A background transition can strand an acquire on a window Android has stopped consuming.
+#ifdef __ANDROID__
+    const uint64_t acquire_timeout = 100000000ull;
+#else
+    const uint64_t acquire_timeout = UINT64_MAX;
+#endif
+    VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, acquire_timeout, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         recreate_swapchain();
-        r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
+#ifdef __ANDROID__
+        if (surface_lost || __atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE)) return false;
+#endif
+        if (!g_vk.swapchain) return false;
+        r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, acquire_timeout, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
     }
+    if (r == VK_TIMEOUT || r == VK_NOT_READY) return false;
 #ifdef __ANDROID__
     if (r == VK_ERROR_SURFACE_LOST_KHR) { surface_lost = true; return false; }
 #endif
@@ -1111,6 +1116,7 @@ void backend_present(NvnTexture *t) {
     } else {
         vk_submit_extra(VK_NULL_HANDLE, VK_NULL_HANDLE);
     }
+    vk_trace_frame(t);
     g_frames++;
     g_present_count = g_frames;
 #ifdef __ANDROID__
@@ -1189,7 +1195,7 @@ void backend_init(void) {
 #ifdef __ANDROID__
     while (!android_window()) SDL_Delay(50);  // (minimised right at the start: no window until the app comes back)
 #endif
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+    if (!make_surface()) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
 #ifdef __ANDROID__
     surface_window = android_window();
 #endif

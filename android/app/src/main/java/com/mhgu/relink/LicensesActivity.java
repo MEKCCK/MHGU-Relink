@@ -20,9 +20,10 @@ import java.util.Arrays;
 
 /** Ajustes -> Licencias: los textos de assets/licenses, con los colores de las ventanas del juego. */
 public class LicensesActivity extends Activity {
+    static final String EXTRA_CHANGELOG = "com.mhgu.relink.CHANGELOG";
     private static final int WINE = Color.rgb(38, 18, 14), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
-    private boolean es, zh;
+    private boolean es, zh, changes;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -31,6 +32,7 @@ public class LicensesActivity extends Activity {
         int language = RecompLanguage.from(this);
         es = language == 1;
         zh = language == 2;
+        changes = getIntent().getBooleanExtra(EXTRA_CHANGELOG, false);
         int pad = dp(16);
 
         LinearLayout page = new LinearLayout(this);
@@ -41,7 +43,8 @@ public class LicensesActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText(zh ? "许可证" : es ? "LICENCIAS" : "LICENSES");
+        title.setText(changes ? (zh ? "更新日志" : es ? "NOVEDADES" : "CHANGELOG")
+                              : (zh ? "许可证" : es ? "LICENCIAS" : "LICENSES"));
         title.setTextColor(GOLD);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -60,10 +63,10 @@ public class LicensesActivity extends Activity {
         page.addView(top);
 
         TextView body = new TextView(this);
-        body.setText(allTexts());
+        body.setText(changes ? changelog() : allTexts());
         body.setTextColor(CREAM);
-        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, changes ? 14 : 11);
+        body.setTypeface(changes ? Typeface.DEFAULT : Typeface.MONOSPACE);
         ScrollView scroll = new ScrollView(this);
         scroll.setPadding(0, pad, 0, 0);
         scroll.addView(body);
@@ -73,6 +76,19 @@ public class LicensesActivity extends Activity {
 
     private int dp(int v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+    }
+
+    private String changelog() {
+        String name = "changelog." + (zh ? "zh" : es ? "es" : "en") + ".txt";
+        try (InputStream in = getAssets().open(name)) {
+            ByteArrayOutputStream text = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) text.write(buf, 0, n);
+            return text.toString("UTF-8");
+        } catch (Exception e) {
+            return zh ? "无法读取更新日志。" : es ? "No se pudieron leer las novedades." : "Could not read the changelog.";
+        }
     }
 
     private String allTexts() {

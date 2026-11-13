@@ -11,7 +11,7 @@
 static SDL_Window *window;
 static Config cfg;
 static bool settings_open;
-static int drawn, ranged, profile, bow_type;
+static int drawn, ranged, profile, bow_type, weapon_override = -1;
 static bool in_quest = true;
 static bool aiming, lock_on, persistent_lock_on, hunt_camera = true;
 static int target_cycles;
@@ -25,7 +25,7 @@ SDL_Window *ui_window(void) { return window; }
 uint32_t weapon_hunter(void) { return 0; }
 int weapon_drawn(void) { return drawn; }
 int weapon_ranged(uint32_t) { return ranged; }
-int weapon_type(void) { return ranged == WEAPON_BOWGUN ? 4 : ranged == WEAPON_BOW ? 10 : 0; }
+int weapon_type(void) { return weapon_override >= 0 ? weapon_override : ranged == WEAPON_BOWGUN ? 4 : ranged == WEAPON_BOW ? 10 : 0; }
 int presence_in_quest(void) { return in_quest; }
 bool weapon_aiming(uint32_t) { return aiming; }
 bool weapon_moving(uint32_t) { return true; }
@@ -80,7 +80,7 @@ static void fresh(int w = 1280, int h = 720) {
     screen_w = w; screen_h = h; assert(SDL_SetWindowSize(window, w, h)); SDL_PumpEvents();
     g_render_aspect=(float)w/h;
     touch_reset(); g_s = {}; g_s.loaded = true; g_s.layout = defaults(0); g_s.saved = g_s.layout;
-    profile = 0; in_quest = true; g_s.in_quest = true; g_s.detected_weapon = 0;
+    profile = 0; weapon_override = -1; in_quest = true; g_s.in_quest = true; g_s.detected_weapon = 0;
     g_s.touched = true; g_s.w = (float)w; g_s.h = (float)h; g_s.sel = -1;
     cfg = {}; cfg.touch_controls = TOUCH_ON; cfg.touch_auto_r = 1;
     const int shown[] = TOUCH_SHOW_DEFAULT; std::copy(shown, shown + TB_COUNT, cfg.touch_show);
@@ -219,10 +219,10 @@ static void dpad_visibility(int w, int h) {
     ImVec2 art = hud(TZ_ARTS, 640, 280);
     event(SDL_EVENT_FINGER_DOWN, 7, art.x, art.y); assert(finger(g_s,7)->kind == F_ARTS);
     event(SDL_EVENT_FINGER_UP, 7, art.x, art.y); assert(update().b & DPAD_UP);
-    touch_reset(); game_menu_state(true); assert(!in_mode(C_DPAD,true,true));
+    touch_reset(); game_menu_state(true); assert(!in_mode(C_HDPAD,true,true));
     at(SDL_EVENT_FINGER_DOWN, C_DPAD_TOGGLE, 8); at(SDL_EVENT_FINGER_UP, C_DPAD_TOGGLE, 8);
-    assert(in_mode(C_DPAD,true,true)); at(SDL_EVENT_FINGER_DOWN,C_DPAD,9,0,-.65f); assert(update().b & DPAD_UP);
-    at(SDL_EVENT_FINGER_CANCELED,C_DPAD,9,0,-.65f); game_menu_state(false);
+    assert(in_mode(C_HDPAD,true,true)); at(SDL_EVENT_FINGER_DOWN,C_HDPAD,9,0,-.65f); assert(update().b & DPAD_UP);
+    at(SDL_EVENT_FINGER_CANCELED,C_HDPAD,9,0,-.65f); game_menu_state(false);
     assert(in_mode(C_HDPAD,false,true));
     cfg.touch_controls=TOUCH_OFF; assert(update(DPAD_DOWN,true).b == DPAD_DOWN);
     assert(drawn_vertices(toggle.c,toggle.r) == 0);
@@ -306,8 +306,9 @@ static void nonquest_layouts() {
         assert(g_s.layout_profile==TOUCH_WEAPON_LAYOUTS);
     }
     in_quest=true; update(); game_menu_state(true);
-    assert(in_mode(C_MPILL,true,true) && !in_mode(C_LAYOUT,true,true));
-    puts("PASS: all four presets cycle in villages and game menus, quest menus retain confirm/back controls");
+    assert(!in_mode(C_MPILL,true,true) && !in_mode(C_LAYOUT,true,true));
+    assert(in_mode(C_HEAVY,true,true) && in_mode(C_DODGE,true,true));
+    puts("PASS: all four presets cycle in villages and game menus; quest menus keep the attack buttons");
 }
 static void quest_attack_styles() {
     fresh();
@@ -347,6 +348,47 @@ static void quest_attack_styles() {
         at(SDL_EVENT_FINGER_CANCELED, C_LIGHT);
     }
     puts("PASS: quest melee and Prowler profiles keep Attacks: buttons and ignore old pill/corner files; ranged profiles stay compatible");
+}
+static void fixed_quest_menus() {
+    for (const auto size : {ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080)}) {
+        for (int p=0;p<TOUCH_WEAPON_LAYOUTS;++p) {
+            fresh((int)size.x,(int)size.y);
+            save_layout(defaults(p),p);
+            weapon_override=PROFILE_WEAPON[p];
+            ranged=weapon_override==4||weapon_override==6?WEAPON_BOWGUN:weapon_override==10?WEAPON_BOW:0;
+            drawn=1; update(); assert(g_s.layout_profile==p);
+            const Layout layout=g_s.layout;
+            bool visible[C_COUNT]; Geo geometry[C_COUNT];
+            for(int c=0;c<C_COUNT;++c) {
+                visible[c]=in_mode(c,false,true);
+                geometry[c]=place(g_s.layout,c,(float)screen_w,(float)screen_h);
+            }
+            const int control=ranged?C_RDODGE:C_HEAVY;
+            const uint64_t button=ranged?B(BTN_B):B(BTN_A);
+            at(SDL_EVENT_FINGER_DOWN,control); assert(update().b==button);
+            for(int step=0;step<6;++step) {
+                game_menu_state(step%2==0);
+                assert(update().b==button && !finger(g_s,1)->done && g_s.layout_profile==p);
+                assert(!memcmp(&layout,&g_s.layout,sizeof layout));
+                for(int c=0;c<C_COUNT;++c) {
+                    const Geo after=place(g_s.layout,c,(float)screen_w,(float)screen_h);
+                    assert(visible[c]==in_mode(c,g_s.menu,true));
+                    assert(after.c.x==geometry[c].c.x && after.c.y==geometry[c].c.y && after.r==geometry[c].r);
+                }
+            }
+            at(SDL_EVENT_FINGER_CANCELED,control); assert(!update().b);
+            game_menu_state(true);
+            cfg.touch_show[TB_DPAD]=1;
+            at(SDL_EVENT_FINGER_DOWN,C_HDPAD,2,.75f,0); assert(update().b&B(BTN_RIGHT));
+            at(SDL_EVENT_FINGER_CANCELED,C_HDPAD,2); assert(!update().b);
+            touch_edit_begin(); update();
+            editor_click(E_SET); assert(g_s.layout_profile==p && g_s.in_quest);
+            assert(!in_editor(C_LAYOUT,true,p));
+            editor_click(E_CANCEL);
+        }
+    }
+    fresh();
+    puts("PASS: all 15 quest profiles at 16:9/21:9/32:9 keep button visibility/geometry and held input through menu transitions; navigation works and editor cannot switch presets");
 }
 static void ranged_controls() {
     fresh(); ranged=WEAPON_BOWGUN; drawn=1; update();
@@ -469,10 +511,10 @@ static void persistent_target_lock() {
 static void show_settings() {
     fresh(); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),1);
     struct Pair { int setting, hunt, menu; };
-    const Pair pairs[]={{TB_ATTACKS,C_HEAVY,C_MPILL},{TB_DODGE,C_DODGE,C_MPILL},{TB_GUARD,C_R,C_MR},
-        {TB_SHEATHE,C_SHEATHE,C_FY},{TB_PLUS,C_MENU,C_MENU},{TB_MINUS,C_HMINUS,C_MINUS},
-        {TB_DPAD,C_HDPAD,C_DPAD},{TB_L,C_L,C_ML},{TB_ZL,C_ZL,-1},{TB_ZR,C_ZR,-1},
-        {TB_L3,C_MAP,-1},{TB_R3,C_R3,-1},{TB_STICK,C_STICK,C_STICK},{TB_MENU_ZL,-1,C_MZL},{TB_MENU_ZR,-1,C_MZR}};
+    const Pair pairs[]={{TB_ATTACKS,C_HEAVY,C_HEAVY},{TB_DODGE,C_DODGE,C_DODGE},{TB_GUARD,C_R,C_R},
+        {TB_SHEATHE,C_SHEATHE,C_SHEATHE},{TB_PLUS,C_MENU,C_MENU},{TB_MINUS,C_HMINUS,C_HMINUS},
+        {TB_DPAD,C_HDPAD,C_HDPAD},{TB_L,C_L,C_L},{TB_ZL,C_ZL,C_ZL},{TB_ZR,C_ZR,C_ZR},
+        {TB_L3,C_MAP,C_MAP},{TB_R3,C_R3,C_R3},{TB_STICK,C_STICK,C_STICK}};
     for (const Pair &p:pairs) {
         for (int menu=0;menu<=1;++menu) {
             const int c=menu?p.menu:p.hunt; if(c<0)continue;
@@ -481,6 +523,8 @@ static void show_settings() {
             cfg.touch_show[p.setting]=1;
         }
     }
+    for (int c : {C_DPAD,C_MPILL,C_ML,C_MR,C_MZL,C_MZR,C_MINUS,C_FY})
+        assert(!in_mode(c,true,true));
     g_town_ns=SDL_GetTicksNS(); cfg.touch_show[TB_ZL]=0; assert(!in_mode(C_ZL,false,true));
     g_style=STYLE_CORNER; cfg.touch_show[TB_GUARD]=0;
     assert(!in_mode(C_CORNER,false,true)&&!in_mode(C_R,false,true)&&in_mode(C_ATTACK,false,true));
@@ -570,7 +614,7 @@ int main() {
     ImGui::CreateContext(); ImGuiIO &io=ImGui::GetIO();io.IniFilename=nullptr;io.LogFilename=nullptr;
     io.BackendFlags|=ImGuiBackendFlags_RendererHasTextures;io.Fonts->AddFontDefaultVector();
     touch_button_sources();item_gestures();auto_r();floating_stick();dpad_visibility(1280,720);dpad_visibility(640,360);layout_roundtrip();show_settings();profile_layouts();quest_attack_styles();
-    nonquest_layouts();ranged_controls();ammo_repeat();target_switch(1280,720);target_switch(2520,1080);target_switch(3840,1080);persistent_target_lock();
+    nonquest_layouts();fixed_quest_menus();ranged_controls();ammo_repeat();target_switch(1280,720);target_switch(2520,1080);target_switch(3840,1080);persistent_target_lock();
     ImGui::DestroyContext();
     fresh();cfg.touch_show[TB_DPAD]=0;preview("touch-host-dpad-hidden-1280x720.png");
     cfg.touch_show[TB_DPAD]=1;update();preview("touch-host-dpad-shown-1280x720.png");

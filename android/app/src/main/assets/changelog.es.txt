@@ -1,0 +1,46 @@
+MHGU Relink 0.2.2 · 2026-11-13
+
+r3: Giro automático con el stick izquierdo centrado
+Los disparos y las cargas con fijación giran hacia el monstruo seleccionado solo cuando el stick izquierdo está centrado. Al moverlo, el jugador controla la dirección; al soltarlo durante una carga válida, la ayuda vuelve sin empezar desde parado ni pulsar de nuevo el ataque. Se mantienen las comprobaciones de cancelación, evasión, envainado y apuntado manual. El seguimiento persistente al apuntar usa la misma condición; no abre la mira ni cambia las entradas de los movimientos.
+
+r2: Mando y diagnóstico gráfico
+Los ejes y la cruceta del mando se siguen enviando al juego cuando el editor de texto conserva el foco después de modificar una dirección IP. Ya no hace falta cambiar de aplicación para recuperar la dirección.
+Se añade Ajustes → Aplicación → Registrar diagnóstico gráfico. Cierra Ajustes para registrar el estado de seis fotogramas consecutivos y después usa Compartir registro. Se detiene automáticamente y está desactivado por defecto; no cambia las opciones gráficas. El oscurecimiento intermitente del fondo en el menú de equipo sigue en investigación; el diagnóstico no confirma una solución.
+
+Fijación y fijación persistente
+Girar normalmente ya no activa el seguimiento de la mira. El arco y las ballestas ligera y pesada siguen al monstruo seleccionado solo al entrar manualmente en el estado de apuntado del juego. El apuntado persistente ya no sobrescribe los ángulos de la cámara normal.
+
+Botones fijos en misiones
+Abrir o cerrar los menús conserva los botones, sus posiciones y las pulsaciones mantenidas. Las armas cuerpo a cuerpo y el modo Gatador conservan Ataque: botones; las armas a distancia mantienen sus controles propios. No se puede cambiar de diseño durante una misión, tampoco desde el editor. Fuera de las misiones siguen disponibles los cuatro diseños. Las cargas y cinemáticas conservan el perfil de misión hasta confirmar la entrada en una aldea.
+
+Estabilidad en viajes y cinemáticas
+Se publica la notificación de espera antes de liberar el mutex del juego para evitar perder una señal. El decodificador espera a que terminen las llamadas activas antes de liberar los búferes y su mutex, rechaza llamadas tardías y corrige la destrucción repetida y el borrado del identificador del juego.
+
+Volver desde otra aplicación
+La recuperación de la ventana usa un único orden de liberación y actualiza el registro de la ventana, evitando destruirla y recrearla dos veces al volver. Tanto el inicio como la recuperación usan el controlador seleccionado. La espera de una imagen de pantalla tiene un límite de 100 ms para continuar en el siguiente fotograma si se bloquea la ventana. Las sesiones en línea siguen ejecutándose en segundo plano.
+
+Se conservan las correcciones de shaders, inicio, traducción y controles, con una marca de compilación 0.2.2 en el registro. Las pruebas en el PC y de compilación cubren estos cambios; la pantalla negra, los viajes a aldeas, la recuperación desde segundo plano y la cámara aún requieren pruebas en los dispositivos afectados.
+
+MHGU Relink 0.2.1 · 2026-11-13
+
+Pantalla negra en algunos dispositivos
+Los shaders normales ya no exigen una extensión opcional de LOD de sombras que compiladores antiguos rechazan incluso sin usarla. Solo se declara cuando se utiliza. Las traducciones antiguas se invalidan automáticamente; el primer inicio vuelve a preparar las cachés afectadas.
+
+Inicio
+La comprobación de archivos y el índice de recursos comparten un solo recorrido de carpetas, sin recorrer más de 35.000 archivos dos veces. Se comprueban en cada inicio; no se reutiliza un índice de otra ejecución.
+El índice ya no busca repetidamente en carpetas grandes para enlazar sus entradas. Se conservan las comprobaciones, el orden de los mods y las cachés de shaders.
+El registro indica el tiempo de cada etapa. La mejora real requiere comparar ambas versiones en el mismo dispositivo; el primer inicio aún debe leer los archivos y preparar las cachés.
+
+Novedades
+En Ajustes → App → Novedades, en español, inglés y chino.
+
+Fijación persistente
+Nueva opción de controles, desactivada por defecto. Activa la fijación y la fijación persistente para mantener el objetivo elegido hasta cancelarlo. El arco y las ballestas ligera y pesada siguen al monstruo seleccionado cuando entras manualmente en el modo de apuntado.
+Toca el icono del objetivo para cambiar de monstruo. Mantén pulsado al menos medio segundo y suelta, o pulsa el stick derecho del mando, para cancelar la fijación.
+
+Se conservan las correcciones anteriores
+Botones táctiles durante las cinemáticas.
+En misiones, las armas cuerpo a cuerpo y el modo Gatador usan Ataque: botones; fuera de las misiones siguen disponibles los cuatro diseños.
+Disparo independiente, apuntado manual, disparo agachado con X+A, selección de munición y giroscopio.
+Parpadeo de la mira y alineación de los bordes en pantallas 21:9 y 32:9.
+Traducción al chino de las ayudas, las armas y los botones del mando.

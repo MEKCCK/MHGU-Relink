@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 static bool menu_open, input_active, keyboard_shown, keyboard_enabled = true;
 static int starts, stops;

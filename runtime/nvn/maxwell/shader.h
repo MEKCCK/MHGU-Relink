@@ -23,7 +23,7 @@
 //  - compute: `layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;` (spec constants 0..2).
 //  - extensions: GL_EXT_shader_explicit_arithmetic_types_int64 (64-bit carry / address math -> shaderInt64),
 //    GL_KHR_shader_subgroup_basic/_shuffle/_shuffle_relative (SHFL, FSWZADD lane: fragment/compute subgroup
-//    support), GL_EXT_texture_shadow_lod (explicit-LOD array / cube shadow lookups).
+//    support), GL_EXT_texture_shadow_lod only for explicit-LOD array / cube shadow lookups.
 //  - not in GLSL: the maxwell_dbg_vs position dump (buffer 29) is MSL only.
 #pragma once
 #include <stdbool.h>

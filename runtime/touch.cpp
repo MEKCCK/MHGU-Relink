@@ -9,10 +9,9 @@
 //   - while a menu of the game's is open (the pause menu, the item pouch, a shop, a yes / no: its windows are drawn
 //     on layer 97, nvn/vulkan/exec.c touch_hud_menu), the left stick keeps the selected mode and moves the hunter. A
 //     screen drag outside the controls moves the cursor with d-pad taps; the stick does not select menu entries
-//     where the
-//     menu has its own fixed layout: a d-pad at its saved hunt position; a confirm (A) / back (B) pill and its X, Y,
-//     L and R controls at the default attack position; Minus at the default map position. A screen drag elsewhere also
-//     moves the cursor, a step every so far, as a list on a phone
+//     The visible buttons keep their layout and positions when menus open or close. A screen drag elsewhere also
+//     moves the cursor, a step every so far, as a list on a phone. In quests the layout selector is disabled;
+//     melee and Prowler keep separate attack buttons, ranged weapons keep their own controls
 //   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): a tap on the item bar (bottom middle)
 //     uses the item, a swipe on it turns the bar; a tap on a Hunter Art's panel (top right) performs it; a tap on the
 //     target camera's icon enables the lock-on, then cycles the target (the camera keeps turning to the selected monster;
@@ -213,15 +212,16 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
 bool is_combo(int i) { return i >= C_COMBO && i <= C_COMBO_END; }
 bool is_tab(int i) { return i == C_ML || i == C_MR || i == C_MZL || i == C_MZR; }  // (the menu's shoulders, drawn as tabs)
 bool is_dpad(int i) { return i == C_DPAD || i == C_HDPAD; }
-bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {  // (the menus: the d-pad, the layout switch, the diamond, the shoulders and the settings)
+bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
     if (ranged < 0) ranged = g_ranged.load();
-    menu = menu && in_quest;  // Outside quests the selected one of the four presets also controls shops and other menus.
+    // Menu detection still controls cursor gestures and lock-on, never the visible buttons or their positions.
+    menu = false;
     // (no run button: the thumb past the stick's rim runs; what a hunt can do without is off until asked for: [Touch] Show*)
     if (i == C_RUN) return false;
     int show = show_setting(i);
     if (show >= 0 && !config_live_touch_show(show)) return false;
     if (i == C_DPAD_TOGGLE) return true;
-    if (i == C_LAYOUT) return !menu;
+    if (i == C_LAYOUT) return !in_quest;
     if (i == C_HDPAD) return !menu;
     if (i == C_DPAD) return menu;
     if (i == C_MPILL) return menu && config_live_touch_show(TB_DODGE);
@@ -244,8 +244,7 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {  // (the menus:
 }
 bool in_editor(int i, bool in_quest, int profile) {
     if (i == C_HDPAD) return config_live_touch_controls() != TOUCH_OFF && config_live_touch_show(TB_DPAD);
-    if (i == C_LAYOUT) return true;
-    if (i == C_MZL || i == C_MZR) return config_live_touch_show(show_setting(i));
+    if (i == C_LAYOUT) return !in_quest;
     return in_mode(i, false, in_quest, ranged_layout_profile(profile));
 }
 const ImVec2 PILL_U(.766f, -.643f);  // the pill's axis on the screen (y down): up and to the right
@@ -875,13 +874,12 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         editor_panel(s.w, s.h, &panel, btn);
         for (int i = 0; i < E_COUNT; i++)
             if (btn[i].in(x, y)) {
-                if (i == E_STYLE && editor_style_locked(s)) return;
+                if ((i == E_STYLE && editor_style_locked(s)) || (i == E_SET && s.in_quest)) return;
                 f->kind = F_MENU;  // (held until it lifts: nothing under it moves)
                 if (i == E_SMALLER || i == E_BIGGER) {
                     if (s.sel >= 0 && s.sel < C_COUNT) s.layout.scale[s.sel] += i == E_BIGGER ? .1f : -.1f, clamp_place(s, s.sel);
                 } else if (i == E_SET) {
-                    if (s.in_quest) select_layout(s, (s.layout_profile + 1) % TOUCH_WEAPON_LAYOUTS);
-                    else select_legacy_mode(s, s.legacy_mode + 1);
+                    if (!s.in_quest) select_legacy_mode(s, s.legacy_mode + 1);
                     s.sel = -1;
                 } else if (i == E_STYLE) {
                     next_style(s);
@@ -1137,8 +1135,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     f->kind = F_NONE;
     recompute_held(s);
     if (cycle_layout) {
-        if (s.in_quest) select_layout(s, (s.layout_profile + 1) % TOUCH_WEAPON_LAYOUTS);
-        else select_legacy_mode(s, s.legacy_mode + 1);
+        if (!s.in_quest) select_legacy_mode(s, s.legacy_mode + 1);
     }
     return true;
 }
@@ -1178,7 +1175,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
             if (f.kind == F_BUTTON && !in_mode(f.ctl, s.menu, s.in_quest, ranged)) f.done = true;
         recompute_held(s);
     }
-    if (game != s.menu) {  // (the game's menu opened or closed: the other layout; fingers on what it lacks let go)
+    if (game != s.menu) {  // Menu input changes, but the quest's controls remain in place under held fingers.
         s.menu = game;
         static int dbg = -1;
         if (dbg < 0) dbg = getenv("MHGU_TOUCH_LOG") != nullptr;
@@ -2197,7 +2194,8 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
     const char *const LABEL[E_COUNT] = {"-", "+", s.in_quest ? "Next weapon" : "Next layout", STYLE_LABEL[s.layout.style],
                                         "Defaults", "Cancel", "Save"};
     for (int i = 0; i < E_COUNT; i++) {
-        bool off = ((i == E_SMALLER || i == E_BIGGER) && s.sel < 0) || (i == E_STYLE && editor_style_locked(s));
+        bool off = ((i == E_SMALLER || i == E_BIGGER) && s.sel < 0) || (i == E_STYLE && editor_style_locked(s)) ||
+                   (i == E_SET && s.in_quest);
         bool lit = false;
         for (const Finger &f : s.f)
             if (f.kind == F_MENU && btn[i].in(f.x, f.y)) lit = true;

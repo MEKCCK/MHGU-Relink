@@ -1,0 +1,46 @@
+MHGU Relink 0.2.2 · 2026-11-13
+
+r3: Automatic turning with the left stick centered
+Locked ranged attacks and charges turn toward the selected monster only while the left stick is centered. Pushing it leaves direction to the player; releasing it during a valid charge resumes assistance without a new standing start or attack press. Cancel, dodge, sheathe and manual-aim checks remain. Persistent scoped tracking uses the same left-stick condition; it does not open aiming mode or change move inputs.
+
+r2: Controller input and graphics diagnostics
+Forward joystick and hat motion while the text editor retains focus after editing a network IP address, so direction input no longer requires switching apps to recover.
+Add Settings → App → Record graphics diagnostic. Close Settings to record rendering state for six consecutive frames, then use Share log. Recording stops automatically and is off by default; graphics settings are unchanged. Intermittent equipment-menu background darkening is still under investigation; this diagnostic does not establish a fix.
+
+Combined lock-on and persistent lock-on
+Ordinary turning no longer triggers reticle tracking. Bow, light bowgun and heavy bowgun track the selected monster only after you manually enter the game's native aiming state. Persistent aiming no longer overwrites the normal camera angles.
+
+Fixed quest buttons
+Opening or closing game menus keeps the same buttons, positions and held inputs. Melee and Prowler keep Attacks: buttons; ranged weapons keep their dedicated controls. Quest preset switching is disabled, including in the editor. All four presets remain available outside quests. Loading and cutscenes retain the quest profile until a village is confirmed.
+
+Travel and cutscene stability
+Publish the wait notification before releasing the guest mutex to prevent a missed wake-up. Decoder destruction now waits for active callbacks before freeing buffers and its mutex, rejects late calls, and fixes repeated destruction and guest handle clearing.
+
+Returning from another app
+Window recovery now uses one ordered resource teardown and updates the window record, avoiding duplicate destruction and recreation on resume. Initial creation and recovery both use the selected driver. Acquiring a display image has a 100 ms timeout so a stalled window can return control to the next frame. Online sessions continue running in the background.
+
+Previous shader, startup, translation and input fixes are retained, with a recognizable 0.2.2 build log. Host regressions and build checks cover these changes; black screens, village travel, background recovery and camera behavior still need testing on affected devices.
+
+MHGU Relink 0.2.1 · 2026-11-13
+
+Black screen on some devices
+Ordinary shaders no longer require an unused optional shadow-LOD extension that older compilers reject. The extension is declared only when used. Old translated programs are invalidated automatically; the first launch rebuilds the affected caches.
+
+Startup
+Game-file validation and the resource index share one directory scan instead of walking over 35,000 files twice. Files are checked on every launch; no index is reused across launches.
+Resource indexing no longer searches large directories repeatedly to link entries. Game-file checks, mod order and shader caches are preserved.
+Startup stages now report their duration in the log. The actual improvement needs comparison on the same device; the first launch still reads game files and prepares caches.
+
+Changelog
+Available under Settings → App → Changelog in English, Spanish and Chinese.
+
+Persistent lock-on
+New Controls option, off by default. Enable Lock on and Persistent lock-on to keep a manually selected target until you cancel it. Bow, light bowgun and heavy bowgun aim follows that monster after you manually enter aiming mode.
+Tap the target icon to switch monsters. Hold for at least half a second and release, or press the controller's right stick, to cancel lock-on.
+
+Previous fixes retained
+Touch buttons during cutscenes.
+Melee and Prowler use the Attacks: buttons layout in quests; all four layouts remain available outside quests.
+Separate fire, manual aim, X+A crouching fire, ammo selection and gyro aiming for ranged weapons.
+Widescreen scope flicker and edge alignment fixes for 21:9 and 32:9.
+Chinese translations for settings help, weapons and controller buttons.

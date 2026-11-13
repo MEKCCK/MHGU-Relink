@@ -170,7 +170,9 @@ void presence_tick(void) {
     int town = sane(gc) ? LD8(gc + GC_TOWN) : -1;
     uint32_t quest = town == TOWN_NONE && sane(qd) ? LD32(qd + 8) : 0;
     int place = !sane(pd) ? -1 : town == TOWN_NONE ? (quest ? 100 : -2) : town;  // -1 menus, 100 quest, -2 between
-    SDL_SetAtomicInt(&presence_quest, place == 100);
+    // Loading and cutscenes can temporarily remove the hunter. Only a confirmed scene may change the touch profile.
+    if (town == TOWN_NONE && quest) SDL_SetAtomicInt(&presence_quest, 1);
+    else if (place >= 0 && place < 100) SDL_SetAtomicInt(&presence_quest, 0);
     // (no hunter while loading too: the menus only after a while; loading, the arena's waiting room...: what was
     // shown stays)
     static uint64_t no_hunter;
@@ -181,6 +183,7 @@ void presence_tick(void) {
         return;
     }
     if (place == -1 && last_place != -1 && last_place != -2 && now - no_hunter < MENU_NS) return;
+    if (place == -1 && town != TOWN_NONE && now - no_hunter >= MENU_NS) SDL_SetAtomicInt(&presence_quest, 0);
     SDL_SetAtomicInt(&presence_place, place);
     if (place != last_place && place >= 0 && place < 100) LOG("[discord] town %d\n", place);
     if (place != last_place || quest != last_quest) since = (int64_t)time(NULL);

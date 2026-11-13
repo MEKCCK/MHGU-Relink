@@ -23,6 +23,9 @@
 #include "../nvn.h"
 #include "../maxwell/shader.h"
 
+void vk_trace_request(void);  // Any thread; capture starts after settings close.
+void vk_trace_frame(NvnTexture *t);  // Render thread, at present end before frame counters advance.
+
 // The most window images a swapchain may have. Android's swapchain makes more than asked for (it adds the compositor's
 // spare buffers to minImageCount): 8 was too few on a Mali-G57 (Helio G100), whose image 8 then had no framebuffer.
 

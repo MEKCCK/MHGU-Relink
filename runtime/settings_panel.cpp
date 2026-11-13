@@ -2573,6 +2573,10 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
         action(r, "log.share", tr("Share log"), []() { ui_request_share_log(); });
         r.back().help = tr("Sends the game's log to the app you choose, for whoever is helping you with a problem.");
+        action(r, "log.graphics", tr("Record graphics diagnostic"), []() { vk_trace_request(); });
+        r.back().help = tr("Close Settings to record rendering state for six game frames, then use Share log. Recording stops automatically.");
+        action(r, "changelog", tr("Changelog"), []() { ui_request_changelog(); });
+        r.back().help = tr("Read the changes in this version.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });
 #endif
         if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)

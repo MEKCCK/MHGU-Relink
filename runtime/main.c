@@ -14,6 +14,7 @@
 #include "hle/mousecam.h"
 #include "kernel.h"
 #include "mods.h"
+#include "romfs.h"
 #include "engine_module.h"
 #include "app_actions.h"
 #include "net/discord.h"
@@ -65,6 +66,7 @@ __attribute__((constructor(101))) static void reserve_guest_space(void) {
 }
 
 static void boot(const char *root) {
+    uint64_t stage = plat_now_ns();
     char exefs[1024], npdm_path[1024];
     snprintf(exefs, sizeof exefs, "%s/exefs", root);
     snprintf(npdm_path, sizeof npdm_path, "%s/main.npdm", exefs);
@@ -74,7 +76,11 @@ static void boot(const char *root) {
     if (!gamelib_load(why, sizeof why)) game_lib_failed(why);
 #endif
     if (!gamelib_load(why, sizeof why)) FATAL("%s\n", why);
+    LOG("[boot] game library ready in %.3f s\n", (plat_now_ns() - stage) / 1e9);
+    stage = plat_now_ns();
     loader_load(exefs);
+    LOG("[boot] game modules ready in %.3f s\n", (plat_now_ns() - stage) / 1e9);
+    stage = plat_now_ns();
     kernel_init();
     dispatch_init();
     mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
@@ -107,6 +113,7 @@ static void boot(const char *root) {
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
     { void sampler_init(void); sampler_init(); }  // (debug, Windows, MHGU_SAMPLE: runtime/sampler.c)
 
+    LOG("[boot] runtime hooks ready in %.3f s\n", (plat_now_ns() - stage) / 1e9);
     uint32_t stack_size = 0x100000;
     int prio = 44;
     FILE *f = fopen(npdm_path, "rb");
@@ -313,6 +320,7 @@ int main(int argc, char **argv) {
     }
     ui_capture_launch_args(argc, argv);
     plat_init();
+    uint64_t startup = plat_now_ns();
     setvbuf(stderr, NULL, _IONBF, 0);
     bool given = false;
     for (int i = 1; i < argc; i++)
@@ -384,7 +392,7 @@ int main(int argc, char **argv) {
         snprintf(romfs, sizeof romfs, "%s/romfs", data);
         snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
         struct stat st;
-        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
+        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : romfs_prepare_base(romfs);
         bool have_shaders = stat(shaders, &st) == 0;
         if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
             char msg[700];
@@ -413,6 +421,8 @@ int main(int argc, char **argv) {
 #endif
     }
     LOG("MHGU Relink %s\n", MHGU_VERSION);
+    LOG("[build] 0.2.2-20261113-r3 (native-aim-gate, quest-fixed-controls, condvar-publish, decoder-retain, shader-lod-opt-in, android-surface-recovery, editor-motion-forward, render-trace, ranged-stick-auto-face)\n");
+    LOG("[boot] startup preflight ready in %.3f s\n", (plat_now_ns() - startup) / 1e9);
 #ifdef __ANDROID__
     void plat_log_device(void);
     plat_log_device();

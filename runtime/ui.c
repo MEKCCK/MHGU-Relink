@@ -52,6 +52,7 @@ int ui_take_picked_folder(char *out, size_t size) {
 #endif
 #ifdef __ANDROID__
 void ui_request_licenses(void) { SDL_SetAtomicInt(&requested_action, 3); }
+void ui_request_changelog(void) { SDL_SetAtomicInt(&requested_action, 15); }
 void ui_request_game_folder(void) { SDL_SetAtomicInt(&requested_action, 4); }
 void ui_request_save_import(void) { SDL_SetAtomicInt(&requested_action, 5); }
 void ui_request_share_log(void) { SDL_SetAtomicInt(&requested_action, 6); }
@@ -433,6 +434,7 @@ int ui_run(void) {
         if (action == 1) exit(0);
 #ifdef __ANDROID__
         if (action == 3) activity_call_language("showLicenses");
+        if (action == 15) activity_call_language("showChangelog");
         if (action == 4) activity_call_language("showGameFolder");
         if (action == 5) activity_call_language("showSaveImport");
         if (action == 6) activity_call_language("showShareLog");

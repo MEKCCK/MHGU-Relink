@@ -6,6 +6,7 @@ extern "C" {
 void ui_capture_launch_args(int argc, char **argv);
 #ifdef __ANDROID__
 void ui_request_licenses(void);     // The licenses' and the game folder's screens, opened on the host thread too
+void ui_request_changelog(void);
 void ui_request_game_folder(void);
 void ui_request_save_import(void);
 void ui_request_save_export(void);
@@ -15,6 +16,7 @@ bool vk_gpu_adreno(void);          // (nvn/vulkan/device.c)
 bool vk_gpu_adreno_fix_applies(void);  // (an Adreno on a Vulkan 1.1 driver: [Performance] AdrenoFix)
 const char *gpu_driver_name(void);  // (platform/android_gpu.c: "" the system's)
 void ui_request_share_log(void);
+void vk_trace_request(void);       // Record a bounded rendering trace after Settings closes.
 #endif
 void ui_request_action(bool restart); // Called after the in-game confirmation, handled on the host thread.
 void ui_request_exit_menu(void);      // Title screen's Main Menu, B: the window-close question (host thread).

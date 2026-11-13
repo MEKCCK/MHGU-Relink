@@ -29,12 +29,20 @@ static pthread_mutex_t g_handle_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t handle_new(void *p) {
     pthread_mutex_lock(&g_handle_lock);
     for (uint32_t i = 0; i < MAX_HANDLES; i++)
-        if (!g_handles[i]) { g_handles[i] = p; pthread_mutex_unlock(&g_handle_lock); return i + 1; }
+        if (!__atomic_load_n(&g_handles[i], __ATOMIC_ACQUIRE)) {
+            __atomic_store_n(&g_handles[i], p, __ATOMIC_RELEASE);
+            pthread_mutex_unlock(&g_handle_lock);
+            return i + 1;
+        }
     pthread_mutex_unlock(&g_handle_lock);
     FATAL("[movie] out of handles\n");
 }
-static void *handle_get_ptr(uint32_t h) { return h && h <= MAX_HANDLES ? g_handles[h - 1] : NULL; }
-static void handle_free(uint32_t h) { if (h && h <= MAX_HANDLES) g_handles[h - 1] = NULL; }
+static void *handle_get_ptr(uint32_t h) {
+    return h && h <= MAX_HANDLES ? __atomic_load_n(&g_handles[h - 1], __ATOMIC_ACQUIRE) : NULL;
+}
+static void handle_free(uint32_t h) {
+    if (h && h <= MAX_HANDLES) __atomic_store_n(&g_handles[h - 1], NULL, __ATOMIC_RELEASE);
+}
 
 // Strings handed to the game (MediaData::FindString): interned in guest memory, never freed.
 static uint32_t guest_string(const char *s) {
@@ -433,9 +441,28 @@ typedef struct {
     bool eos_pending;
     int64_t eos_time;
     bool stopped;      // Stop / destroyed: no more events (see dec_stop)
+    bool closing;      // destruction has detached the guest handle; Start must not re-enable events
     bool format_told;  // the output format change before the first frame (the game sets its renderer up on it)
+    int refs;          // the published handle and each vtable call, protected by g_handle_lock
     pthread_mutex_t lock;
 } Decoder;
+
+static void dec_destroy(Decoder *d);
+
+static Decoder *dec_retain(Cpu *c) {
+    pthread_mutex_lock(&g_handle_lock);
+    Decoder *d = self_state(c);
+    if (d) d->refs++;
+    pthread_mutex_unlock(&g_handle_lock);
+    return d;
+}
+
+static void dec_unref(Decoder *d) {
+    pthread_mutex_lock(&g_handle_lock);
+    bool last = --d->refs == 0;
+    pthread_mutex_unlock(&g_handle_lock);
+    if (last) dec_destroy(d);
+}
 
 // Input / output buffers are guest memory (the HLE heap is never freed): those of destroyed decoders are reused.
 static struct { uint32_t mem, size; } g_buf_pool[64];
@@ -468,8 +495,7 @@ static void dec_signal(Cpu *c, Decoder *d, int i) {
     pthread_mutex_unlock(&d->lock);
 }
 
-static void dec_configure(Cpu *c) {  // slot 2 (MediaData *)
-    Decoder *d = self_state(c);
+static void dec_configure(Cpu *c, Decoder *d) {  // slot 2 (MediaData *)
     AVCodecParameters *p = md(ARG(1))->codecpar;
     if (!p) { LOG("[movie] Configure without codec parameters\n"); RET(MOVIE_ERR); return; }
     const AVCodec *codec = avcodec_find_decoder(p->codec_id);
@@ -494,8 +520,7 @@ static void dec_configure(Cpu *c) {  // slot 2 (MediaData *)
     RET(0);
 }
 
-static void dec_register_events(Cpu *c) {  // slot 3 (DecoderEvents *)
-    Decoder *d = self_state(c);
+static void dec_register_events(Cpu *c, Decoder *d) {  // slot 3 (DecoderEvents *)
     for (int i = 0; i < 4; i++) d->events[i] = LD32(ARG(1) + 4 * i);
     RET(0);
 }
@@ -519,12 +544,12 @@ static void dec_output_format(Decoder *d, MediaData *m) {
         md_set_int(m, "channel-count", d->channels);
     }
 }
-static void dec_get_output_format(Cpu *c) { dec_output_format(self_state(c), md(ARG(1))); RET(0); }         // slot 4
-static void dec_get_output_buffer_format(Cpu *c) { dec_output_format(self_state(c), md(ARG(2))); RET(0); }  // slot 18
+static void dec_get_output_format(Cpu *c, Decoder *d) { dec_output_format(d, md(ARG(1))); RET(0); }         // slot 4
+static void dec_get_output_buffer_format(Cpu *c, Decoder *d) { dec_output_format(d, md(ARG(2))); RET(0); }  // slot 18
 
-static void dec_start(Cpu *c) {  // slot 5
-    Decoder *d = self_state(c);
+static void dec_start(Cpu *c, Decoder *d) {  // slot 5
     pthread_mutex_lock(&d->lock);
+    if (d->closing) { pthread_mutex_unlock(&d->lock); RET(MOVIE_ERR); return; }
     d->stopped = false;
     pthread_mutex_unlock(&d->lock);
     dec_signal(c, d, 0);  // all input buffers are free
@@ -533,8 +558,7 @@ static void dec_start(Cpu *c) {  // slot 5
 
 // slot 6: Stop. A stopped hardware decoder signals nothing: stop signalling and clear what is still set (an event
 // still set after the game deleted the decoder wakes its decoder thread into a call through a dead object).
-static void dec_stop(Cpu *c) {
-    Decoder *d = self_state(c);
+static void dec_stop(Cpu *c, Decoder *d) {
     pthread_mutex_lock(&d->lock);
     if (!d->stopped) {
         d->stopped = true;
@@ -545,8 +569,7 @@ static void dec_stop(Cpu *c) {
     RET(0);
 }
 
-static void dec_flush(Cpu *c) {  // slots 7 (Reset) / 8 (Flush): drop everything in flight
-    Decoder *d = self_state(c);
+static void dec_flush(Cpu *c, Decoder *d) {  // slots 7 (Reset) / 8 (Flush): drop everything in flight
     pthread_mutex_lock(&d->lock);
     if (d->ctx) avcodec_flush_buffers(d->ctx);
     for (int i = 0; i < d->npending; i++) av_frame_free(&d->pending[i]);
@@ -559,8 +582,7 @@ static void dec_flush(Cpu *c) {  // slots 7 (Reset) / 8 (Flush): drop everything
     RET(0);
 }
 
-static void dec_acquire_input(Cpu *c) {  // slot 9 (int *index, int *remaining)
-    Decoder *d = self_state(c);
+static void dec_acquire_input(Cpu *c, Decoder *d) {  // slot 9 (int *index, int *remaining)
     pthread_mutex_lock(&d->lock);
     if (d->npending >= NPENDING - 8) { pthread_mutex_unlock(&d->lock); RET(MOVIE_ERR); return; }  // backpressure
     int idx = -1, free_n = 0;
@@ -574,8 +596,7 @@ static void dec_acquire_input(Cpu *c) {  // slot 9 (int *index, int *remaining)
     RET(0);
 }
 
-static void dec_get_input_buffer(Cpu *c) {  // slot 10 (int, Buffer *)
-    Decoder *d = self_state(c);
+static void dec_get_input_buffer(Cpu *c, Decoder *d) {  // slot 10 (int, Buffer *)
     int i = (int)ARG(1);
     if (i < 0 || i >= NIN) { RET(MOVIE_ERR); return; }
     buf_point(ARG(2), d->in_mem[i], d->in_cap, 0);
@@ -648,8 +669,7 @@ static bool flush_pending(Decoder *d) {
 }
 
 // slot 11: SendInputBufferForDecode(int index, int offset, int size, int64 timeUs, uint32 flags)
-static void dec_send_input(Cpu *c) {
-    Decoder *d = self_state(c);
+static void dec_send_input(Cpu *c, Decoder *d) {
     int idx = (int)ARG(1), off = (int)ARG(2), size = (int)ARG(3);
     int64_t time = (int64_t)(((uint64_t)STK(1) << 32) | STK(0));
     uint32_t flags = STK(2);
@@ -678,19 +698,17 @@ static void dec_send_input(Cpu *c) {
     if (flags & MOVIE_EOS) { d->eos_pending = true; d->eos_time = time; }
     produced |= flush_pending(d);
     if (idx >= 0 && idx < NIN) d->in_busy[idx] = false;
+    bool tell_format = produced && !d->format_told;
+    if (tell_format) d->format_told = true;
     pthread_mutex_unlock(&d->lock);
     dec_signal(c, d, 0);
-    if (produced && !d->format_told) {  // (as a MediaCodec: INFO_OUTPUT_FORMAT_CHANGED before the first buffer)
-        d->format_told = true;
-        dec_signal(c, d, 2);
-    }
+    if (tell_format) dec_signal(c, d, 2);  // MediaCodec: INFO_OUTPUT_FORMAT_CHANGED before the first buffer
     if (produced) dec_signal(c, d, 1);
     RET(0);
 }
 
 // slot 12: AcquireOutputBufferIndex(int *index, int64 *timeUs, uint32 *flags, int *remaining)
-static void dec_acquire_output(Cpu *c) {
-    Decoder *d = self_state(c);
+static void dec_acquire_output(Cpu *c, Decoder *d) {
     pthread_mutex_lock(&d->lock);
     if (!d->nready) { pthread_mutex_unlock(&d->lock); RET(MOVIE_ERR); return; }
     OutReady r = d->ready[0];
@@ -713,8 +731,7 @@ static void dec_acquire_output(Cpu *c) {
 // slots 13 (int, Buffer *) / 17 (int, Buffer *, MediaData *). The game hands in a Buffer around its own memory
 // (SetDataAndCapacity + SetRange: its video texture / audio ring) and expects the decoded data copied there; a Buffer
 // without memory is pointed at ours instead.
-static void dec_get_output_buffer(Cpu *c) {
-    Decoder *d = self_state(c);
+static void dec_get_output_buffer(Cpu *c, Decoder *d) {
     int i = (int)ARG(1);
     uint32_t b = ARG(2);
     if (i < 0 || i >= NOUT) { RET(MOVIE_ERR); return; }
@@ -735,20 +752,18 @@ static void dec_get_output_buffer(Cpu *c) {
     }
     RET(0);
 }
-static void dec_get_output_buffer_md(Cpu *c) {
-    dec_get_output_buffer(c);
-    if (ARG(3)) dec_output_format(self_state(c), md(ARG(3)));
+static void dec_get_output_buffer_md(Cpu *c, Decoder *d) {
+    dec_get_output_buffer(c, d);
+    if (ARG(3)) dec_output_format(d, md(ARG(3)));
 }
 
-static void dec_get_output_buffer_size(Cpu *c) {  // slot 14 (int *size, int *count)
-    Decoder *d = self_state(c);
+static void dec_get_output_buffer_size(Cpu *c, Decoder *d) {  // slot 14 (int *size, int *count)
     if (ARG(1)) ST32(ARG(1), d->out_cap);
     if (ARG(2)) ST32(ARG(2), NOUT);
     RET(0);
 }
 
-static void dec_release_output(Cpu *c) {  // slot 15 (int)
-    Decoder *d = self_state(c);
+static void dec_release_output(Cpu *c, Decoder *d) {  // slot 15 (int)
     dec_signal(c, d, 0);  // input may be accepted again
     int i = (int)ARG(1);
     pthread_mutex_lock(&d->lock);
@@ -759,38 +774,71 @@ static void dec_release_output(Cpu *c) {  // slot 15 (int)
     RET(0);
 }
 
-static void dec_last_error(Cpu *c) { RET(0); }  // slot 16
+static void dec_last_error(Cpu *c, Decoder *d) { (void)d; RET(0); }  // slot 16
 
 static void dec_dtor(Cpu *c) {  // slots 0 / 1
+    uint32_t guest = ARG(0);
+    pthread_mutex_lock(&g_handle_lock);
     uint32_t h = LD32(ARG(0) + 4);
     Decoder *d = handle_get_ptr(h);
+    handle_free(h);
+    ST32(guest + 4, 0);
+    pthread_mutex_unlock(&g_handle_lock);
     if (!d) return;
-    dec_stop(c);
     pthread_mutex_lock(&d->lock);
+    d->closing = true;
+    pthread_mutex_unlock(&d->lock);
+    dec_stop(c, d);
+    dec_unref(d);  // callbacks already in flight keep the state, buffers and mutex alive until they return
+}
+
+static void dec_destroy(Decoder *d) {
     if (d->ctx) avcodec_free_context(&d->ctx);
     if (d->frame) av_frame_free(&d->frame);
     if (d->pkt) av_packet_free(&d->pkt);
     for (int i = 0; i < d->npending; i++) av_frame_free(&d->pending[i]);
     for (int i = 0; i < NIN; i++) buf_put(d->in_mem[i], d->in_cap);
     for (int i = 0; i < NOUT; i++) buf_put(d->out_mem[i], d->out_cap);
-    pthread_mutex_unlock(&d->lock);
     pthread_mutex_destroy(&d->lock);
     free(d);
-    handle_free(h);
-    ST32(ARG(0) + 4, 0);
 }
+
+#define DEC_RETAINED(fn) \
+    static void fn##_l(Cpu *c) { \
+        Decoder *d = dec_retain(c); \
+        if (!d) { RET(MOVIE_ERR); return; } \
+        fn(c, d); \
+        dec_unref(d); \
+    }
+DEC_RETAINED(dec_configure)
+DEC_RETAINED(dec_register_events)
+DEC_RETAINED(dec_get_output_format)
+DEC_RETAINED(dec_start)
+DEC_RETAINED(dec_stop)
+DEC_RETAINED(dec_flush)
+DEC_RETAINED(dec_acquire_input)
+DEC_RETAINED(dec_get_input_buffer)
+DEC_RETAINED(dec_send_input)
+DEC_RETAINED(dec_acquire_output)
+DEC_RETAINED(dec_get_output_buffer)
+DEC_RETAINED(dec_get_output_buffer_size)
+DEC_RETAINED(dec_release_output)
+DEC_RETAINED(dec_last_error)
+DEC_RETAINED(dec_get_output_buffer_md)
+DEC_RETAINED(dec_get_output_buffer_format)
 
 // Decoder(DecoderType, DecoderOutputFormat, DecoderMode)
 HLE_FUNC("_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE", movie_decoder_ctor) {
     static uint32_t vt;
     if (!vt) {
-        HostFn f[19] = {dec_dtor, dec_dtor, dec_configure, dec_register_events, dec_get_output_format, dec_start,
-                        dec_stop, dec_flush, dec_flush, dec_acquire_input, dec_get_input_buffer, dec_send_input,
-                        dec_acquire_output, dec_get_output_buffer, dec_get_output_buffer_size, dec_release_output,
-                        dec_last_error, dec_get_output_buffer_md, dec_get_output_buffer_format};
+        HostFn f[19] = {dec_dtor, dec_dtor, dec_configure_l, dec_register_events_l, dec_get_output_format_l, dec_start_l,
+                        dec_stop_l, dec_flush_l, dec_flush_l, dec_acquire_input_l, dec_get_input_buffer_l, dec_send_input_l,
+                        dec_acquire_output_l, dec_get_output_buffer_l, dec_get_output_buffer_size_l, dec_release_output_l,
+                        dec_last_error_l, dec_get_output_buffer_md_l, dec_get_output_buffer_format_l};
         vt = make_vtable(f, 19, 1);
     }
     Decoder *d = calloc(1, sizeof *d);
+    d->refs = 1;
     pthread_mutex_init(&d->lock, NULL);
     ST32(ARG(0), vt);
     ST32(ARG(0) + 4, handle_new(d));

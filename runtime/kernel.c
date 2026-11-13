@@ -340,12 +340,13 @@ static uint32_t svc_arbitrate_unlock(uint32_t addr) {
 static uint32_t svc_wait_process_wide_key(uint32_t mutex, uint32_t key, uint32_t tag, int64_t timeout) {
     pthread_mutex_lock(&g_klock);
     KThread *t = t_cur;
-    mutex_release(mutex);
     t->wait_kind = WAIT_CONDVAR;
     t->wait_addr = key;
     t->wait_mutex = mutex;
     t->wait_tag = tag;
+    // nn::os can skip SignalProcessWideKey when key is zero: publish before another thread takes the mutex.
     __atomic_store_n(u32p(key), 1, __ATOMIC_SEQ_CST);
+    mutex_release(mutex);
     uint32_t r = block_current(timeout);
     // Timed out: return without the mutex, as Horizon does (nn::os then takes it itself: re-taking it here left the
     // thread waiting on a mutex it owned). Cancelled: hand it back, the caller assumes it holds it.

@@ -88,6 +88,7 @@ typedef struct {
     uint8_t inf_ever[256];   // ... has held one so far: what a branch target may see
     bool static_flow;        // SSY / PBK / PCNT stacks resolved at translation (flow_resolve): no run-time stacks
     uint32_t *flow_tgt;      // (static_flow) per instruction index: where its SYNC / BRK / CONT goes (~0u: unreached)
+    bool uses_shadow_lod;   // explicit LOD for array/cube shadow samplers needs an optional GLSL extension
 } Ctx;
 
 #define NO64(c) ((c)->glsl && maxwell_no_int64)
@@ -594,6 +595,7 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         lod_kind = 1;
     }
     if (t->shadow && type == TEXTYPE_3D) { fail(c, "3d shadow texture"); strcpy(out, "vec4(0.0f)"); return; }
+    if (t->shadow && lod_kind == 1 && (type == TEXTYPE_2D_ARRAY || cube)) c->uses_shadow_lod = true;
     if (layer && type != TEXTYPE_1D_ARRAY && type != TEXTYPE_2D_ARRAY && type != TEXTYPE_CUBE_ARRAY) {
         fail(c, "array lookup on a 3d texture");  // TEX .3D with the array bit
         strcpy(out, "vec4(0.0f)");
@@ -1809,12 +1811,10 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
 }
 
 static const char glsl_prelude[] =
-    "#version 460\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_KHR_shader_subgroup_basic : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle_relative : require\n"
-    "#extension GL_EXT_texture_shadow_lod : require\n"
     "#define cbr(cb, off) cb[min((off) >> 4, uint(cb.length() - 1))][((off) >> 2) & 3u]\n"
     "uint as_u(float x) { return floatBitsToUint(x); }\n"
     "uint as_u(uint x) { return x; }\n"
@@ -1889,6 +1889,9 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (c->fail) { free(body.buf); free(c->body.buf); free(c); return info; }
     int set = stage == STAGE_FRAGMENT ? 1 : 0;
     Str s = {0};
+    sp(&s, "#version 460\n");
+    // Older shaderc builds reject even unused required extensions (black screen on Android).
+    if (c->uses_shadow_lod) sp(&s, "#extension GL_EXT_texture_shadow_lod : require\n");
     sp(&s, "%s", glsl_prelude);
     if (maxwell_no_int64) sp(&s, "%s", glsl_prelude_no64);
     for (int i = 0; i < 18; i++) {

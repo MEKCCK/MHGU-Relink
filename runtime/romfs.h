@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Startup only, before guest threads: scan once for validation, then let romfs_open consume the same tree.
+// Returns the base game's file count (0 if unreadable); mods never contribute to validation.
+int romfs_prepare_base(const char *base_dir);
 // Builds the image from base_dir and the given overlay folders (later ones win; files they add are added).
 bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays);
 uint64_t romfs_size(void);

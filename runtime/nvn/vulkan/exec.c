@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,117 @@
 #include "shaders.h"
 #include "vk.h"
 #include "../../touch.h"
+#include "../../overlay.h"
+
+// BEGIN CPU RENDER TRACE
+// Requested diagnostics only: retain six whole frames in memory, then write once without GPU inspection.
+#define TRACE_CAPACITY (768u * 1024u)
+#define TRACE_FRAMES 6u
+#define TRACE_DRAWS 1024u
+#define TRACE_FRAME_CAPACITY (TRACE_CAPACITY / TRACE_FRAMES)
+static _Atomic bool trace_requested;
+static bool trace_active, trace_truncated, trace_frame_truncated, trace_frame_footer, trace_draw_limit;
+static char trace_text[TRACE_CAPACITY];
+static size_t trace_used, trace_frame_start;
+static unsigned trace_frames, trace_draws, trace_passes;
+
+static void trace_append(const char *fmt, ...) {
+    if (!trace_active || trace_frame_truncated) return;
+    size_t limit = trace_frame_start + TRACE_FRAME_CAPACITY - (trace_frame_footer ? 128 : 1024);
+    size_t left = trace_used < limit ? limit - trace_used : 0;
+    if (!left) {
+        trace_truncated = trace_frame_truncated = true;
+        trace_used += (size_t)snprintf(trace_text + trace_used, sizeof trace_text - trace_used,
+                                      "[render-trace] truncated: frame text budget reached\n");
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(trace_text + trace_used, left, fmt, args);
+    va_end(args);
+    if (n < 0 || (size_t)n >= left) {
+        trace_truncated = trace_frame_truncated = true;
+        trace_used += (size_t)snprintf(trace_text + trace_used, sizeof trace_text - trace_used,
+                                      "[render-trace] truncated: frame text budget reached\n");
+        return;
+    }
+    trace_used += (size_t)n;
+}
+
+static void trace_texture(const char *role, const NvnTexture *t, const NvnTextureView *v, bool has_view) {
+    if (!trace_active || trace_frame_truncated) return;
+    const TexBackend *b = t ? t->backend : NULL;
+    trace_append("  %s id=%llu obj=%p addr=%llx fmt=%x guest=%ux%ux%u backend=%d:%ux%u samples=%u gpu=%u",
+                 role, (unsigned long long)(t ? t->debug_id : 0), (const void *)t,
+                 (unsigned long long)(t ? t->addr : 0), t ? t->format : 0,
+                 t ? t->width : 0, t ? t->height : 0, t ? t->depth : 0,
+                 b ? b->format : 0, b ? b->width : 0, b ? b->height : 0, b ? b->samples : 0, b && b->gpu_owned);
+    if (has_view && v)
+        trace_append(" view=%x:m%u+%u:l%u+%u:f%x:ds%u:sw%u,%u,%u,%u", v->setmask, v->base_level,
+                     v->num_levels, v->min_layer, v->num_layers, v->format, v->ds_mode,
+                     v->swizzle[0], v->swizzle[1], v->swizzle[2], v->swizzle[3]);
+    else trace_append(" view=default");
+    trace_append("\n");
+}
+
+void vk_trace_request(void) { atomic_store(&trace_requested, true); }
+
+static bool trace_draw_begin(void) {
+    if (!trace_active || trace_frame_truncated) return false;
+    if (trace_draws == TRACE_DRAWS) {
+        if (!trace_draw_limit)
+            trace_append("[render-trace] draw limit: remaining draws in frame %llu omitted\n",
+                         (unsigned long long)g_present_count);
+        trace_draw_limit = true;
+        return false;
+    }
+    trace_draws++;
+    return true;
+}
+
+static void trace_auxdraw(const char *shader) {
+    if (trace_draw_begin())
+        trace_append("[render-trace] draw=%u pass=%u builtin=%s\n", trace_draws, trace_passes, shader);
+}
+
+static void trace_copy_ref(const char *role, const TexRef *ref) {
+    if (!trace_active || trace_frame_truncated) return;
+    trace_texture(role, (NvnTexture *)(uintptr_t)ref->tex, &ref->view, ref->has_view);
+    trace_append("    region=%d,%d,%d,%d,%d,%d\n", ref->region[0], ref->region[1], ref->region[2],
+                 ref->region[3], ref->region[4], ref->region[5]);
+}
+
+// Called at the end of backend_present, before g_frames/g_present_count advance.
+void vk_trace_frame(NvnTexture *t) {
+    if (trace_active) {
+        trace_frame_footer = true;
+        trace_frame_truncated = false;  // Each frame reserves space for its present/summary even after details fill.
+        trace_append("[render-trace] present frame=%llu draws=%u passes=%u\n", (unsigned long long)g_present_count,
+                     trace_draws, trace_passes);
+        trace_texture("present", t, NULL, false);
+        if (++trace_frames == TRACE_FRAMES) {
+            trace_used += (size_t)snprintf(trace_text + trace_used, sizeof trace_text - trace_used,
+                                          "[render-trace] complete frames=%u truncated=%u\n", trace_frames, trace_truncated);
+            trace_active = false;
+            atomic_exchange(&trace_requested, false);  // Repeated taps during a capture are one request.
+            LOG("%s", trace_text);
+            return;
+        }
+        trace_draws = trace_passes = 0;
+        trace_draw_limit = false;
+        trace_frame_footer = trace_frame_truncated = false;
+        trace_frame_start = trace_used;
+        trace_append("[render-trace] begin frame=%llu\n", (unsigned long long)(g_present_count + 1));
+    } else if (atomic_load(&trace_requested) && !overlay_menu_open() && atomic_exchange(&trace_requested, false)) {
+        trace_used = trace_frame_start = trace_frames = trace_draws = trace_passes = 0;
+        trace_truncated = trace_frame_truncated = trace_frame_footer = trace_draw_limit = false;
+        trace_active = true;
+        trace_text[0] = 0;
+        trace_append("[render-trace] CPU command state; no GPU readback; six complete frames after settings close\n"
+                     "[render-trace] begin frame=%llu\n", (unsigned long long)(g_present_count + 1));
+    }
+}
+// END CPU RENDER TRACE
 // [Touch] MoveHUD: the item bar's move to the top middle, on the game's 1280x720 canvas (cbuf_info)
 // [Touch] MoveHUD, while the touch controls show (runtime/touch.cpp), on the game's 1280x720 canvas (cbuf_info):
 //   the status (clock, health, stamina, sharpness, name: layer 103 above y 500) to the screen's left edge
@@ -1469,6 +1581,7 @@ void vk_ms_resolve(TexBackend *b) {
         VkViewport vp = {0, 0, (float)b->width, (float)b->height, 0, 1};
         vkCmdSetViewport(cb, 0, 1, &vp);
         vkCmdSetScissor(cb, 0, 1, &area);
+        trace_auxdraw("resolve-depth");
         vkCmdDraw(cb, 3, 1, 0, 0);
         vkCmdEndRenderPass(cb);
         ss_forget();
@@ -1521,6 +1634,7 @@ static bool ms_expand(VkCommandBuffer cb, TexBackend *b, TexBackend *m, VkFormat
     VkViewport vp = {0, 0, (float)b->width, (float)b->height, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &area);
+    trace_auxdraw("msaa-expand");
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
     vk_full_barrier(cb);
@@ -1556,6 +1670,8 @@ static NvnTexture *mf_tex;        // the picture of the run of models open (NULL
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
+    trace_append("[render-trace] picture-copy src=%p dst=%p fmt=%d size=%ux%u\n",
+                 (void *)b, (void *)d, b->format, b->width, b->height);
     VkCommandBuffer cb = vk_cmd();
     if (d->image && (d->width != b->width || d->height != b->height || d->format != b->format)) {
         vk_views_forget(d);
@@ -1581,12 +1697,14 @@ static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (mad
     return true;
 }
 static void models_fxaa_begin(NvnTexture *t) {
+    trace_texture("models-fxaa-begin", t, NULL, false);
     vk_end_pass();
     st.rt_dirty = true;
     if (picture_copy(t->backend, &mf_before)) mf_tex = t, mf_frame = g_present_count;
 }
 static void models_fxaa_end(void) {
     NvnTexture *t = mf_tex;
+    trace_texture("models-fxaa-end", t, NULL, false);
     TexBackend *b = t->backend;
     mf_tex = NULL;
     vk_end_pass();
@@ -1620,6 +1738,7 @@ static void models_fxaa_end(void) {
     VkViewport vp = {0, 0, (float)b->width, (float)b->height, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &area);
+    trace_auxdraw("fxaa-models");
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
     vk_full_barrier(cb);
@@ -1848,6 +1967,17 @@ static void begin_pass(void) {
     VkRenderPass begin_rp = pass_noload ? render_pass(pass_color, pass_ncolor, pass_depth, pass_samples, pass_noload) : pass_rp;
     if (pass_noload) stat_noload++;
     pass_skip_clear = pass_noload;
+    if (trace_active && !trace_frame_truncated) {
+        trace_append("[render-trace] pass=%u frame=%llu rect=0,0,%u,%u scale=%.6g,%.6g noload=%x samples=%u\n",
+                     ++trace_passes, (unsigned long long)g_present_count, minw, minh, pass_sx, pass_sy,
+                     pass_noload, pass_samples);
+        for (int i = 0; i < st.rt.ncolor; i++) {
+            char role[12];
+            snprintf(role, sizeof role, "rt%d", i);
+            trace_texture(role, st.rt.color[i], &st.rt.cview[i], st.rt.has_cview[i]);
+        }
+        trace_texture("depth", st.rt.depth, &st.rt.dview, st.rt.has_dview);
+    }
     gp_mark("  (between passes)");
     gp_pass_note = gp_next_note, gp_next_note = "";
     VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = begin_rp, .framebuffer = fb,
@@ -2302,6 +2432,9 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     // there is done already, to the value the pass began with, its last such clear. Done again it was a second write of
     // the whole attachment, 2% of an Adreno 830's frame)
     bool whole = rect.offset.x == 0 && rect.offset.y == 0 && rect.extent.width >= pass_w && rect.extent.height >= pass_h;
+    trace_append("[render-trace] clear pass=%u idx=%d rect=%d,%d,%u,%u mask=%x depth=%d:%.9g stencil=%d:%x/%x whole=%d skip=%x\n",
+                 trace_passes, index, rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height,
+                 mask, depth, dval, stencil, sval, smask, whole, pass_skip_clear);
     if (index >= 0 && (pass_skip_clear >> index) & 1) {
         if (whole && (mask & 0xF) == 0xF) return;
         pass_skip_clear &= ~(1u << index);
@@ -2339,6 +2472,7 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     if (color) memcpy(pc, color, 16);
     pc[4] = dval;
     vkCmdPushConstants(cb, pc_layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
+    trace_auxdraw("clear");
     vkCmdDraw(cb, 3, 1, 0, 0);
 }
 
@@ -3354,6 +3488,7 @@ static void resolve_feedback(Prog *pr) {
                 vk_image_init_layout(vk_cmd(), d->image, d->aspect);
             }
             if (!s->valid) {
+                trace_texture("feedback-snapshot", t, NULL, false);
                 vk_end_pass();
                 vk_ms_resolve(src);
                 VkCommandBuffer cb = vk_cmd();
@@ -4109,6 +4244,65 @@ static uint64_t prog_fs_hash(Prog *p) {
     return p->chash[1];
 }
 
+static void trace_draw(Prog *pr, const PipeKey *k, bool indexed, uint32_t count, uint32_t inst) {
+    if (!trace_draw_begin()) return;
+    trace_append("[render-trace] draw=%u pass=%u vs=%llx fs=%llx count=%u inst=%u indexed=%d z=%u/%u/%u stencil=%u blend=%x wmask=",
+                 trace_draws, trace_passes, (unsigned long long)st.program->stages[0].code_addr,
+                 (unsigned long long)prog_fs_hash(pr), count, inst, indexed, k->depth_test, k->depth_write,
+                 k->depth_op, k->stencil_test, k->blend_on);
+    for (uint32_t i = 0; i < k->ncolor; i++) trace_append(i ? ",%x" : "%x", k->write_mask[i]);
+    trace_append(" blend0=%u,%u,%u,%u,%u,%u,%u,%u\n", k->blend[0][0], k->blend[0][1], k->blend[0][2],
+                 k->blend[0][3], k->blend[0][4], k->blend[0][5], k->blend[0][6], k->blend[0][7]);
+    int sampled = 0;
+    for (int i = 0; i < pr->fi->ntex && sampled < 8 && !trace_frame_truncated; i++) {
+        ShaderTexture *tx = &pr->fi->tex[i];
+        NvnTexture *t = shader_texture_object(1, tx);
+        TexBackend *b = t ? t->backend : NULL;
+        if (!b || !b->gpu_owned) continue;  // Static HUD/material textures are not the changing render targets.
+        int slot = ((int)tx->handle_offset - 0x20) / 8;
+        uint64_t handle = slot >= 0 && slot < 32 ? st.tex[1][slot] : 0;
+        uint32_t tic = (uint32_t)handle & 0xFFFFF, tsc = (uint32_t)(handle >> 20) & 0xFFF;
+        NvnTexEntry *entry = st.tpool && tic < (uint32_t)st.tpool->count ? &((NvnTexEntry *)st.tpool->entries)[tic] : NULL;
+        NvnSamplerDesc *sampler = st.spool && tsc < (uint32_t)st.spool->count ? &((NvnSamplerDesc *)st.spool->entries)[tsc] : NULL;
+        char role[24];
+        snprintf(role, sizeof role, "sample%d(slot%d)", i, slot);
+        trace_texture(role, t, entry ? &entry->view : NULL, entry && entry->has_view);
+        bool feedback = false;
+        for (int j = 0; j < nfeedback; j++) feedback |= feedback_tex[j] == t;
+        trace_append("    sampler=%u compare=%u/%u filter=%u/%u lod=%.6g..%.6g bias=%.6g wrap=%u,%u,%u feedback=%d\n",
+                     tsc, sampler ? sampler->compare_mode : 0, sampler ? sampler->compare_func : 0,
+                     sampler ? sampler->min_filter : 0, sampler ? sampler->mag_filter : 0,
+                     sampler ? sampler->lod_min : 0, sampler ? sampler->lod_max : 0, sampler ? sampler->lod_bias : 0,
+                     sampler ? sampler->wrap[0] : 0, sampler ? sampler->wrap[1] : 0, sampler ? sampler->wrap[2] : 0, feedback);
+        sampled++;
+    }
+    for (int k = 1; k < 18 && !trace_frame_truncated; k++) {
+        if (!(pr->fi->cbuf_mask & (1u << k)) || k == 2) continue;
+        Range r;
+        uint64_t size;
+        if (k == 1) {
+            NvnShaderStage *fs = &st.program->stages[1];
+            r = (Range){fs->code_addr + fs->const_offset, fs->const_size ? fs->const_size : 16};
+            size = pr->fi->cbuf_size[k] > r.size ? pr->fi->cbuf_size[k] : r.size;
+        } else {
+            r = st.ubuf[1][k - 3];
+            size = pr->fi->cbuf_size[k] ? pr->fi->cbuf_size[k] : 256;
+            if ((pr->fi->cbuf_dynamic & (1u << k)) && r.size) size = r.size > 0x10000 ? 0x10000 : r.size;
+            if (r.size && size > r.size) size = r.size;
+            if (size < 16) size = 16;
+        }
+        if (size > 256) size = 256;
+        if (!r.addr || !guest_range_ok(r.addr, size)) {
+            trace_append("    fubo%d=unavailable\n", k);
+            continue;
+        }
+        const uint8_t *bytes = G2H((uint32_t)r.addr);
+        uint64_t hash = 14695981039346656037ull;
+        for (uint64_t i = 0; i < size; i++) hash = (hash ^ bytes[i]) * 1099511628211ull;
+        trace_append("    fubo%d bytes=%llu hash=%016llx\n", k, (unsigned long long)size, (unsigned long long)hash);
+    }
+}
+
 // FXAA 3.11 (FXAAMode = 3_11): the game's FXAA pass draws shaders.c "fxaa.frag" instead, from the same input into the
 // same target. False: not possible, the game's own pass draws.
 static VkDescriptorSetLayout fxaa_set_layout;
@@ -4192,6 +4386,7 @@ static bool fxaa_311(NvnTexture *src) {
     VkViewport vp = {0, 0, (float)w, (float)h, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &area);
+    trace_auxdraw("fxaa-311");
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
     gp_mark("  FXAA 3.11");
@@ -4805,6 +5000,7 @@ static void draw(CmdRec *r, bool indexed) {
             }
         }
     }
+    if (trace_active) trace_draw(pr, &k, use_index, use_index ? icount : count, inst);
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     if (k.depth_write) grass_shadow_drawn(r, indexed, prog_fs_hash(pr));  // (tall grass: its main pass, grass_depth_laid)
@@ -4830,6 +5026,7 @@ static void draw(CmdRec *r, bool indexed) {
             VkDescriptorSet s0 = stage_set(pr->fsrcap->nbinds, pr->fsrcap->binds, pr->fsrcap->set0, 0, 0, pr->vi, 0, 0, 0);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->fsrcap->layout, 0, 1, &s0, 0, NULL);
             ss.known &= ~SS_SETS;  // (not draw's sets any more)
+            trace_auxdraw("fsr-capture");
             if (!use_index) vkCmdDraw(cb, count, 1, first, base_inst);
             else vkCmdDrawIndexed(cb, icount, 1, 0, base_vertex, base_inst);
         }
@@ -4883,6 +5080,8 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     snapshots_invalidate(NULL);
     NvnTexture *t = (NvnTexture *)(uintptr_t)dst->tex;
     if (!t || !src) return;
+    trace_append("[render-trace] copy-buffer-to-texture buffer=%llx\n", (unsigned long long)src);
+    trace_copy_ref("destination", dst);
     vk_end_pass();
     st.rt_dirty = true;
     const FormatInfo *fi;
@@ -4946,6 +5145,8 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
 static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
     NvnTexture *t = (NvnTexture *)(uintptr_t)src->tex;
     if (!t || !dst) return;
+    trace_append("[render-trace] copy-texture-to-buffer buffer=%llx\n", (unsigned long long)dst);
+    trace_copy_ref("source", src);
     vk_end_pass();
     st.rt_dirty = true;
     if (t->backend) vk_ms_resolve(t->backend);
@@ -5006,6 +5207,9 @@ static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags) {
     snapshots_invalidate(NULL);
     NvnTexture *st_ = (NvnTexture *)(uintptr_t)src->tex, *dt = (NvnTexture *)(uintptr_t)dst->tex;
     if (!st_ || !dt) return;
+    trace_append("[render-trace] copy-texture flags=%llx\n", (unsigned long long)flags);
+    trace_copy_ref("source", src);
+    trace_copy_ref("destination", dst);
     if (g_dump_active) LOG("[dump] copy %p -> %p\n", (void *)st_, (void *)dt);
     vk_end_pass();
     st.rt_dirty = true;
@@ -5043,6 +5247,8 @@ static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags) {
         if (dy0 + dh > dlh) dh = dlh - dy0;
         if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     }
+    trace_append("[render-trace] copy-effective src=m%u:l%u:%d,%d,%d,%d dst=m%u:l%u:%d,%d,%d,%d\n",
+                 slv, sly, sx0, sy0, sw, sh, dlv, dly, dx0, dy0, dw, dh);
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     VkImageAspectFlags sa = s->aspect, da = d->aspect;
@@ -5146,6 +5352,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     float pv[12] = {nvn_window_origin() == 0 ? 1.0f : 0.0f, 0, 0, 0, 0, 0, 1, 1,  // (flip, crop origin / size)
                     hdr ? vk_hdr_gamma() : 0, 0, 0, 0};                       // (HDR: the intermediate's gamma)
     vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pv);
+    trace_auxdraw("present");
     vkCmdDraw(cb, 3, 1, 0, 0);
 }
 
