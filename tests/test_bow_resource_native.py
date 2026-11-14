@@ -14,7 +14,8 @@ import sys
 
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT / 'tools'))
-sys.path.insert(0, os.environ.get('MHGU_UNICORN_PATH', 'D:/codex/bow-landing-test-tools'))
+if os.environ.get('MHGU_UNICORN_PATH'):
+    sys.path.insert(0, os.environ['MHGU_UNICORN_PATH'])
 from nso import Nso
 import unicorn
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
