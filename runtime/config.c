@@ -1829,12 +1829,6 @@ void config_load(void) {
     // Not with FSR (its stand-ins and inputs are made for the game rendering at its input size: that keeps the old way)
     // nor with MHGU_NO_RSCALE=1 (A/B tests).
     bool rscale = !g_config.fsr && h > 1080 && !getenv("MHGU_NO_RSCALE");
-#ifdef __ANDROID__
-    // Android: the 2D screen-sized targets (the loading backdrop and other HUD layers) are not mapped continuously by
-    // the scaling path yet: a target 1188x540 made 1400x636 leaves a duplicated strip at the left. Render at the
-    // window's own size as 0.1.6 did; MHGU_RSCALE=1 keeps the experiment available.
-    if (!getenv("MHGU_RSCALE")) rscale = false;
-#endif
     if (!rscale) {  // The game's 2.5 GB heap fits its GPU pool (below) grown by ~665 MB at most (4800x2700 played;
         // 5120x2880, +774: "out of command memory" before the town). Larger render sizes never worked: their targets
         // alone are more than the pool. Keep the shape, lower the size to what fits with 640 MB.
