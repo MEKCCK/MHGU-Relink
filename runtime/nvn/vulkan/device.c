@@ -642,13 +642,7 @@ static void create_swapchain(void) {
         LOG("[vk] surface: current %ux%u, transform 0x%x (supported 0x%x), extent %ux%u..%ux%u; window %dx%d\n",
             caps.currentExtent.width, caps.currentExtent.height, caps.currentTransform, caps.supportedTransforms,
             caps.minImageExtent.width, caps.minImageExtent.height, caps.maxImageExtent.width, caps.maxImageExtent.height, w, h);
-    // The window is what the activity shows, but the surface's own extent is what the compositor uses when both are
-    // landscape: on a phone with a left cutout (landscape), SDL's window can include the inset while the surface does
-    // not, and forcing the window size repeated a strip of the picture at the left edge. Only override when the
-    // surface reports the panel's portrait size (the rotation case above).
-    bool win_landscape = w > h, surf_landscape = caps.currentExtent.width > caps.currentExtent.height;
-    bool need_window_extent = caps.currentExtent.width == UINT32_MAX || (w > 0 && h > 0 && win_landscape != surf_landscape);
-    if (need_window_extent && w > 0 && h > 0) {
+    if (w > 0 && h > 0) {
         ext.width = (uint32_t)w, ext.height = (uint32_t)h;
         if (caps.maxImageExtent.width && caps.maxImageExtent.height) {  // (within what the surface takes)
             if (ext.width > caps.maxImageExtent.width) ext.width = caps.maxImageExtent.width;
@@ -656,8 +650,7 @@ static void create_swapchain(void) {
         }
         if (ext.width < caps.minImageExtent.width) ext.width = caps.minImageExtent.width;
         if (ext.height < caps.minImageExtent.height) ext.height = caps.minImageExtent.height;
-    } else if (caps.currentExtent.width == UINT32_MAX &&
-               (caps.currentTransform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR))) {
+    } else if (caps.currentTransform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)) {
         uint32_t t = ext.width;
         ext.width = ext.height, ext.height = t;
     }
