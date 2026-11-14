@@ -193,3 +193,4 @@ MIT；第三方组件见 `THIRD_PARTY_NOTICES`。运行时的内核、IPC、NVN 
 - `NoiseSuppression`：更严格的麦克风门限（并非 RNNoise）。
 - Push to talk：键盘 `V`，或手柄的 MISC1 按钮。
 - PC 构建需要 `libopus`（Arch：`pacman -S opus`）；没有它时构建仍可完成，但语音关闭。
+- PC 端没有自带 AEC：外放会把游戏声和对方语音收进麦克风，建议戴耳机；Linux 可用 PipeWire 的 `module-echo-cancel`，或使用 Push to talk。

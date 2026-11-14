@@ -141,3 +141,5 @@ adb install -r -i com.mhgu.relink MHGU-0.2.0.apk
 
 只有同样运行本项目（或同一语音协议）的玩家能听到；原版 Switch 不支持该语音协议。Push to talk 目前需要
 键盘 `V` 或手柄 MISC1；Android 触屏暂无独立语音键。
+
+Android 会以 AAudio 的 `VOICE_COMMUNICATION` 输入预设打开麦克风，让系统回声消除器拿到扬声器参考；外放时仍建议戴耳机，尤其是双方都外放的情况。
