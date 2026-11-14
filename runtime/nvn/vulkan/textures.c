@@ -254,12 +254,10 @@ static bool low_memory_textures(void) {
 static bool tex_scalable(const NvnTexture *t) {
     if (g_rscale[0] <= 1.0f && g_rscale[1] <= 1.0f) return false;
     if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || !t->width || !t->height) return false;
-    for (int k = 0; k < 8; k++) {
-        uint32_t m = (1u << k) - 1, w0 = g_render_size[0] >> k, h0 = g_render_size[1] >> k;
-        uint32_t w1 = (g_render_size[0] + m) >> k, h1 = (g_render_size[1] + m) >> k;
-        if (!w0 || !h0) break;
-        if ((t->width == w0 || t->width == w1) && (t->height == h0 || t->height == h1)) return true;
-    }
+    // Only the full screen-sized targets: the half and smaller targets are the 2D HUD/loading chain, whose
+    // guest-size copies and texel coordinates do not map continuously through the scale table (a 1188x540 target made
+    // 1400x636 left a duplicated strip at the left). The 3D scene target is the full render size and stays scaled.
+    if (t->width == g_render_size[0] && t->height == g_render_size[1]) return true;
     return false;
 }
 static void create_image(NvnTexture *t, TexBackend *b) {
