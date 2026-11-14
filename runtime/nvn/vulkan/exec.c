@@ -3859,7 +3859,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
-                    if (loading_strip || ui_loading_pass) {
+                    if (loading_strip) {
                         new_pos_x = pos_x * s;
                     } else {
                         new_pos_x = hud_map_x(pos_x, s, anchor_left, anchor_right, anchor);
