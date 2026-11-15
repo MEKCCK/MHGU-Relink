@@ -821,7 +821,7 @@ EditorZone g_editor_zones[TZ_COUNT], g_build_editor[TZ_COUNT];
 
 Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_quest) {
     (void)in_quest;
-    if (k < 0 || k >= TZ_COUNT) return {};
+    if (k < 0 || k >= TZ_MAP) return {};  // The reserved map slot is kept only for layout-file compatibility.
     EditorZone z;
     {
         std::lock_guard<std::mutex> l(g_zone_lock);
@@ -831,7 +831,6 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
     const bool moved = config_live_touch_hud() != 0;
     Rect r = z.bounds;
     if (!r.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != moved) {
-        if (k == TZ_MAP) return {};  // Use observed map pieces rather than an assumed map location or size.
         // Keep an editable handle even before this HUD part has appeared in the current scene.
         const float aspect = g_render_aspect > 0 ? g_render_aspect : w / h;
         const float right = 640.0f * (1.0f + std::min(g_ui_anchor_aspect, aspect) / aspect);
@@ -851,11 +850,6 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
     r.x1 = p.x0 + (r.x1 + (layout.zx[k] + MARGIN[k][2] + ZONE_SLOP) * sx) * p.w / 1280.0f;
     r.y0 = p.y0 + (r.y0 + (layout.zy[k] - MARGIN[k][1] - ZONE_SLOP) * sy) * p.h / 720.0f;
     r.y1 = p.y0 + (r.y1 + (layout.zy[k] + MARGIN[k][3] + ZONE_SLOP) * sy) * p.h / 720.0f;
-    if (k == TZ_MAP) {
-        float side = std::max(48.0f, .09f * h), cx = (r.x0 + r.x1) * .5f, cy = (r.y0 + r.y1) * .5f;
-        r.x0 = std::min(r.x0, cx - side * .5f), r.x1 = std::max(r.x1, cx + side * .5f);
-        r.y0 = std::min(r.y0, cy - side * .5f), r.y1 = std::max(r.y1, cy + side * .5f);
-    }
     return r;
 }
 
@@ -1419,7 +1413,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         }
         int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.0f, true, false, s.in_quest, true, control_profile(s));
         if (c < 0 && control_profile(s) >= 0) {  // Visible buttons stay editable; HUD handles beat only their enlarged touch areas.
-            for (int k = 0; k < TZ_COUNT && c < 0; k++)
+            for (int k = 0; k < TZ_MAP && c < 0; k++)
                 if (editor_zone_rect(s.layout, k, s.w, s.h, s.in_quest).in(x, y)) c = ZONE_SEL + k;
         }
         if (c < 0) c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.5f, true, false, s.in_quest, true, control_profile(s));
@@ -1449,6 +1443,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             if (a && b && c >= 0 && c < C_COUNT) s.layout.scale[c] = s.pinch_s0 * hypotf(a->x - b->x, a->y - b->y) / s.pinch_d0, clamp_place(s, c);
         } else if (f->ctl >= ZONE_SEL) {  // a HUD part: in the canvas' units (the HUD keeps its 16:9 shape: squeeze)
             int k = f->ctl - ZONE_SEL;
+            if (k < 0 || k >= TZ_MAP) return;
             Pic pic = picture(s.w, s.h);
             s.layout.zx[k] = std::clamp(s.layout.zx[k] + dx * 1280.0f / pic.w / squeeze(), -1400.0f, 1400.0f);
             s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h / squeeze_y(), -800.0f, 800.0f);
@@ -2115,7 +2110,7 @@ extern "C" void touch_reset(void) {
 extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
                                  float offset_x, float offset_y) {
     (void)game_x;
-    if (zone < 0 || zone >= TZ_COUNT) return;
+    if (zone < 0 || zone >= TZ_MAP) return;
     EditorZone &z = g_build_editor[zone];
     float x = canvas_x - offset_x, y = canvas_y - offset_y;
     if (!z.bounds.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != (g_touch_hud != 0)) {
@@ -2124,7 +2119,7 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
         z.bounds.x0 = std::min(z.bounds.x0, x), z.bounds.x1 = std::max(z.bounds.x1, x);
         z.bounds.y0 = std::min(z.bounds.y0, y), z.bounds.y1 = std::max(z.bounds.y1, y);
     }
-    if (g_build.n[zone] >= 32) return;  // Dense maps still contribute all origins to their editor bounds.
+    if (g_build.n[zone] >= 32) return;
     int i = g_build.n[zone]++;
     g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
 }
@@ -2155,8 +2150,8 @@ extern "C" void touch_hud_frame(void) {
         uint64_t now = SDL_GetTicksNS();
         frames++, with += any;
         if (now - since > 2000 * MS) {
-            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %d target %d map %d)\n", with, frames, g_build.n[0],
-                    g_build.n[1], g_build.n[2], g_build.n[3]);
+            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %d target %d)\n", with, frames, g_build.n[0],
+                    g_build.n[1], g_build.n[2]);
             since = now, frames = with = 0;
         }
     }
@@ -2994,9 +2989,9 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 
 void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h) {
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 96));
-    static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
-                                                    "Hunter Arts - drag to move", "Lock-on - drag to move", "Map - drag to move"};
-    for (int k = 0; k < TZ_COUNT; k++) {
+    static const char *const ZONE_HINT[TZ_MAP] = {"Items: tap to use, swipe to change - drag to move",
+                                               "Hunter Arts - drag to move", "Lock-on - drag to move"};
+    for (int k = 0; k < TZ_MAP; k++) {
         if (control_profile(s) < 0) break;
         Rect r = editor_zone_rect(s.layout, k, w, h, s.in_quest);
         if (!r.ok) continue;

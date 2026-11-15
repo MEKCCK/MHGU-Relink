@@ -14,9 +14,6 @@ static inline int hud_touch_zone(float x, float y, float z, bool hunt_hud) {
         if (x >= 1170.0f && x <= 1230.0f && y >= 16.0f && y <= 95.0f) return HUD_TOUCH_TARGET;
     } else if (fabsf(z - 103.0f) < 0.5f && !(y < 500.0f && x < 900.0f)) {
         return HUD_TOUCH_ITEM;
-    } else if (fabsf(z - 105.0f) < 0.5f) {
-        // The minimap uses the same HUD layer in quests and in the village / Hub.
-        return HUD_TOUCH_MAP;
     }
     return HUD_TOUCH_NONE;
 }
@@ -30,7 +27,8 @@ typedef struct HudTouchOffset {
 static inline HudTouchOffset hud_touch_offset(int zone, bool visible, const volatile float dx[HUD_TOUCH_COUNT],
                                               const volatile float dy[HUD_TOUCH_COUNT], float sx, float sy) {
     HudTouchOffset offset = {0};
-    offset.active = visible && zone >= 0 && zone < HUD_TOUCH_COUNT;
+    // The former map slot remains in saved layouts only; it never moves the map.
+    offset.active = visible && zone >= 0 && zone < HUD_TOUCH_MAP;
     if (offset.active) {
         offset.x = dx[zone] * sx;
         offset.y = dy[zone] * sy;
@@ -41,15 +39,6 @@ static inline HudTouchOffset hud_touch_offset(int zone, bool visible, const vola
 
 static inline bool hud_touch_relax_scissor(bool relaxed, HudTouchOffset offset) {
     return relaxed || offset.moved;
-}
-
-// A moved minimap keeps its local crop. A whole-pass scissor must keep covering the pass.
-// The caller has already applied the same horizontal / vertical anchors as the map pieces.
-static inline void hud_touch_map_scissor(int rect[4], HudTouchOffset offset, float width, float height) {
-    if (!offset.moved || width <= 0.0f || height <= 0.0f) return;
-    if (!(rect[0] > 0 || rect[1] > 0 || rect[2] < width || rect[3] < height)) return;
-    rect[0] += (int)lroundf(offset.x * width / 1280.0f);
-    rect[1] += (int)lroundf(offset.y * height / 720.0f);
 }
 
 // Group re-anchoring runs later and would overwrite both manual Y and its feedback base.

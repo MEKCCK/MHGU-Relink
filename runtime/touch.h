@@ -50,7 +50,7 @@ extern volatile int g_touch_hud;
 // and subsequent taps select the next monster; holding the icon for 500 ms toggles the lock. The render thread passes
 // each moved part's place (the game's
 // position, and where it went on the 1280x720 canvas: nvn/vulkan/exec.c cbuf_info), and closes each frame (device.c).
-enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_COUNT };  // MAP reports editor placement only; no gameplay tap action.
+enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_COUNT };  // MAP is reserved for saved-layout compatibility; not editable.
 // where the player put them in the layout editor: an offset from their default place, in the game's 16:9 canvas
 // units (1280 x 720); the render thread adds it (nvn/vulkan/exec.c)
 extern volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];

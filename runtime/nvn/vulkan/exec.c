@@ -994,7 +994,6 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_h = -1;  // a menu's partial scissor follows its entire canvas horizontally
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
-static HudTouchOffset ui_map_scissor;  // the minimap's manual placement translates its local crop, without opening it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 static uint64_t ui_menu_frame;  // the frame (g_present_count) that last drew a layer 97 menu (ui_preview_map)
 // The HUD quads drawn last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left / 1 right /
@@ -2134,13 +2133,6 @@ static VkRect2D scissor_rect(void) {
             y = (int)floorf(off + y0 * sy);
             sh = (int)ceilf(off + y1 * sy) - y;
         }
-    }
-    if (ui_map_scissor.moved && !ui_relax_scissor) {
-        float pw, ph;
-        pass_guest_size(&pw, &ph);
-        int rect[4] = {x, y, sw, sh};
-        hud_touch_map_scissor(rect, ui_map_scissor, pw, ph);
-        x = rect[0], y = rect[1];
     }
     {
         PreviewMap pm;
@@ -3624,10 +3616,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (size > r.size && r.size) size = r.size;
     if (size < 16) size = 16;
     if (!guest_range_ok(r.addr, size)) return zero_ubo(size);
-    if (stage == 0 && k == 3) {
-        ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
-        ui_map_scissor = (HudTouchOffset){0};
-    }
+    if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
     // (a pass the size of the game's picture, in the guest's units: FSR's stand-ins and scaled targets are larger)
     bool screen_pass = stage == 0 && k == 3 && roundf((float)pass_h / pass_sy) == (float)g_render_size[1];
     if (screen_pass && !st.ds[0] && size >= 64) {
@@ -3695,16 +3684,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool menu_canvas = false;
                 float new_pos_x = pos_x, new_pos_y = pos_y;
                 bool item_bar_move = false, arts_move = false, target_move = false, status_edge = false;
-                // Recognize the Meownster frame before classifying its first layer-105 piece as a minimap.
-                if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                 // the hunt's HUD (not a menu, the results, a loading screen, the title): its item bar, Hunter Arts and
                 // target camera answer a finger (runtime/touch.cpp), moved or not; with the touch controls they move
                 bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !ui_title_pass &&
                                 !ui_meownster_pass;
                 int touch_zone = hud_touch_zone(pos_x, pos_y, pos_z, hunt_hud);
-                if (touch_zone == HUD_TOUCH_MAP && ui_frontend_pass) touch_zone = HUD_TOUCH_NONE;
                 bool item_bar_part = false, arts_part = false, target_part = false;
-                bool map_part = touch_zone == HUD_TOUCH_MAP;
                 bool grouped = false;
                 int vgroup = 1;
 
@@ -3853,6 +3838,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // reward list over it (100), the Reward List header and the prompts at the bottom. Layer 100 went to the
                     // bottom with its rule: the tokens sat too low on the map, the lead Palico below the frame, and the
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
+                    if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
                     // Layer 110 outside the loading screen (the bowgun's reticle, lock-on markers) marks points of the 3D
                     // picture, which at 16:10 (Vert+: 16:9's width, more height about the centre) is the 16:9 one scaled
@@ -3907,19 +3893,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     HudTouchOffset offset = hud_touch_offset(touch_zone, touch_visible(), g_touch_zone_dx, g_touch_zone_dy, s, sy);
                     new_pos_x += offset.x;
                     new_pos_y += offset.y;
-                    if (map_part) {
-                        ui_map_scissor = offset;
-                        if (offset.moved && s < 1.0f) ui_scissor_h = anchor;
-                    } else {
-                        ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
-                    }
+                    ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
                     if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     if (arts_part) {
                         touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                         ui_art_piece = true, ui_art_game_y = pos_y;
                     }
                     if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
-                    if (map_part) touch_hud_piece(TZ_MAP, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     // One anchor per window (ui_group_end), on a picture narrower than 16:9. Not for the hunt's status HUD
                     // and item bar (103), the minimap (105), the loading screen, or the bars that belong to an edge (a
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
@@ -4906,17 +4886,15 @@ static void draw(CmdRec *r, bool indexed) {
 
     // ---- descriptor sets
     ui_art_piece = false;
-    ui_map_scissor = (HudTouchOffset){0};
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0)};
     if (ss_need(SS_SETS, ss.sets_layout == pr->layout && !memcmp(ss.sets, sets, sizeof sets))) {  // (the same ones: kept)
         ss.sets_layout = pr->layout, memcpy(ss.sets, sets, sizeof sets);
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);
     }
-    if (ui_relax_scissor || ui_scissor_v >= 0 || ui_scissor_h >= 0 || ui_map_scissor.moved) {  // (set while the constants above were built: for this draw only; the
+    if (ui_relax_scissor || ui_scissor_v >= 0 || ui_scissor_h >= 0) {  // (set while the constants above were built: for this draw only; the
         apply_scissor(cb);                         // next draw and any clear before it get the game's scissor again)
         ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
-        ui_map_scissor = (HudTouchOffset){0};
     }
 
     // ---- indices (copied; the largest index bounds the vertex data copied below)
