@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -23,6 +24,21 @@ static bool host_rename_path(const char *oldpath,const char *newpath) {
 #include "../runtime/touch.cpp"
 #undef SDL_RenamePath
 
+// Keep the same behavioral harness buildable against the frozen pre-fix runtime.
+// Its one shared timestamp must fail per-zone behavior, not fail compilation.
+template<typename T> static auto &hud_timestamp(T &stamps,int zone) {
+    if constexpr(std::is_array_v<T>) return stamps[zone];
+    else return stamps;
+}
+static void hud_art_slot(float game_y,int slot) {
+#ifdef MHGU_TOUCH_BASELINE_NO_ART_SLOT
+    // The archived runtime predates the renderer marker API; it observes only the pieces.
+    (void)game_y; (void)slot;
+#else
+    touch_hud_art_slot(game_y,slot);
+#endif
+}
+
 static SDL_Window *window;
 static Config cfg;
 static bool settings_open;
@@ -31,7 +47,7 @@ static int config_saves;
 static int drawn, ranged, profile, bow_type, weapon_override = -1;
 static constexpr int UNKNOWN_WEAPON = -2;
 static bool in_quest = true;
-static bool aiming, lock_on, persistent_lock_on, hunt_camera = true;
+static bool aiming, lock_on, persistent_lock_on, hunt_camera = true, hunter_moving = true;
 static int target_cycles;
 static uint32_t local_hunter;
 static struct {
@@ -89,7 +105,7 @@ int weapon_ranged(uint32_t) { return ranged; }
 int weapon_type(void) { return weapon_override == UNKNOWN_WEAPON ? -1 : weapon_override >= 0 ? weapon_override : ranged == WEAPON_BOWGUN ? 4 : ranged == WEAPON_BOW ? 10 : 0; }
 int presence_in_quest(void) { return in_quest; }
 bool weapon_aiming(uint32_t) { return aiming; }
-bool weapon_moving(uint32_t) { return true; }
+bool weapon_moving(uint32_t) { return hunter_moving; }
 unsigned weapon_action(uint32_t) { return 0; }
 int weapon_bow_type(void) { return bow_type; }
 bool mousecam_active(void) { return hunt_camera; }
@@ -240,7 +256,7 @@ static void fresh(int w = 1280, int h = 720) {
     g_s.touched = true; g_s.w = (float)w; g_s.h = (float)h; g_s.sel = -1;
     cfg = {}; cfg.touch_controls = TOUCH_ON; cfg.touch_auto_r = 0;
     const int shown[] = TOUCH_SHOW_DEFAULT; std::copy(shown, shown + TB_COUNT, cfg.touch_show);
-    settings_open = false; config_save_fail=companion_commit_fail=false; config_saves=0; drawn = 0; ranged = 0; bow_type = 0; aiming = lock_on = persistent_lock_on = false; hunt_camera = true;
+    settings_open = false; config_save_fail=companion_commit_fail=false; config_saves=0; drawn = 0; ranged = 0; bow_type = 0; aiming = lock_on = persistent_lock_on = false; hunt_camera = hunter_moving = true;
     local_hunter=0; bow_drag={};
     target_cycles = 0; item_steps.clear();
     g_lock_follow = g_lock_shots = false;
@@ -455,6 +471,7 @@ static void game_menu_pages_and_slider() {
     puts("PASS: direct page-arrow taps page once; skin-tone slider follows the finger without camera/A input, panel taps confirm and changed slider screens cancel");
 }
 static ImVec2 hud(int zone, float x, float y) {
+    if(zone==TZ_ARTS) hud_art_slot(y,0);
     touch_hud_piece(zone, x, y, x, y, 0, 0); touch_hud_frame();
     Rect r = zone_rect(zones(), zone, (float)screen_w, (float)screen_h); assert(r.ok);
     return ImVec2((r.x0 + r.x1) * .5f, (r.y0 + r.y1) * .5f);
@@ -843,6 +860,48 @@ static void quest_dpad_camera() {
 
 static void no_stick_camera(const Input &v) {
     assert(!v.dx && !v.dy && !v.rx && !v.ry);
+}
+static void hunter_art_first_entry() {
+    fresh(); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0);
+    hunt_camera=hunter_moving=false; aiming=false; g_town_ns=0; g_play_ns=0;
+    in_quest=false; local_hunter=0; update(); assert(g_s.menu);
+    in_quest=true; local_hunter=0x08004000; drawn=1; update(); assert(g_s.menu);
+    auto frame=[]() {
+        // The original HUD's 631 row is moved to a clear canvas area; identity is tested separately.
+        touch_hud_piece(TZ_ARTS,726,631,640,280,0,0);
+        touch_hud_piece(TZ_ARTS,730,637,644,286,0,0);
+        hud_art_slot(631,0);
+        touch_hud_piece(TZ_ITEM,1000,640,640,640,0,0);
+        touch_hud_frame();
+    };
+    auto point=[]() {
+        const Rect r=zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h); assert(r.ok);
+        return ImVec2((r.x0+r.x1)*.5f,(r.y0+r.y1)*.5f);
+    };
+    frame(); const Input entered=update(B(BTN_B),true);
+    if(g_s.menu) fprintf(stderr,"ART FIRST ENTRY FAILURE: fresh quest HUD remained menu with no camera/movement/menu round-trip\n");
+    assert(!g_s.menu && entered.b==B(BTN_B) && !entered.touch_b); no_stick_camera(entered);
+    ImVec2 p=point(); event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind==F_ARTS);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); const Input first=update(B(BTN_B),true);
+    const uint64_t directions=DPAD_UP|DPAD_RIGHT|DPAD_DOWN;
+    assert(first.touch_b && !(first.touch_b&~directions) && first.b==(first.touch_b|B(BTN_B)));
+    no_stick_camera(first); const uint64_t selected=first.touch_b;
+    touch_reset(); game_menu_state(true);
+    p=point(); event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+    assert(finger(g_s,1)->kind!=F_ARTS);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); const Input menu=update(); assert(!(menu.touch_b&directions)); no_stick_camera(menu);
+    touch_reset(); g_menu_ns=0; g_window_open=false; frame(); update(); assert(!g_s.menu);
+    p=point(); event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind==F_ARTS);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); const Input returned=update();
+    assert(returned.touch_b==selected && returned.b==selected); no_stick_camera(returned);
+    for(int missing=0;missing<4;++missing) {
+        fresh(); hunt_camera=hunter_moving=false; aiming=false; g_town_ns=0; g_play_ns=0;
+        in_quest=missing!=0; local_hunter=missing==1?0:0x08004000;
+        if(missing!=2) frame();
+        if(missing==3) hud_timestamp(g_zones.ns,TZ_ARTS)=SDL_GetTicksNS()-stale_limit()-1;
+        update(); assert(g_s.menu);
+    }
+    puts("PASS: fresh quest HUD enables the first Hunter Art tap without prior movement, camera callbacks or opening a menu; explicit menus still suppress it, closing preserves its direction, and town/no-local-hunter/no-HUD/stale-Art with fresh items cannot invent gameplay");
 }
 static void universal_floating_stick() {
     for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080)}) {
@@ -1429,9 +1488,12 @@ static void editor_hud_quest_only() {
             g_zones={}; g_build={};
             for (int cache=0;cache<3;++cache) {
                 if (cache==1) {
-                    for (int k=0;k<TZ_COUNT;++k) touch_hud_piece(k,640,260.f+k*90,640,260.f+k*90,0,0);
+                    for (int k=0;k<TZ_COUNT;++k) {
+                        touch_hud_piece(k,640,260.f+k*90,640,260.f+k*90,0,0);
+                        if(k==TZ_ARTS) hud_art_slot(260.f+k*90,0);
+                    }
                     touch_hud_frame();
-                } else if (cache==2) g_zones.ns=SDL_GetTicksNS()-stale_limit()-1;
+                } else if (cache==2) for(int k=0;k<TZ_COUNT;++k) hud_timestamp(g_zones.ns,k)=SDL_GetTicksNS()-stale_limit()-1;
                 for (int k=0;k<TZ_COUNT;++k) assert(!editor_hud_rect(k).ok);
                 const auto geometry=touch_geometry();
                 for (int k=0;k<TZ_COUNT;++k) { g_s.layout.zx[k]+=123; g_s.layout.zy[k]+=87; }
@@ -1504,6 +1566,7 @@ static void editor_hud_feedback() {
     for (int k=0;k<TZ_COUNT;++k) {
         const float ox=g_s.layout.zx[k]*squeeze(),oy=g_s.layout.zy[k]*squeeze_y();
         touch_hud_piece(k,base[k].x,base[k].y,base[k].x+ox,base[k].y+oy,ox,oy);
+        if(k==TZ_ARTS) hud_art_slot(base[k].y,0);
     }
     touch_hud_frame(); Rect remembered[TZ_COUNT];
     for (int k=0;k<TZ_COUNT;++k) { remembered[k]=editor_hud_rect(k); assert(g_editor_zones[k].bounds.ok); }
@@ -1512,9 +1575,9 @@ static void editor_hud_feedback() {
     touch_hud_piece(TZ_ITEM,base[TZ_ITEM].x,base[TZ_ITEM].y,base[TZ_ITEM].x+80,base[TZ_ITEM].y+15,80,15);
     touch_hud_frame();
     for (int k=0;k<TZ_COUNT;++k) near_rect(remembered[k],editor_hud_rect(k));
-    assert(!zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
-    assert(!zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h).ok);
-    g_zones.ns=SDL_GetTicksNS()-stale_limit()-1;
+    assert(zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
+    assert(zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h).ok);
+    for(int k=0;k<TZ_COUNT;++k) hud_timestamp(g_zones.ns,k)=SDL_GetTicksNS()-stale_limit()-1;
     assert(!zone_rect(zones(),TZ_ITEM,(float)screen_w,(float)screen_h).ok);
     touch_hud_frame();  // A wholly empty render frame also keeps all editor handles.
     for (int k=0;k<TZ_COUNT;++k) near_rect(remembered[k],editor_hud_rect(k));
@@ -1545,6 +1608,150 @@ static void editor_hud_feedback() {
         }
     }
     puts("PASS: per-HUD editor caches subtract renderer-applied offsets, survive missing/empty/expired live frames, reapply another preset correctly and reject incompatible mode/anchor/aspect; ordinary gameplay never receives ghost HUD hit regions");
+}
+static void hunter_art_zone_lifetime() {
+    fresh(); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0); update();
+    touch_hud_piece(TZ_ARTS,726,631,640,280,0,0);
+    hud_art_slot(631,0);
+    touch_hud_piece(TZ_TARGET,1200,55,1000,120,0,0);
+    touch_hud_piece(TZ_ITEM,1000,640,640,620,0,0); touch_hud_frame();
+    const Rect arts=zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h);
+    const Rect target=zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h);
+    assert(arts.ok && target.ok); const Zones first=zones();
+    const ImVec2 p((arts.x0+arts.x1)*.5f,(arts.y0+arts.y1)*.5f);
+    event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind==F_ARTS);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); const uint64_t selected=update().touch_b; assert(selected);
+    touch_reset();
+    touch_hud_piece(TZ_ITEM,1000,640,660,620,20,0); touch_hud_frame();
+    const Rect kept_arts=zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h);
+    const Rect kept_target=zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h);
+    if(!kept_arts.ok || !kept_target.ok) fprintf(stderr,"ART ZONE LIFETIME FAILURE: item-only frame erased another live HUD zone\n");
+    near_rect(arts,kept_arts); near_rect(target,kept_target);
+    assert(hud_timestamp(g_zones.ns,TZ_ARTS)==hud_timestamp(first.ns,TZ_ARTS) &&
+           hud_timestamp(g_zones.ns,TZ_TARGET)==hud_timestamp(first.ns,TZ_TARGET));
+    event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind==F_ARTS);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); const Input after_item=update();
+    assert(after_item.touch_b==selected && after_item.b==selected); no_stick_camera(after_item); touch_reset();
+    hud_timestamp(g_zones.ns,TZ_ARTS)=SDL_GetTicksNS()-stale_limit()-1;
+    const uint64_t old_art=hud_timestamp(g_zones.ns,TZ_ARTS);
+    touch_hud_piece(TZ_ITEM,1000,640,660,620,20,0); touch_hud_frame();
+    assert(hud_timestamp(g_zones.ns,TZ_ARTS)==old_art && !zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
+    assert(zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h).ok && zone_rect(zones(),TZ_ITEM,(float)screen_w,(float)screen_h).ok);
+    event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind!=F_ARTS);
+    event(SDL_EVENT_FINGER_CANCELED,1,p.x,p.y); assert(!update().touch_b);
+    touch_hud_piece(TZ_TARGET,1200,55,1010,120,10,0); touch_hud_frame();
+    assert(hud_timestamp(g_zones.ns,TZ_ARTS)==old_art && !zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
+    touch_hud_piece(TZ_ARTS,726,631,660,310,20,30); hud_art_slot(631,0); touch_hud_frame();
+    near_rect(arts,zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h),20,30);
+    hud_timestamp(g_zones.ns,TZ_TARGET)=SDL_GetTicksNS()-stale_limit()-1;
+    const uint64_t old_target=hud_timestamp(g_zones.ns,TZ_TARGET),new_art=hud_timestamp(g_zones.ns,TZ_ARTS);
+    touch_hud_piece(TZ_ITEM,1000,640,660,620,20,0); touch_hud_frame();
+    assert(hud_timestamp(g_zones.ns,TZ_TARGET)==old_target && !zone_rect(zones(),TZ_TARGET,(float)screen_w,(float)screen_h).ok);
+    assert(hud_timestamp(g_zones.ns,TZ_ARTS)==new_art && zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h).ok);
+    const Zones before_empty=zones(); touch_hud_frame();
+    for(int k=0;k<TZ_COUNT;++k) assert(hud_timestamp(g_zones.ns,k)==hud_timestamp(before_empty.ns,k));
+    puts("PASS: item-only frames preserve fresh Hunter Arts/target positions and Art input; each zone expires by its own timestamp, other-zone/empty frames cannot refresh an expired hit region, and the next real Art piece restores only its new location");
+}
+static std::vector<ImVec2> hunter_art_frame(const std::vector<int> &slots,bool markers_first) {
+    const float sx=squeeze(),sy=squeeze_y();
+    const float ox=g_s.layout.zx[TZ_ARTS]*sx,oy=g_s.layout.zy[TZ_ARTS]*sy;
+    const float base_y=cfg.touch_hud?180.f:490.f;
+    const Pic pic=picture((float)screen_w,(float)screen_h);
+    std::vector<ImVec2> points;
+    // Compact visible rows deliberately share coordinates across different slot selections.
+    // Original game Y groups geometry; only the separately captured native icon identifies its slot.
+    auto markers=[&]() {
+        for(size_t row=0;row<slots.size();++row) hud_art_slot(550.f+(float)row*48+4,slots[row]);
+    };
+    if(markers_first) markers();
+    for(size_t i=slots.size();i>0;--i) {
+        const float row=(float)(i-1),gy=550.f+row*48,cy=base_y+row*50*sy+oy;
+        touch_hud_piece(TZ_ARTS,730,gy+6,804+ox,cy+6*sy,ox,oy);
+        touch_hud_piece(TZ_ARTS,726,gy,800+ox,cy,ox,oy);
+    }
+    if(!markers_first) markers();
+    touch_hud_frame();
+    for(size_t row=0;row<slots.size();++row)
+        points.push_back(ImVec2(pic.x0+(835+ox)*pic.w/1280,
+            pic.y0+(base_y+(float)row*50*sy+3*sy+oy)*pic.h/720));
+    return points;
+}
+static void hunter_art_tap(ImVec2 point,int slot) {
+    const uint64_t expected[]={B(BTN_UP),B(BTN_RIGHT),B(BTN_DOWN)};
+    touch_reset(); update();
+    event(SDL_EVENT_FINGER_DOWN,1,point.x,point.y);
+    const Finger *f=finger(g_s,1); assert(f && f->kind==F_ARTS);
+    if(f->part!=slot) fprintf(stderr,"ART SLOT FAILURE: expected slot=%d actual=%d at %.1f,%.1f\n",slot,f->part,point.x,point.y);
+    assert(f->part==slot);
+    event(SDL_EVENT_FINGER_UP,1,point.x,point.y); const Input v=update(B(BTN_B),true);
+    const uint64_t direction=slot>=0?expected[slot]:0;
+    assert(v.touch_b==direction && v.b==(direction|B(BTN_B))); no_stick_camera(v);
+    touch_reset(); assert(!update().touch_b);
+}
+static void hunter_art_sparse_slots() {
+    for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080),ImVec2(1280,800)})
+        for(int moved:{0,1}) for(int mask=1;mask<8;++mask) for(bool markers_first:{false,true}) {
+            fresh((int)size.x,(int)size.y); cfg.touch_hud=moved;
+            std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0);
+            g_s.layout.zx[TZ_ARTS]=markers_first?71:-36; g_s.layout.zy[TZ_ARTS]=markers_first?-27:39;
+            publish_zones(g_s.layout); update();
+            std::vector<int> slots;
+            for(int slot:{2,0,1}) if(mask&(1<<slot)) slots.push_back(slot);
+            const auto points=hunter_art_frame(slots,markers_first);
+            for(size_t row=0;row<slots.size();++row) hunter_art_tap(points[row],slots[row]);
+            // A true camera drag or cancellation cannot activate the row it started over.
+            const ImVec2 p=points.front(); const float dx=.04f*screen_h;
+            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+            event(SDL_EVENT_FINGER_MOTION,1,p.x+dx,p.y);
+            event(SDL_EVENT_FINGER_UP,1,p.x+dx,p.y); assert(!update().touch_b); touch_reset();
+            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+            event(SDL_EVENT_FINGER_CANCELED,1,p.x,p.y); assert(!update().touch_b);
+            game_menu_state(true);
+            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); assert(finger(g_s,1)->kind!=F_ARTS);
+            event(SDL_EVENT_FINGER_UP,1,p.x,p.y); assert(!(update().touch_b&(DPAD_UP|DPAD_RIGHT|DPAD_DOWN)));
+            touch_reset(); game_menu_state(false);
+            const auto returned=hunter_art_frame(slots,!markers_first);
+            for(size_t row=0;row<slots.size();++row) hunter_art_tap(returned[row],slots[row]);
+        }
+    puts("PASS: each native Art slot, all sparse pairs and all three map to Up/Right/Down independently of visible order, shuffled pieces and marker order at four sizes with MoveHUD on/off and custom offsets; drag/cancel/menu never activate Arts and menu close preserves identity");
+}
+static void hunter_art_unknown_slots() {
+    for(int mode=0;mode<5;++mode) {
+        fresh(); std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0); update();
+        touch_hud_piece(TZ_ARTS,726,631,640,280,0,0);
+        if(mode==1) { hud_art_slot(631,-1); hud_art_slot(631,3); hud_art_slot(NAN,1); }
+        if(mode==2) hud_art_slot(400,2);
+        if(mode==3) { hud_art_slot(631,0); hud_art_slot(631,2); }
+        if(mode==4) hud_art_slot(631,1);
+        touch_hud_frame();
+#ifndef MHGU_TOUCH_BASELINE_NO_ART_SLOT
+        if(mode==4) g_zones.art_slot_ns=SDL_GetTicksNS()-stale_limit()-1;
+#endif
+        const Rect rect=zone_rect(zones(),TZ_ARTS,(float)screen_w,(float)screen_h); assert(rect.ok);
+        hunter_art_tap(ImVec2((rect.x0+rect.x1)*.5f,(rect.y0+rect.y1)*.5f),-1);
+    }
+    puts("PASS: absent, invalid, distant, conflicting and expired native slot markers never fall back to a dense slot number or emit a Hunter Art direction");
+}
+static void hunter_art_template_offsets() {
+    for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080),ImVec2(1280,800)}) for(int moved:{0,1}) {
+        fresh((int)size.x,(int)size.y); cfg.touch_hud=moved;
+        std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0); update();
+        g_s.layout.zx[TZ_ARTS]=53; g_s.layout.zy[TZ_ARTS]=-31; publish_zones(g_s.layout);
+        const std::vector<int> slots={2,0}; auto points=hunter_art_frame(slots,true);
+        for(size_t row=0;row<slots.size();++row) hunter_art_tap(points[row],slots[row]);
+        assert(save_layout_file(g_s.layout,COMMON_PATH));
+        touch_edit_begin(); update(); drag_editor_hud(TZ_ARTS,-21,17); editor_click(E_SAVE); update();
+        const Layout saved=g_s.layout; assert(touch_template_save(39,"Sparse Art offsets"));
+        g_s.layout.zx[TZ_ARTS]=0; g_s.layout.zy[TZ_ARTS]=0; publish_zones(g_s.layout);
+        assert(touch_template_use(39)); same_layout(g_s.layout,saved);
+        points=hunter_art_frame(slots,false);
+        for(size_t row=0;row<slots.size();++row) hunter_art_tap(points[row],slots[row]);
+        Layout disk; assert(load_layout_file(&disk,COMMON_PATH)); same_layout(disk,saved);
+        touch_reset(); g_s={}; update(); same_layout(g_s.layout,saved);
+        points=hunter_art_frame(slots,true);
+        for(size_t row=0;row<slots.size();++row) hunter_art_tap(points[row],slots[row]);
+    }
+    puts("PASS: sparse native Art identities survive actual editor dragging, Save, template 40 apply and layout reload with MoveHUD on/off at four sizes; stored offsets retain their values");
 }
 static void editor_hud_priority_and_multitouch() {
     fresh(); assert(save_layout_file(g_s.layout,COMMON_PATH)); update(); touch_edit_begin(); update();
@@ -2665,22 +2872,61 @@ static void preview(const char *path) {
     printf("HOST PREVIEW: %s (%dx%d, actual ImGui draw lists / SDL software renderer; no game scene)\n",path,screen_w,screen_h);
 }
 
+struct HunterArtCase { const char *name; void (*run)(); };
+static const HunterArtCase hunter_art_cases[]={
+    {"first-entry",hunter_art_first_entry},
+    {"zone-lifetime",hunter_art_zone_lifetime},
+    {"sparse-slots",hunter_art_sparse_slots},
+    {"unknown-slots",hunter_art_unknown_slots},
+    {"template-offsets",hunter_art_template_offsets},
+};
+static void run_hunter_art_cases(const char *selected) {
+    int passed=0;
+    for(const HunterArtCase &test:hunter_art_cases) {
+        if(selected && strcmp(selected,test.name)) continue;
+        // An assertion abort leaves its start record and stderr for the external wrapper.
+        printf("{\"suite\":\"hunter-arts\",\"event\":\"case-start\",\"case\":\"%s\"}\n",test.name);
+        test.run();
+        printf("{\"suite\":\"hunter-arts\",\"event\":\"case-result\",\"case\":\"%s\",\"status\":\"pass\"}\n",test.name);
+        ++passed;
+    }
+    assert(passed);
+    printf("{\"suite\":\"hunter-arts\",\"event\":\"summary\",\"status\":\"pass\",\"passed\":%d,\"host_only\":true}\n",passed);
+}
 int main(int argc,char **argv) {
-    (void)argc; (void)argv;
+    bool arts_only=false;
+    const char *art_case=nullptr;
+    const char *const prefix="--hunter-arts-case=";
+    for(int i=1;i<argc;++i) {
+        if(!strcmp(argv[i],"--hunter-arts-only")) arts_only=true;
+        else if(!strncmp(argv[i],prefix,strlen(prefix))) {
+            art_case=argv[i]+strlen(prefix); arts_only=true;
+        } else { fprintf(stderr,"Unknown argument: %s\n",argv[i]); return 2; }
+    }
+    if(art_case) {
+        bool found=false;
+        for(const HunterArtCase &test:hunter_art_cases) found|=!strcmp(art_case,test.name);
+        if(!found) { fprintf(stderr,"Unknown Hunter Art case: %s\n",art_case); return 2; }
+    }
     setvbuf(stdout,nullptr,_IONBF,0);
     assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
     window=SDL_CreateWindow("MHGU common touch host regression",screen_w,screen_h,SDL_WINDOW_HIDDEN); assert(window);
     ImGui::CreateContext(); ImGuiIO &io=ImGui::GetIO(); io.IniFilename=nullptr; io.LogFilename=nullptr;
     io.BackendFlags|=ImGuiBackendFlags_RendererHasTextures; io.Fonts->AddFontDefaultVector();
+    if(arts_only) {
+        run_hunter_art_cases(art_case);
+        ImGui::DestroyContext(); SDL_DestroyWindow(window); SDL_Quit(); return 0;
+    }
     common_startup_and_legacy(); ranged_guard_migration(); common_r_aim_identity(); ammo_default_migration(); common_controls_and_names();
     touch_button_sources(); item_gestures(); auto_r(); floating_stick();
     dpad_visibility(1280,720); dpad_visibility(640,360); layout_roundtrip(); show_settings();
     common_editor_and_failure(); template_roundtrip_and_failure(); template_corrupt_input(); auto_r_sources_and_ownership(); auto_r_lifecycle();
     icon_template_isolation(); icon_import_failures(); icon_resource_fallback(); freeform_icon_drawing();
-    quest_dpad_camera(); universal_floating_stick(); universal_floating_boundaries(); universal_floating_priority_and_reset();
+    quest_dpad_camera(); hunter_art_first_entry(); universal_floating_stick(); universal_floating_boundaries(); universal_floating_priority_and_reset();
     common_floating_editor_roundtrip(); ordinary_button_drag(); button_drag_release_and_multitouch(); button_drag_lifecycle(); button_drag_exclusions();
     bow_charge_drag(); bow_drag_sources(); bow_drag_lifecycle(); bow_drag_manual_aim();
-    editor_hud_quest_only(); editor_hud_dragging(); editor_hud_feedback(); editor_hud_priority_and_multitouch();
+    editor_hud_quest_only(); editor_hud_dragging(); editor_hud_feedback(); hunter_art_zone_lifetime();
+    hunter_art_sparse_slots(); hunter_art_unknown_slots(); hunter_art_template_offsets(); editor_hud_priority_and_multitouch();
     ammo_repeat(); arrow_gesture_ownership(); ammo_visibility_and_editor(); arrow_gesture_lifecycle(); arrow_release_pending_and_overlap(); item_gesture_lifecycle();
     target_switch(1280,720); target_switch(2520,1080); target_switch(3840,1080); persistent_target_lock();
     game_menu_taps(); game_menu_button_coexist(); game_menu_stick_coexist(); game_menu_gesture_lifecycle(); game_menu_pages_and_slider();

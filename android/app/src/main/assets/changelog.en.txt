@@ -1,4 +1,7 @@
-MHGU Relink 0.2.2 · 2026-11-13
+MHGU Relink 0.2.3 · 2026-11-15
+
+2026-11-15: Hunter Art slots and first-use taps
+Preserve the equipped Hunter Art slot when only slot 2 or 3 is present, keeping its display and touch input aligned. Hunter Arts can be tapped on entering a quest without opening and closing a menu first; a partial HUD frame no longer clears the other touch regions.
 
 2026-11-15: Remove gyroscope controls
 Remove phone and controller gyro aiming, sensor sampling and related settings. Legacy motion settings no longer apply. Touch swipes, virtual buttons, sticks and direct menu taps remain available.

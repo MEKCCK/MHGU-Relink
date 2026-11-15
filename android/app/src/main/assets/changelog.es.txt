@@ -1,4 +1,7 @@
-MHGU Relink 0.2.2 · 2026-11-13
+MHGU Relink 0.2.3 · 2026-11-15
+
+2026-11-15: Ranuras de Artes de caza y primer toque
+Se conserva la ranura equipada cuando solo se usa la segunda o la tercera, manteniendo la posición y la entrada táctil correspondientes. Las Artes de caza pueden tocarse al entrar en una misión sin abrir y cerrar antes un menú; un fotograma parcial del HUD ya no borra las otras zonas táctiles.
 
 2026-11-15: Retirar el control por giroscopio
 Se eliminan la puntería por giroscopio del teléfono y del mando, la lectura del sensor y sus ajustes. Los ajustes antiguos de movimiento dejan de aplicarse. Se conservan los deslizamientos táctiles, los botones virtuales, los sticks y los toques directos en los menús.

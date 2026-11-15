@@ -57,6 +57,9 @@ extern volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];
 // offset_x/y are the scaled manual displacement actually applied to this piece, excluding automatic MoveHUD.
 void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
                      float offset_x, float offset_y);
+// Native Hunter Art direction icon on this row: slot 0 / 1 / 2 is Up / Right / Down.
+// The render thread may report it before or after the row pieces; touch_hud_frame publishes them together.
+void touch_hud_art_slot(float game_y, int slot);
 void touch_hud_frame(void);
 void touch_hud_menu(void);  // (render thread) a menu window of the game's was drawn this frame: the menu layout
 

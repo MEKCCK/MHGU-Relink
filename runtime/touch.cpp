@@ -714,7 +714,10 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
 struct Zones {
     int n[TZ_COUNT];
     float gy[TZ_COUNT][32], cx[TZ_COUNT][32], cy[TZ_COUNT][32];  // the game's y; where on the canvas
-    uint64_t ns;
+    uint64_t ns[TZ_COUNT];
+    unsigned art_slot_mask;
+    float art_slot_y[3];  // the native Up / Right / Down icons identify slots even when empty rows are absent
+    uint64_t art_slot_ns;
 };
 std::mutex g_zone_lock;
 Zones g_zones, g_build;  // (g_build: the render thread's alone)
@@ -728,7 +731,7 @@ const float ZONE_SLOP = 10.0f;
 // least 250 ms, at most 1.5 s: a slow frame now and then must not take them away under a finger)
 std::atomic<uint64_t> g_frame_ns{16 * 1000000ull};  // the time between presented frames, smoothed
 uint64_t stale_limit(void) { return std::clamp<uint64_t>(3 * g_frame_ns.load(), 250 * 1000000ull, 1500 * 1000000ull); }
-bool stale(const Zones &z) { return SDL_GetTicksNS() - z.ns > stale_limit(); }
+bool stale(const Zones &z, int k) { return SDL_GetTicksNS() - z.ns[k] > stale_limit(); }
 // The menu layout: while a menu window of the game's is open (drawn just now), and while the hunter is not being
 // played (the title, the main menu, the character creation, a cutscene: no hunt camera and no town walked for a few
 // seconds - a few, so carving or a short animation in a hunt, when the camera handler does not run, keeps the layout)
@@ -753,7 +756,15 @@ bool game_menu(void) {
 // (a bow drawn or a gun aimed has a camera of its own: the hunt camera's handler doesn't run then)
 void play_seen(uint32_t hunter) {  // (the SDL main thread, each input update)
     uint64_t now = plat_now_ns(), town = g_town_ns;
-    if (mousecam_active() || (town && now - town < 400 * 1000000ull) || weapon_moving(hunter) || weapon_aiming(hunter)) g_play_ns = now;
+    // The arts can be ready before the hunt camera has run. A fresh native HUD is also gameplay evidence,
+    // but a cached art panel underneath a menu must not make that menu disappear from the touch controls.
+    uint64_t ticks = SDL_GetTicksNS(), menu = g_menu_ns.load();
+    bool arts = false;
+    if (hunter && presence_in_quest() && (!menu || ticks - menu >= stale_limit())) {
+        std::lock_guard<std::mutex> l(g_zone_lock);
+        arts = g_zones.n[TZ_ARTS] && !stale(g_zones, TZ_ARTS);
+    }
+    if (mousecam_active() || (town && now - town < 400 * 1000000ull) || weapon_moving(hunter) || weapon_aiming(hunter) || arts) g_play_ns = now;
 }
 
 // The game's picture in the window: as wide as it fits in its own shape (g_render_aspect), centred (device.c
@@ -822,7 +833,7 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
 
 Rect zone_rect(const Zones &z, int k, float w, float h) {
     Rect r = {1e30f, 1e30f, -1e30f, -1e30f, false};
-    if (!z.n[k] || stale(z)) return r;
+    if (!z.n[k] || stale(z, k)) return r;
     for (int i = 0; i < z.n[k]; i++) {
         r.x0 = std::min(r.x0, z.cx[k][i]), r.x1 = std::max(r.x1, z.cx[k][i]);
         r.y0 = std::min(r.y0, z.cy[k][i]), r.y1 = std::max(r.y1, z.cy[k][i]);
@@ -835,21 +846,41 @@ Rect zone_rect(const Zones &z, int k, float w, float h) {
     return r;
 }
 // the Hunter Arts' rows (their pieces grouped by the game's y), top to bottom: screen y ranges
-int arts_rows(const Zones &z, float w, float h, float rows[3][2]) {
+int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] = nullptr) {
     int k = TZ_ARTS, n = z.n[k], idx[32];
-    if (!n || stale(z)) return 0;
+    if (!n || stale(z, k)) return 0;
     for (int i = 0; i < n; i++) idx[i] = i;
     std::sort(idx, idx + n, [&](int a, int b) { return z.gy[k][a] < z.gy[k][b]; });
     int nr = 0;
+    float game_y0[3], game_y1[3];
     float last = -1e9f;
     for (int j = 0; j < n; j++) {
         int i = idx[j];
         if (z.gy[k][i] - last > 22.0f) {
             if (nr == 3) break;
+            game_y0[nr] = game_y1[nr] = z.gy[k][i];
             rows[nr][0] = rows[nr][1] = z.cy[k][i], nr++;
         }
+        game_y1[nr - 1] = z.gy[k][i];
         rows[nr - 1][0] = std::min(rows[nr - 1][0], z.cy[k][i]), rows[nr - 1][1] = std::max(rows[nr - 1][1], z.cy[k][i]);
         last = z.gy[k][i];
+    }
+    if (slots) {
+        std::fill(slots, slots + 3, -1);
+        if (SDL_GetTicksNS() - z.art_slot_ns <= stale_limit()) {
+            for (int slot = 0; slot < 3; slot++) {
+                if (!(z.art_slot_mask & (1u << slot))) continue;
+                int row = -1;
+                float best = 1e30f;
+                for (int i = 0; i < nr; i++) {
+                    float y = z.art_slot_y[slot];
+                    float d = y < game_y0[i] ? game_y0[i] - y : y > game_y1[i] ? y - game_y1[i] : 0;
+                    if (d <= 22.0f && d < best) best = d, row = i;
+                }
+                if (row >= 0) slots[row] = slots[row] == -1 ? slot : -2;
+            }
+        }
+        for (int i = 0; i < nr; i++) if (slots[i] < 0) slots[i] = -1;
     }
     Pic p = picture(w, h);
     for (int i = 0; i < nr; i++)
@@ -1504,13 +1535,13 @@ extern "C" bool touch_event(const SDL_Event *e) {
             f->kind = F_TARGET;
         } else if (!s.menu && arts.in(x, y)) {
             float rows[3][2];
-            int nr = arts_rows(z, s.w, s.h, rows), row = -1;
+            int slots[3], nr = arts_rows(z, s.w, s.h, rows, slots), row = -1;
             float best = 1e30f;  // (the row under the finger, or the nearest one)
             for (int i = 0; i < nr; i++) {
                 float d = y < rows[i][0] ? rows[i][0] - y : y > rows[i][1] ? y - rows[i][1] : 0;
                 if (d < best) best = d, row = i;
             }
-            f->kind = F_ARTS, f->part = row;  // (performed on the tap, when it lifts: a drag turns the camera)
+            f->kind = F_ARTS, f->part = row >= 0 ? slots[row] : -1;  // use the native slot, not the visible row number
         } else if (!on_stick && menu_touch_begin(s, *f, e)) {
             return true;
         } else if (in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) && in_stick_zone(s, x, y, item)) {
@@ -1613,7 +1644,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && !f->part && now - f->t0 < 220 * MS &&
         fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
         pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
-    if (f->kind == F_ARTS && tap && f->part >= 0)  // a tap on a Hunter Art's panel: its d-pad direction
+    if (f->kind == F_ARTS && tap && f->part >= 0 && f->part < 3)  // a tap on a Hunter Art's panel: its d-pad direction
         pulse(s, ART_FACE[f->part], 120 * MS),  // (its d-pad direction)
             s.art_row = f->part, s.art_flash = now + 250 * MS, tap_due();
     bool target_hold = f->kind == F_TARGET && !f->moved && !cancel && now - f->t0 >= 500 * MS;
@@ -2048,11 +2079,17 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
 
+extern "C" void touch_hud_art_slot(float game_y, int slot) {
+    if (slot < 0 || slot >= 3 || !std::isfinite(game_y)) return;
+    g_build.art_slot_mask |= 1u << slot;
+    g_build.art_slot_y[slot] = game_y;
+}
+
 extern "C" void touch_hud_frame(void) {
     if (g_build_menu) g_menu_ns = SDL_GetTicksNS();
     g_build_menu = false;
-    // (a frame drawn without those parts keeps the last ones: they age out after 300 ms, zone_rect, when the HUD is
-    // gone; a frame now and then without them must not leave a finger on the camera instead)
+    // Each part keeps its last observed frame until it ages out. An item-only frame must not erase a ready art
+    // or refresh an absent target; a frame now and then without a part must not turn its tap into a camera drag.
     bool any = false;
     for (int k = 0; k < TZ_COUNT; k++) any |= g_build.n[k] != 0;
     static uint64_t last;
@@ -2071,15 +2108,27 @@ extern "C" void touch_hud_frame(void) {
             since = now, frames = with = 0;
         }
     }
-    if (any) {
+    if (any || g_build.art_slot_mask) {
         std::lock_guard<std::mutex> l(g_zone_lock);
-        g_zones = g_build;
-        g_zones.ns = SDL_GetTicksNS();
-        // Editing keeps each part independently; ordinary gameplay still expires its live hit regions.
-        for (int k = 0; k < TZ_COUNT; k++)
+        if (g_build.art_slot_mask) {
+            g_zones.art_slot_mask = g_build.art_slot_mask;
+            memcpy(g_zones.art_slot_y, g_build.art_slot_y, sizeof g_zones.art_slot_y);
+            g_zones.art_slot_ns = t;
+        }
+        for (int k = 0; k < TZ_COUNT; k++) {
+            int n = g_build.n[k];
+            if (!n) continue;
+            g_zones.n[k] = n;
+            memcpy(g_zones.gy[k], g_build.gy[k], n * sizeof(float));
+            memcpy(g_zones.cx[k], g_build.cx[k], n * sizeof(float));
+            memcpy(g_zones.cy[k], g_build.cy[k], n * sizeof(float));
+            g_zones.ns[k] = t;
+            // Editing keeps each part independently; gameplay still expires its live hit regions.
             if (g_build_editor[k].bounds.ok) g_editor_zones[k] = g_build_editor[k];
+        }
     }
     memset(g_build.n, 0, sizeof g_build.n);
+    g_build.art_slot_mask = 0;
     for (EditorZone &z : g_build_editor) z = {};
 }
 
@@ -3051,9 +3100,10 @@ extern "C" void touch_draw(float w, float h) {
     }
     if (arts.ok && now < s.art_flash) {
         float rows[3][2];
-        int nr = arts_rows(z, w, h, rows);
-        if (s.art_row < nr)
-            dl->AddRect(ImVec2(arts.x0, rows[s.art_row][0]), ImVec2(arts.x1, rows[s.art_row][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
+        int slots[3], nr = arts_rows(z, w, h, rows, slots);
+        for (int i = 0; i < nr; i++)
+            if (slots[i] == s.art_row)
+                dl->AddRect(ImVec2(arts.x0, rows[i][0]), ImVec2(arts.x1, rows[i][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
     }
     if (target.ok && config_live_lock_on()) {  // the lock-on: a padlock by the target camera's icon, lit (and its ring) while on
         ImVec2 c((target.x0 + target.x1) * .5f, (target.y0 + target.y1) * .5f);

@@ -1016,7 +1016,28 @@ static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu,
 static bool ui_stamp_pass;  // this pass draws the Quest Complete stamp (its borders, layer 97 at x 640, y 53 / 687, came first)
 static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
 static bool ui_meownster_pass;  // this pass draws the Meownster Hunters return screen (its map frame, layer 105, came first)
+static bool ui_art_piece;
+static float ui_art_game_y;
+static HudArtRows ui_art_build, ui_art_previous;
+static uint64_t ui_art_frame, ui_art_frame_ns, ui_art_seen_ns;
+static bool ui_art_started, ui_art_collected;
 volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every HUD quad of the next frame and its anchor (device.c)
+
+static void hunter_art_frame_begin(void) {
+    if (ui_art_started && ui_art_frame == g_present_count) return;
+    uint64_t now = plat_now_ns();
+    if (!ui_art_started || g_present_count != ui_art_frame + 1 ||
+        (ui_art_seen_ns && now - ui_art_seen_ns > 250000000ull)) {
+        memset(&ui_art_build, 0, sizeof ui_art_build);
+        memset(&ui_art_previous, 0, sizeof ui_art_previous);
+        ui_art_seen_ns = 0;
+    } else if (ui_art_collected) {
+        hud_art_rows_finish(&ui_art_build);
+        ui_art_previous = ui_art_build;
+    }
+    ui_art_collected = false;
+    ui_art_started = true, ui_art_frame = g_present_count, ui_art_frame_ns = now;
+}
 
 // 16:10: a window is drawn as pieces (body, edges, corners, then its text), each placed by its own centre, so one rule
 // could send its top edge up and its bottom edge down (the chat window, the shoutout list, the Guild Card greeting).
@@ -3883,7 +3904,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             arts_top_now = 1e9f, arts_frame = g_present_count;
                         }
                         if (pos_y < arts_top_now) arts_top_now = pos_y;
-                        new_pos_y = (pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
+                        float row_y;
+                        new_pos_y = (hud_art_rows_map(&ui_art_previous, pos_y, &row_y) ? row_y :
+                                     pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
                     }
                     else if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
@@ -3893,7 +3916,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     new_pos_y += offset.y;
                     ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
                     if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
-                    if (arts_part) touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    if (arts_part) {
+                        touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                        ui_art_piece = true, ui_art_game_y = pos_y;
+                        hud_art_rows_piece(&ui_art_build, pos_y);
+                        ui_art_collected = true, ui_art_seen_ns = ui_art_frame_ns;
+                    }
                     if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     // One anchor per window (ui_group_end), on a picture narrower than 16:9. Not for the hunt's status HUD
                     // and item bar (103), the minimap (105), the loading screen, or the bars that belong to an edge (a
@@ -4621,7 +4649,61 @@ static uint32_t max_index16(const uint16_t *s, uint32_t n, uint16_t skip) {
     return max_index16_plain(s, n, skip);
 }
 
+static void hunter_art_slot(Prog *pr, const PipeKey *k, bool indexed, const VkSpan *ib, VkIndexType type,
+                            uint32_t first, uint32_t count, int32_t base_vertex, uint32_t instances) {
+    if (!ui_art_piece || instances != 1 || count < 4 || count > 6) return;
+    int stream = -1;
+    // main 0xc4feb4 (texture) and 0xc55524 (font) write xyz/color/texel-UV vertices (stride 24, UV at 16).
+    for (int i = 0; i < 32; i++) {
+        if (!(k->attr_mask & (1u << i)) || k->attr_fmt[i] != VK_FORMAT_R32G32_SFLOAT || k->attr_off[i] != 16) continue;
+        uint32_t s = k->attr_bind[i];
+        if (s < 16 && k->stride[s] == 24 && !k->divisor[s]) {
+            if (stream >= 0 && stream != (int)s) return;
+            stream = (int)s;
+        }
+    }
+    if (stream < 0 || (indexed && !ib->ptr)) return;
+    Range vb = st.vbuf[stream];
+    if (!vb.addr || vb.addr > UINT32_MAX) return;
+    float uv[6][2], u0 = INFINITY, v0 = INFINITY, u1 = -INFINITY, v1 = -INFINITY;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t index = indexed ? (type == VK_INDEX_TYPE_UINT16 ? ((const uint16_t *)ib->ptr)[i]
+                                                                : ((const uint32_t *)ib->ptr)[i]) : first + i;
+        int64_t vertex = (int64_t)index + (indexed ? base_vertex : 0);
+        if (vertex < 0) return;
+        uint64_t off = (uint64_t)vertex * 24 + 16;
+        if ((vb.size && (off > vb.size || vb.size - off < 8)) || !guest_range_ok(vb.addr + off, 8)) return;
+        memcpy(uv[i], G2H((uint32_t)(vb.addr + off)), 8);
+        if (!isfinite(uv[i][0]) || !isfinite(uv[i][1])) return;
+        u0 = fminf(u0, uv[i][0]), u1 = fmaxf(u1, uv[i][0]);
+        v0 = fminf(v0, uv[i][1]), v1 = fmaxf(v1, uv[i][1]);
+    }
+    unsigned corners = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        int x = fabsf(uv[i][0] - u0) < 0.01f ? 0 : fabsf(uv[i][0] - u1) < 0.01f ? 1 : -1;
+        int y = fabsf(uv[i][1] - v0) < 0.01f ? 0 : fabsf(uv[i][1] - v1) < 0.01f ? 1 : -1;
+        if (x < 0 || y < 0) return;
+        corners |= 1u << (x + 2 * y);
+    }
+    if (corners != 15) return;
+    int slot = -1;
+    for (int i = 0; i < pr->fi->ntex; i++) {
+        NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
+        if (!t || t->addr > UINT32_MAX || t->width != t->height || (t->width != 256 && t->width != 512)) continue;
+        int prompts_hunter_art_slot(uint32_t, float, float, float, float);
+        int found = prompts_hunter_art_slot((uint32_t)t->addr, u0, v0, u1, v1);
+        if (found < 0) continue;
+        if (slot >= 0 && slot != found) return;
+        slot = found;
+    }
+    if (slot >= 0) {
+        hud_art_rows_slot(&ui_art_build, ui_art_game_y, slot);
+        touch_hud_art_slot(ui_art_game_y, slot);
+    }
+}
+
 static void draw(CmdRec *r, bool indexed) {
+    hunter_art_frame_begin();
     if (!st.program) { stat_skipped++; return; }
     if (shadow_skipped()) { stat_skipped++; return; }
     ShaderKey vkey = {0}, fkey = {0};
@@ -4828,6 +4910,7 @@ static void draw(CmdRec *r, bool indexed) {
     apply_scissor(cb);
 
     // ---- descriptor sets
+    ui_art_piece = false;
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0)};
     if (ss_need(SS_SETS, ss.sets_layout == pr->layout && !memcmp(ss.sets, sets, sizeof sets))) {  // (the same ones: kept)
@@ -4890,6 +4973,8 @@ static void draw(CmdRec *r, bool indexed) {
         ss.ib = ib.buf; ss.io = ib.off; ss.it = itype_vk;
         vkCmdBindIndexBuffer(cb, ib.buf, ib.off, itype_vk);
     }
+
+    hunter_art_slot(pr, &k, use_index, &ib, itype_vk, first, use_index ? icount : count, base_vertex, inst);
 
     // ---- vertex streams: the bound range (once per submission) when small, else what this draw can read
     for (int s = 0; s < 17; s++) {
