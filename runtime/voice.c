@@ -65,7 +65,7 @@ bool host_talk_held(void);  // (host_input.c: the V key, or the controller's MIS
 #define VOICE_GATE       0.015f   // louder than this (of full scale) is sent
 #define VOICE_NOISE_GATE 0.02f    // ... and with [Voice] NoiseSuppression, this loud (the room stays out)
 #define VOICE_AGC_TARGET 0.5f     // a voice's peaks are raised towards this
-#define VOICE_AGC_MAX    4.0f     // at most this many times
+#define VOICE_AGC_MAX    2.0f     // at most this many times
 #define VOICE_HANGON     30       // frames sent after the voice stops (300 ms)
 #define VOICE_HANGON_PTT 10       // push to talk: the last word (100 ms)
 #define VOICE_QUEUE      3        // frames kept queued in the playback stream (20..30 ms)
@@ -376,6 +376,12 @@ static void close_all(void) {  // (g_open_mu held)
 static bool open_all(void) {  // (g_open_mu held)
     bool ok = true;
     SDL_AudioSpec spec = {SDL_AUDIO_S16, 1, VOICE_RATE};
+#ifdef __ANDROID__
+    // AAudio's voice-communication input gives the platform echo canceller/noise suppressor the echo reference it
+    // needs; the default (no preset) often records the speaker's game audio raw. The output stream keeps its normal
+    // media routing (setting the stream role here would send the game to the earpiece on some phones).
+    SDL_SetHint(SDL_HINT_ANDROID_AAUDIO_INPUT_PRESET, "7");
+#endif
     if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         LOG("[voice] no sound: %s\n", SDL_GetError());
         ok = false;

@@ -102,7 +102,7 @@ try:
     native_report_path = output / 'native-resource-results.json'
     native = subprocess.run([
         sys.executable, str(project / 'tests/test_bow_resource_native.py'),
-        '--main', os.environ.get('MHGU_NATIVE_MAIN', 'D:/codex/MHGURecompAndroidBuild/game/exefs/main'),
+        '--main', os.environ.get('MHGU_NATIVE_MAIN', str(project / 'game' / 'exefs' / 'main')),
         '--contract', str(contract_path), '--output', str(native_report_path),
     ], env=env, cwd=project, capture_output=True, timeout=120)
     native_log = output / 'native-resource.log'

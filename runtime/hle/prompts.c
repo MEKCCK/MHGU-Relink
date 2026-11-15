@@ -671,7 +671,11 @@ void prompts_frame(void) {
     static int shown[16];
     static bool shown_kbm, any_shown;
     static int shown_view = -1;
+#ifdef __ANDROID__
+    bool kbm = false;  // (touch/controller: there is no keyboard prompt set on a phone)
+#else
     bool kbm = config_live_kbm_prompts() && host_input_last_device() == 1;
+#endif
     int want[16], view = -1;  // (each Switch button's input now; 0: the game's glyph)
     memset(want, 0, sizeof want);
     if (kbm) {

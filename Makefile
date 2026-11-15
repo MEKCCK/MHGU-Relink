@@ -120,7 +120,7 @@ WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windr
 ICON_RES := $(O)/icon.res.o
 UPD_ICON_RES := $(O)/updater-icon.res.o
 LDFLAGS  := $(LINKER) -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
-            -lbcrypt -lntdll -luserenv -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic -lz \
+            -lbcrypt -lsynchronization -lntdll -luserenv -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic -lz \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgu-relink.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared $(LINKER) -static-libgcc $(O)/mhgu-relink.dll.a
