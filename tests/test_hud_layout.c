@@ -21,6 +21,9 @@ static void touch_zones(void) {
         {900, 499, 103.49f, HUD_TOUCH_ITEM}, {899, 499, 103, HUD_TOUCH_NONE},
         {1000, 650, 102.5f, HUD_TOUCH_NONE}, {1000, 650, 103.5f, HUD_TOUCH_NONE},
         {800, 650, 103, HUD_TOUCH_ITEM}, {1000, 650, 100, HUD_TOUCH_NONE},
+        {1150, 180, 105, HUD_TOUCH_MAP}, {980, 75, 104.51f, HUD_TOUCH_MAP},
+        {1230, 310, 105.49f, HUD_TOUCH_MAP}, {1150, 180, 104.5f, HUD_TOUCH_NONE},
+        {1150, 180, 105.5f, HUD_TOUCH_NONE},
     };
     for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i) {
         assert(hud_touch_zone(cases[i].x, cases[i].y, cases[i].z, true) == cases[i].zone);
@@ -33,15 +36,15 @@ static void touch_offsets(void) {
         const char *aspect;
         float sx, sy, x[HUD_TOUCH_COUNT], y[HUD_TOUCH_COUNT];
     } canvases[] = {
-        {"16:9", 1, 1, {21, 42, 63}, {-14, -28, -56}},
-        {"21:9", 16.0f / 21.0f, 1, {16, 32, 48}, {-14, -28, -56}},
-        {"32:9", 0.5f, 1, {10.5f, 21, 31.5f}, {-14, -28, -56}},
-        {"16:10", 1, 0.9f, {21, 42, 63}, {-12.6f, -25.2f, -50.4f}},
+        {"16:9", 1, 1, {21, 42, 63, 84}, {-14, -28, -56, -70}},
+        {"21:9", 16.0f / 21.0f, 1, {16, 32, 48, 64}, {-14, -28, -56, -70}},
+        {"32:9", 0.5f, 1, {10.5f, 21, 31.5f, 42}, {-14, -28, -56, -70}},
+        {"16:10", 1, 0.9f, {21, 42, 63, 84}, {-12.6f, -25.2f, -50.4f, -63}},
     };
     for (unsigned i = 0; i < sizeof canvases / sizeof *canvases; ++i) {
         for (int sign = -1; sign <= 1; sign += 2) {
-            volatile float dx[HUD_TOUCH_COUNT] = {sign * 21.0f, sign * 42.0f, sign * 63.0f};
-            volatile float dy[HUD_TOUCH_COUNT] = {sign * -14.0f, sign * -28.0f, sign * -56.0f};
+            volatile float dx[HUD_TOUCH_COUNT] = {sign * 21.0f, sign * 42.0f, sign * 63.0f, sign * 84.0f};
+            volatile float dy[HUD_TOUCH_COUNT] = {sign * -14.0f, sign * -28.0f, sign * -56.0f, sign * -70.0f};
             for (int zone = 0; zone < HUD_TOUCH_COUNT; ++zone) {
                 HudTouchOffset offset = hud_touch_offset(zone, true, dx, dy, canvases[i].sx, canvases[i].sy);
                 assert(offset.active && offset.moved);
@@ -96,92 +99,39 @@ static void touch_offsets(void) {
         }
 }
 
-static void hunter_art_rows(void) {
-    HudArtRows rows = {0};
-    float y;
-    assert(!hud_art_rows_map(&rows, 600, &y));
-    // Arbitrary native coordinates: slot three alone retains the third designed touch display position.
-    hud_art_rows_piece(&rows, 785);
-    hud_art_rows_slot(&rows, 780, 2);
-    hud_art_rows_piece(&rows, 780);
-    hud_art_rows_finish(&rows);
-    assert(rows.nrows == 1 && rows.rows[0].identified);
-    assert(hud_art_rows_map(&rows, 780, &y)); near(y, 173);
-    assert(hud_art_rows_map(&rows, 785, &y)); near(y, 178);
-    assert(!hud_art_rows_map(&rows, 900, &y));
-    assert(!hud_art_rows_map(&rows, NAN, &y));
-    assert(!hud_art_rows_map(&rows, 780, NULL));
-    // A partial redraw keeps the previously established anchor/position, but supplies no new art identity.
-    hud_art_rows_piece(&rows, 785);
-    hud_art_rows_finish(&rows);
-    assert(rows.nrows == 1 && !rows.rows[0].identified);
-    assert(hud_art_rows_map(&rows, 785, &y)); near(y, 178);
-    // The renderer retains prev over item-only frames, and owns expiry by clearing both objects.
-    HudArtRows prev = rows;
-    assert(hud_art_rows_map(&prev, 780, &y)); near(y, 173);
-    rows = (HudArtRows){0};
-    assert(!hud_art_rows_map(&rows, 780, &y));
-
-    const float native_y[] = {590, 640, 690};
-    const int slots[] = {2, 0, 1};
-    for (int i = 2; i >= 0; i--) {
-        hud_art_rows_slot(&rows, native_y[i], slots[i]);
-        hud_art_rows_piece(&rows, native_y[i] + 3);
-        hud_art_rows_piece(&rows, native_y[i]);
-    }
-    hud_art_rows_finish(&rows);
-    assert(rows.nrows == 3);
-    for (int i = 0; i < 3; i++) {
-        assert(rows.rows[i].identified);
-        assert(hud_art_rows_map(&rows, native_y[i] + 3, &y)); near(y, 41 + slots[i] * 66 + 3);
-    }
-    // Partial updates of different native rows cannot re-number or move the others.
-    hud_art_rows_piece(&rows, 643);
-    hud_art_rows_finish(&rows);
-    assert(hud_art_rows_map(&rows, 643, &y)); near(y, 44);
-    assert(hud_art_rows_map(&rows, 693, &y)); near(y, 110);
-    hud_art_rows_piece(&rows, 693);
-    hud_art_rows_finish(&rows);
-    assert(hud_art_rows_map(&rows, 693, &y)); near(y, 110);
-    assert(hud_art_rows_map(&rows, 593, &y)); near(y, 176);
-    // A real new icon on the same native row replaces the old slot identity.
-    rows = (HudArtRows){0};
-    hud_art_rows_piece(&rows, 600); hud_art_rows_slot(&rows, 600, 2); hud_art_rows_finish(&rows);
-    hud_art_rows_piece(&rows, 600); hud_art_rows_slot(&rows, 600, 0); hud_art_rows_finish(&rows);
-    assert(rows.rows[0].identified && rows.rows[0].slot == 0);
-    assert(hud_art_rows_map(&rows, 600, &y)); near(y, 41);
-
-    // Unknown empty panels fill remaining display positions without becoming valid art identities.
-    rows = (HudArtRows){0};
-    for (int i = 0; i < 3; i++) hud_art_rows_piece(&rows, 600 + 50 * i);
-    hud_art_rows_slot(&rows, 600, 2); hud_art_rows_finish(&rows);
-    assert(rows.rows[0].identified && !rows.rows[1].identified && !rows.rows[2].identified);
-    assert(hud_art_rows_map(&rows, 600, &y)); near(y, 173);
-    assert(hud_art_rows_map(&rows, 650, &y)); near(y, 41);
-    assert(hud_art_rows_map(&rows, 700, &y)); near(y, 107);
-    // Scaling and saved offsets follow mapping exactly once, including a narrow picture.
-    assert(hud_art_rows_map(&rows, 605, &y));
-    volatile float dx[HUD_TOUCH_COUNT] = {0}, dy[HUD_TOUCH_COUNT] = {0, -28, 0};
-    HudTouchOffset offset = hud_touch_offset(HUD_TOUCH_ARTS, true, dx, dy, 1, 0.9f);
-    near(y * 0.9f + offset.y, (173 + 5 - 28) * 0.9f);
-
-    rows = (HudArtRows){0};
-    hud_art_rows_piece(&rows, 600); hud_art_rows_piece(&rows, 650);
-    hud_art_rows_slot(&rows, 600, 0); hud_art_rows_slot(&rows, 600, 1);
-    hud_art_rows_slot(&rows, NAN, 2); hud_art_rows_slot(&rows, 650, 9);
-    hud_art_rows_piece(&rows, INFINITY);
-    hud_art_rows_finish(&rows);
-    assert(rows.nrows == 2 && !rows.rows[0].identified && !rows.rows[1].identified);
-    assert(rows.rows[0].slot != rows.rows[1].slot);
-    rows = (HudArtRows){0};
-    hud_art_rows_piece(&rows, 600); hud_art_rows_slot(&rows, 600, 0); hud_art_rows_slot(&rows, 650, 0);
-    hud_art_rows_finish(&rows);
-    assert(rows.nrows == 1 && !rows.rows[0].identified);
-    rows = (HudArtRows){0};
-    for (int i = 0; i < 4; i++) hud_art_rows_piece(&rows, 600 + 50 * i);
-    hud_art_rows_finish(&rows);
-    assert(!hud_art_rows_map(&rows, 600, &y));
-    puts("Hunter Arts display rows: sparse/reordered/partial/conflicting/manual-offset cases OK");
+static void touch_map_scissors(void) {
+    const struct { float width, height, sx, sy; int dx, dy; } cases[] = {
+        {1280, 720, 1, 1, 48, -32},
+        {2520, 1080, 16.0f / 21.0f, 1, 72, -48},
+        {2560, 720, 0.5f, 1, 48, -32},
+        {1280, 800, 1, 0.9f, 48, -32},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i)
+        for (int sign = -1; sign <= 1; sign += 2)
+            for (int visible = 0; visible <= 1; ++visible) {
+                volatile float dx[HUD_TOUCH_COUNT] = {0, 0, 0, sign * 48.0f};
+                volatile float dy[HUD_TOUCH_COUNT] = {0, 0, 0, sign * -32.0f};
+                HudTouchOffset offset = hud_touch_offset(HUD_TOUCH_MAP, visible != 0, dx, dy, cases[i].sx, cases[i].sy);
+                int local[4] = {100, 80, 200, 160};
+                hud_touch_map_scissor(local, offset, cases[i].width, cases[i].height);
+                assert(local[0] == 100 + visible * sign * cases[i].dx);
+                assert(local[1] == 80 + visible * sign * cases[i].dy);
+                assert(local[2] == 200 && local[3] == 160);
+                int full[4] = {0, 0, (int)cases[i].width, (int)cases[i].height};
+                hud_touch_map_scissor(full, offset, cases[i].width, cases[i].height);
+                assert(full[0] == 0 && full[1] == 0);
+                assert(full[2] == cases[i].width && full[3] == cases[i].height);
+                int unlimited[4] = {0, 0, 16384, 16384};
+                hud_touch_map_scissor(unlimited, offset, cases[i].width, cases[i].height);
+                assert(unlimited[0] == 0 && unlimited[1] == 0 && unlimited[2] == 16384 && unlimited[3] == 16384);
+            }
+    // Zero placement preserves the game's crop, and a missing pass size cannot produce a displacement.
+    int local[4] = {100, 80, 200, 160};
+    hud_touch_map_scissor(local, (HudTouchOffset){0}, 1280, 720);
+    assert(local[0] == 100 && local[1] == 80 && local[2] == 200 && local[3] == 160);
+    hud_touch_map_scissor(local, (HudTouchOffset){48, -32, true, true}, 0, 720);
+    hud_touch_map_scissor(local, (HudTouchOffset){48, -32, true, true}, 1280, 0);
+    assert(local[0] == 100 && local[1] == 80 && local[2] == 200 && local[3] == 160);
 }
 
 int main(void) {
@@ -229,7 +179,7 @@ int main(void) {
     assert(!hud_menu_panel_allowed(640, 53, false, true));
     touch_zones();
     touch_offsets();
-    hunter_art_rows();
+    touch_map_scissors();
     puts("HUD layout regressions: OK");
     return 0;
 }

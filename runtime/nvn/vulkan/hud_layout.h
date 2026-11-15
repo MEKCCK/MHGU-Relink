@@ -4,142 +4,7 @@
 
 enum { HUD_LEFT, HUD_RIGHT, HUD_CENTER };
 
-enum { HUD_TOUCH_NONE = -1, HUD_TOUCH_ITEM, HUD_TOUCH_ARTS, HUD_TOUCH_TARGET, HUD_TOUCH_COUNT };
-
-typedef struct HudArtRow {
-    float y0, y1, anchor;
-    int slot;
-    bool identified;
-} HudArtRow;
-
-typedef struct HudArtRows {
-    float pieces[32], marker_y[3];
-    int npieces, nrows;
-    unsigned marker_mask, bad_markers;
-    HudArtRow rows[3];
-} HudArtRows;
-
-static inline void hud_art_rows_piece(HudArtRows *rows, float gy) {
-    if (isfinite(gy) && rows->npieces < 32) rows->pieces[rows->npieces++] = gy;
-}
-
-static inline void hud_art_rows_slot(HudArtRows *rows, float gy, int slot) {
-    if (slot < 0 || slot >= 3 || !isfinite(gy)) return;
-    unsigned bit = 1u << slot;
-    if ((rows->marker_mask & bit) && fabsf(rows->marker_y[slot] - gy) > 22.0f) rows->bad_markers |= bit;
-    rows->marker_mask |= bit;
-    rows->marker_y[slot] = gy;
-}
-
-static inline float hud_art_row_distance(const HudArtRow *row, float gy) {
-    return gy < row->y0 ? row->y0 - gy : gy > row->y1 ? gy - row->y1 : 0.0f;
-}
-
-// Finalize one present's observations. Keep this object between adjacent presents so a partial redraw can
-// retain a row's display position; the renderer owns the cache's lifetime and clears it after gaps/expiry.
-static inline void hud_art_rows_finish(HudArtRows *rows) {
-    HudArtRow previous[3];
-    int nprevious = rows->nrows;
-    for (int i = 0; i < nprevious; i++) previous[i] = rows->rows[i];
-    rows->nrows = 0;
-    for (int i = 1; i < rows->npieces; i++) {
-        float y = rows->pieces[i];
-        int j = i;
-        while (j && rows->pieces[j - 1] > y) rows->pieces[j] = rows->pieces[j - 1], j--;
-        rows->pieces[j] = y;
-    }
-    bool overflow = false;
-    float last = -INFINITY;
-    for (int i = 0; i < rows->npieces; i++) {
-        float y = rows->pieces[i];
-        if (y - last > 22.0f) {
-            if (rows->nrows == 3) { overflow = true; break; }
-            HudArtRow *row = &rows->rows[rows->nrows++];
-            row->y0 = row->y1 = row->anchor = y;
-            row->slot = -1;
-            row->identified = false;
-        }
-        rows->rows[rows->nrows - 1].y1 = y;
-        last = y;
-    }
-    if (overflow) rows->nrows = 0;
-    unsigned old_used = 0;
-    for (int i = 0; i < rows->nrows; i++) {
-        HudArtRow *row = &rows->rows[i];
-        int match = -1;
-        float best = INFINITY;
-        for (int j = 0; j < nprevious; j++) {
-            if (old_used & (1u << j)) continue;
-            float d = hud_art_row_distance(&previous[j], (row->y0 + row->y1) * 0.5f);
-            if (d <= 22.0f && d < best) best = d, match = j;
-        }
-        if (match >= 0) {
-            old_used |= 1u << match;
-            row->anchor = previous[match].anchor;
-            row->slot = previous[match].slot;
-            // Retained positions are for display only; only this present's real icons identify an art.
-        }
-    }
-    // Preserve other native rows through partial redraws without refreshing any input identity.
-    if (!overflow && rows->nrows)
-        for (int i = 0; i < nprevious && rows->nrows < 3; i++)
-            if (!(old_used & (1u << i))) {
-                rows->rows[rows->nrows] = previous[i];
-                rows->rows[rows->nrows++].identified = false;
-            }
-    unsigned confirmed = 0, conflicting = 0;
-    int claimed[3] = {-1, -1, -1};
-    for (int slot = 0; slot < 3; slot++) {
-        if (!(rows->marker_mask & (1u << slot)) || (rows->bad_markers & (1u << slot))) continue;
-        int match = -1;
-        float best = INFINITY;
-        for (int i = 0; i < rows->nrows; i++) {
-            float d = hud_art_row_distance(&rows->rows[i], rows->marker_y[slot]);
-            if (d <= 22.0f && d < best) best = d, match = i;
-        }
-        if (match < 0) continue;
-        if (claimed[match] >= 0) conflicting |= 1u << match;
-        else claimed[match] = slot;
-    }
-    for (int i = 0; i < rows->nrows; i++) {
-        HudArtRow *row = &rows->rows[i];
-        if (conflicting & (1u << i)) row->slot = -1;
-        else if (claimed[i] >= 0) {
-            row->slot = claimed[i];
-            row->anchor = rows->marker_y[row->slot];
-            row->identified = true;
-            confirmed |= 1u << row->slot;
-        }
-    }
-    unsigned used = confirmed;
-    for (int i = 0; i < rows->nrows; i++) {
-        HudArtRow *row = &rows->rows[i];
-        if (row->identified) continue;
-        if (row->slot < 0 || (used & (1u << row->slot))) row->slot = -1;
-        else used |= 1u << row->slot;
-    }
-    for (int i = 0; i < rows->nrows; i++)
-        if (rows->rows[i].slot < 0)
-            for (int slot = 0; slot < 3; slot++)
-                if (!(used & (1u << slot))) { rows->rows[i].slot = slot; used |= 1u << slot; break; }
-    rows->npieces = 0;
-    rows->marker_mask = rows->bad_markers = 0;
-}
-
-static inline bool hud_art_rows_map(const HudArtRows *rows, float gy, float *canvas_y) {
-    if (!isfinite(gy) || !canvas_y) return false;
-    int match = -1;
-    float best = INFINITY;
-    for (int i = 0; i < rows->nrows; i++) {
-        float d = hud_art_row_distance(&rows->rows[i], gy);
-        if (d <= 22.0f && d < best) best = d, match = i;
-    }
-    if (match < 0) return false;
-    const HudArtRow *row = &rows->rows[match];
-    // These are the touch HUD's three designed display positions, not inferred native slot coordinates.
-    *canvas_y = 41.0f + row->slot * 66.0f + gy - row->anchor;
-    return true;
-}
+enum { HUD_TOUCH_NONE = -1, HUD_TOUCH_ITEM, HUD_TOUCH_ARTS, HUD_TOUCH_TARGET, HUD_TOUCH_MAP, HUD_TOUCH_COUNT };
 
 // The entire item group includes the bowgun's ammo list above y 500.
 static inline int hud_touch_zone(float x, float y, float z, bool hunt_hud) {
@@ -149,6 +14,9 @@ static inline int hud_touch_zone(float x, float y, float z, bool hunt_hud) {
         if (x >= 1170.0f && x <= 1230.0f && y >= 16.0f && y <= 95.0f) return HUD_TOUCH_TARGET;
     } else if (fabsf(z - 103.0f) < 0.5f && !(y < 500.0f && x < 900.0f)) {
         return HUD_TOUCH_ITEM;
+    } else if (fabsf(z - 105.0f) < 0.5f) {
+        // The minimap uses the same HUD layer in quests and in the village / Hub.
+        return HUD_TOUCH_MAP;
     }
     return HUD_TOUCH_NONE;
 }
@@ -173,6 +41,15 @@ static inline HudTouchOffset hud_touch_offset(int zone, bool visible, const vola
 
 static inline bool hud_touch_relax_scissor(bool relaxed, HudTouchOffset offset) {
     return relaxed || offset.moved;
+}
+
+// A moved minimap keeps its local crop. A whole-pass scissor must keep covering the pass.
+// The caller has already applied the same horizontal / vertical anchors as the map pieces.
+static inline void hud_touch_map_scissor(int rect[4], HudTouchOffset offset, float width, float height) {
+    if (!offset.moved || width <= 0.0f || height <= 0.0f) return;
+    if (!(rect[0] > 0 || rect[1] > 0 || rect[2] < width || rect[3] < height)) return;
+    rect[0] += (int)lroundf(offset.x * width / 1280.0f);
+    rect[1] += (int)lroundf(offset.y * height / 720.0f);
 }
 
 // Group re-anchoring runs later and would overwrite both manual Y and its feedback base.

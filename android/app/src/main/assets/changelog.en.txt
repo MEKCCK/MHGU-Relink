@@ -1,7 +1,10 @@
 MHGU Relink 0.2.3 · 2026-11-15
 
-2026-11-15: Hunter Art slots and first-use taps
-Preserve the equipped Hunter Art slot when only slot 2 or 3 is present, keeping its display and touch input aligned. Hunter Arts can be tapped on entering a quest without opening and closing a menu first; a partial HUD frame no longer clears the other touch regions.
+2026-11-15: Map and layout editor toolbar
+Show draggable item, Hunter Arts and lock-on edit boxes both inside and outside quests. Add map dragging using its actual rendered bounds and a separate saved offset. Enlarge the size, Defaults, Cancel and Save buttons; drag the toolbar header to move it. Each template saves its own map and toolbar positions, with support for older layouts and all 40 existing template slots.
+
+2026-11-15: Restore v0.1.6 Hunter Art taps
+Restore gu-native v0.1.6 group-relative placement, visible-row hit testing and 120 ms direction pulses on release. Missing, expired or conflicting icon metadata no longer disables taps; slot corrections apply only when every visible row has a reliable, distinct identity. No later upstream code is used. Keep the first-entry and independent HUD cache fixes.
 
 2026-11-15: Remove gyroscope controls
 Remove phone and controller gyro aiming, sensor sampling and related settings. Legacy motion settings no longer apply. Touch swipes, virtual buttons, sticks and direct menu taps remain available.

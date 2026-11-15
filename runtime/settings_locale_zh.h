@@ -275,6 +275,8 @@ static inline const char *settings_text_zh(int language, const char *english) {
         {"Items: tap to use, swipe to change - drag to move", "道具：点按使用，滑动切换 - 拖动可移动"},
         {"Hunter Arts - drag to move", "狩猎技 - 拖动可移动"},
         {"Lock-on - drag to move", "锁定目标 - 拖动可移动"},
+        {"Map - drag to move", "地图 - 拖动可移动"},
+        {"Drag toolbar to move", "拖动此处移动工具栏"},
         {"Attack  X / A", "攻击  X / A"},
         {"Dodge  B", "闪避  B"},
         {"Sheathe  Y", "收刀  Y"},

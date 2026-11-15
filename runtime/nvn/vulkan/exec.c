@@ -157,7 +157,7 @@ void vk_trace_frame(NvnTexture *t) {
 #define ARTS_TOP 41.0f              // the top row's first piece goes to this y (two rows: 631 -> 41; three: the same)
 #define TARGET_DX (-250.0f)         // (x 1200 -> 950, from the right edge: left of the arts)
 _Static_assert(HUD_TOUCH_ITEM == TZ_ITEM && HUD_TOUCH_ARTS == TZ_ARTS && HUD_TOUCH_TARGET == TZ_TARGET &&
-               HUD_TOUCH_COUNT == TZ_COUNT, "HUD touch zones must match the touch editor");
+               HUD_TOUCH_MAP == TZ_MAP && HUD_TOUCH_COUNT == TZ_COUNT, "HUD touch zones must match the touch editor");
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_snapshots;
 // (MHGU_VK_STATS) time spent: translating command lists, waiting for the GPU, guest memory copied per submission
@@ -994,6 +994,7 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_h = -1;  // a menu's partial scissor follows its entire canvas horizontally
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
+static HudTouchOffset ui_map_scissor;  // the minimap's manual placement translates its local crop, without opening it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 static uint64_t ui_menu_frame;  // the frame (g_present_count) that last drew a layer 97 menu (ui_preview_map)
 // The HUD quads drawn last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left / 1 right /
@@ -1018,26 +1019,7 @@ static bool ui_results_pass, ui_results_last;  // this pass / the last pass with
 static bool ui_meownster_pass;  // this pass draws the Meownster Hunters return screen (its map frame, layer 105, came first)
 static bool ui_art_piece;
 static float ui_art_game_y;
-static HudArtRows ui_art_build, ui_art_previous;
-static uint64_t ui_art_frame, ui_art_frame_ns, ui_art_seen_ns;
-static bool ui_art_started, ui_art_collected;
 volatile int g_hudtrace_active;  // (debug) MHGU_CONTROL "hudtrace": log every HUD quad of the next frame and its anchor (device.c)
-
-static void hunter_art_frame_begin(void) {
-    if (ui_art_started && ui_art_frame == g_present_count) return;
-    uint64_t now = plat_now_ns();
-    if (!ui_art_started || g_present_count != ui_art_frame + 1 ||
-        (ui_art_seen_ns && now - ui_art_seen_ns > 250000000ull)) {
-        memset(&ui_art_build, 0, sizeof ui_art_build);
-        memset(&ui_art_previous, 0, sizeof ui_art_previous);
-        ui_art_seen_ns = 0;
-    } else if (ui_art_collected) {
-        hud_art_rows_finish(&ui_art_build);
-        ui_art_previous = ui_art_build;
-    }
-    ui_art_collected = false;
-    ui_art_started = true, ui_art_frame = g_present_count, ui_art_frame_ns = now;
-}
 
 // 16:10: a window is drawn as pieces (body, edges, corners, then its text), each placed by its own centre, so one rule
 // could send its top edge up and its bottom edge down (the chat window, the shoutout list, the Guild Card greeting).
@@ -2152,6 +2134,13 @@ static VkRect2D scissor_rect(void) {
             y = (int)floorf(off + y0 * sy);
             sh = (int)ceilf(off + y1 * sy) - y;
         }
+    }
+    if (ui_map_scissor.moved && !ui_relax_scissor) {
+        float pw, ph;
+        pass_guest_size(&pw, &ph);
+        int rect[4] = {x, y, sw, sh};
+        hud_touch_map_scissor(rect, ui_map_scissor, pw, ph);
+        x = rect[0], y = rect[1];
     }
     {
         PreviewMap pm;
@@ -3635,7 +3624,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (size > r.size && r.size) size = r.size;
     if (size < 16) size = 16;
     if (!guest_range_ok(r.addr, size)) return zero_ubo(size);
-    if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
+    if (stage == 0 && k == 3) {
+        ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
+        ui_map_scissor = (HudTouchOffset){0};
+    }
     // (a pass the size of the game's picture, in the guest's units: FSR's stand-ins and scaled targets are larger)
     bool screen_pass = stage == 0 && k == 3 && roundf((float)pass_h / pass_sy) == (float)g_render_size[1];
     if (screen_pass && !st.ds[0] && size >= 64) {
@@ -3703,12 +3695,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool menu_canvas = false;
                 float new_pos_x = pos_x, new_pos_y = pos_y;
                 bool item_bar_move = false, arts_move = false, target_move = false, status_edge = false;
+                // Recognize the Meownster frame before classifying its first layer-105 piece as a minimap.
+                if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                 // the hunt's HUD (not a menu, the results, a loading screen, the title): its item bar, Hunter Arts and
                 // target camera answer a finger (runtime/touch.cpp), moved or not; with the touch controls they move
                 bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !ui_title_pass &&
                                 !ui_meownster_pass;
                 int touch_zone = hud_touch_zone(pos_x, pos_y, pos_z, hunt_hud);
+                if (touch_zone == HUD_TOUCH_MAP && ui_frontend_pass) touch_zone = HUD_TOUCH_NONE;
                 bool item_bar_part = false, arts_part = false, target_part = false;
+                bool map_part = touch_zone == HUD_TOUCH_MAP;
                 bool grouped = false;
                 int vgroup = 1;
 
@@ -3857,7 +3853,6 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // reward list over it (100), the Reward List header and the prompts at the bottom. Layer 100 went to the
                     // bottom with its rule: the tokens sat too low on the map, the lead Palico below the frame, and the
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
-                    if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
                     // Layer 110 outside the loading screen (the bowgun's reticle, lock-on markers) marks points of the 3D
                     // picture, which at 16:10 (Vert+: 16:9's width, more height about the centre) is the 16:9 one scaled
@@ -3904,9 +3899,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             arts_top_now = 1e9f, arts_frame = g_present_count;
                         }
                         if (pos_y < arts_top_now) arts_top_now = pos_y;
-                        float row_y;
-                        new_pos_y = (hud_art_rows_map(&ui_art_previous, pos_y, &row_y) ? row_y :
-                                     pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
+                        new_pos_y = (pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
                     }
                     else if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
@@ -3914,15 +3907,19 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     HudTouchOffset offset = hud_touch_offset(touch_zone, touch_visible(), g_touch_zone_dx, g_touch_zone_dy, s, sy);
                     new_pos_x += offset.x;
                     new_pos_y += offset.y;
-                    ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
+                    if (map_part) {
+                        ui_map_scissor = offset;
+                        if (offset.moved && s < 1.0f) ui_scissor_h = anchor;
+                    } else {
+                        ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
+                    }
                     if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     if (arts_part) {
                         touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                         ui_art_piece = true, ui_art_game_y = pos_y;
-                        hud_art_rows_piece(&ui_art_build, pos_y);
-                        ui_art_collected = true, ui_art_seen_ns = ui_art_frame_ns;
                     }
                     if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    if (map_part) touch_hud_piece(TZ_MAP, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     // One anchor per window (ui_group_end), on a picture narrower than 16:9. Not for the hunt's status HUD
                     // and item bar (103), the minimap (105), the loading screen, or the bars that belong to an edge (a
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
@@ -4697,13 +4694,11 @@ static void hunter_art_slot(Prog *pr, const PipeKey *k, bool indexed, const VkSp
         slot = found;
     }
     if (slot >= 0) {
-        hud_art_rows_slot(&ui_art_build, ui_art_game_y, slot);
         touch_hud_art_slot(ui_art_game_y, slot);
     }
 }
 
 static void draw(CmdRec *r, bool indexed) {
-    hunter_art_frame_begin();
     if (!st.program) { stat_skipped++; return; }
     if (shadow_skipped()) { stat_skipped++; return; }
     ShaderKey vkey = {0}, fkey = {0};
@@ -4911,15 +4906,17 @@ static void draw(CmdRec *r, bool indexed) {
 
     // ---- descriptor sets
     ui_art_piece = false;
+    ui_map_scissor = (HudTouchOffset){0};
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0)};
     if (ss_need(SS_SETS, ss.sets_layout == pr->layout && !memcmp(ss.sets, sets, sizeof sets))) {  // (the same ones: kept)
         ss.sets_layout = pr->layout, memcpy(ss.sets, sets, sizeof sets);
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);
     }
-    if (ui_relax_scissor || ui_scissor_v >= 0 || ui_scissor_h >= 0) {  // (set while the constants above were built: for this draw only; the
+    if (ui_relax_scissor || ui_scissor_v >= 0 || ui_scissor_h >= 0 || ui_map_scissor.moved) {  // (set while the constants above were built: for this draw only; the
         apply_scissor(cb);                         // next draw and any clear before it get the game's scissor again)
         ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
+        ui_map_scissor = (HudTouchOffset){0};
     }
 
     // ---- indices (copied; the largest index bounds the vertex data copied below)

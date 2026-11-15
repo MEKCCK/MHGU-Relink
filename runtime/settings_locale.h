@@ -298,6 +298,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Items: tap to use, swipe to change - drag to move", "Objetos: tocar usa, deslizar cambia - arrastrá para mover", "道具：点按使用，滑动切换 - 拖动移动"},
         {"Hunter Arts - drag to move", "Hunter Arts - arrastrá para mover", "狩猎技艺 - 拖动移动"},
         {"Lock-on - drag to move", "Bloqueo de cámara - arrastrá para mover", "锁定 - 拖动移动"},
+        {"Map - drag to move", "Mapa - arrastra para mover", "地图 - 拖动可移动"},
+        {"Drag toolbar to move", "Arrastra aquí para mover la barra", "拖动此处移动工具栏"},
         {"Attack  X / A", "Ataque  X / A", "攻击  X / A"},
         {"Dodge  B", "Esquivar  B", "翻滚  B"},
         {"Sheathe  Y", "Enfundar  Y", "收刀  Y"},

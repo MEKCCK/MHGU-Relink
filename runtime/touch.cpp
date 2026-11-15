@@ -341,6 +341,7 @@ bool load_icon_pixels(const char *hash, std::vector<unsigned char> &pixels, int 
 struct Layout {
     float x[C_COUNT], y[C_COUNT], scale[C_COUNT];
     float zx[TZ_COUNT], zy[TZ_COUNT];  // the moved HUD parts' offsets (canvas units: g_touch_zone_dx / dy)
+    float editor_x, editor_y;         // toolbar position within the available screen travel (0..1)
     int style;                         // STYLE_*
     int weapon_profile;                // reserved slots bind to one of the original 15 weapons
     IconChoice icons[C_LAID];           // zero-initialized legacy layouts keep their original faces
@@ -354,7 +355,7 @@ void migrate_ranged_guard(Layout &l, int profile) {
     if (l.x[C_R] == DEFS[C_R].x && l.y[C_R] == DEFS[C_R].y && l.scale[C_R] == 1.0f)
         l.x[C_R] = .58f, l.y[C_R] = .78f;
 }
-const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target"};
+const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target", "hud_map"};
 void migrate_common_ammo(Layout &l) {
     // Previously hidden common arrows used positions occupied by the combo grid and R.
     // Move only the untouched old defaults; saved custom placements remain independent.
@@ -364,6 +365,7 @@ void migrate_common_ammo(Layout &l) {
 }
 Layout defaults(int profile) {
     Layout l = {};
+    l.editor_x = .5f;
     l.weapon_profile = profile < TOUCH_WEAPON_LAYOUTS ? profile : -1;
     for (int i = 0; i < C_COUNT; i++) l.x[i] = DEFS[i].x, l.y[i] = DEFS[i].y, l.scale[i] = 1.0f;  // (the menu layout's: unused)
     if (fixed_quest_attack_style(profile)) l.style = STYLE_SEPARATE;
@@ -439,7 +441,7 @@ bool save_layout_file(const Layout &l, const char *path, const char *name = null
     snprintf(temp, sizeof temp, "%s.tmp", path);
     FILE *f = fopen(temp, "w");
     if (!f) { fprintf(stderr, "[touch] could not save %s\n", path); return false; }
-    fprintf(f, "layout_version 3\n");
+    fprintf(f, "layout_version 4\n");
     if (name) fprintf(f, "template_name %s\n", name);
     fprintf(f, "# touch controls: name, centre (screen heights from its edge and the bottom), size\n");
     for (int i = 0; i < C_LAID; i++) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
@@ -448,6 +450,7 @@ bool save_layout_file(const Layout &l, const char *path, const char *name = null
                 l.icons[i].choice == -1 ? l.icons[i].hash : "-");
     fprintf(f, "# the game's HUD parts moved for touch: name, offset from their place (the game's 1280x720 units), 1\n");
     for (int k = 0; k < TZ_COUNT; k++) fprintf(f, "%s %.1f %.1f 1\n", ZONE_KEY[k], l.zx[k], l.zy[k]);
+    fprintf(f, "editor_panel %.4f %.4f 1\n", l.editor_x, l.editor_y);
     fprintf(f, "attack_style %d 0 1\n", l.style);
     if (combos) for (int i = 0; i < TOUCH_COMBOS; ++i) {
         fprintf(f, "combo_mask %d %u\n", i + 1, config_combo_mask(combos->touch_weapon_combo[UNIVERSAL_LAYOUT][i]));
@@ -480,6 +483,7 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
     if (!f) return false;
     Layout layout = defaults(COMMON_BASE);
     bool controls[C_LAID] = {}, zones[TZ_COUNT] = {}, icons[C_LAID] = {}, named = false, invalid_icon = false;
+    bool editor_present = false, invalid_editor = false;
     int version = 0;
     bool masks[TOUCH_COMBOS] = {}, pads[TOUCH_COMBOS] = {}, names[TOUCH_COMBOS] = {};
     char line[160], key[32], stored_name[TOUCH_TEMPLATE_NAME_MAX] = {};
@@ -488,6 +492,7 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
         if (!strcmp(line, "layout_version 1")) { version = 1; continue; }
         if (!strcmp(line, "layout_version 2")) { version = 2; continue; }
         if (!strcmp(line, "layout_version 3")) { version = 3; continue; }
+        if (!strcmp(line, "layout_version 4")) { version = 4; continue; }
         if (!strncmp(line, "icon ", 5)) {
             int choice;
             char hash[65], extra;
@@ -536,6 +541,21 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
             continue;
         }
         float x, y, scale;
+        if (sscanf(line, "%31s", key) != 1) continue;
+        if (!strcmp(key, "hud_map") || !strcmp(key, "editor_panel")) {
+            bool panel = !strcmp(key, "editor_panel");
+            bool valid = sscanf(line, "%31s %f %f %f %c", key, &x, &y, &scale, &extra) == 4 &&
+                         std::isfinite(x) && std::isfinite(y) && scale == 1.0f;
+            if (panel) {
+                valid = valid && !editor_present && x >= 0 && x <= 1 && y >= 0 && y <= 1;
+                if (valid) layout.editor_x = x, layout.editor_y = y, editor_present = true;
+            } else {
+                valid = valid && !zones[TZ_MAP] && fabsf(x) <= 1400 && fabsf(y) <= 800;
+                if (valid) layout.zx[TZ_MAP] = x, layout.zy[TZ_MAP] = y, zones[TZ_MAP] = true;
+            }
+            invalid_editor |= !valid;
+            continue;
+        }
         if (sscanf(line, "%31s %f %f %f", key, &x, &y, &scale) != 4) continue;
         for (int i = 0; i < C_LAID; ++i)
             if (!strcmp(key, DEFS[i].key) && x > 0 && x < 4 && y > 0 && y < 1 && scale >= .4f && scale <= 2.5f) {
@@ -548,10 +568,11 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
                 zones[i] = true;
             }
     }
-    bool ok = !ferror(f) && version && !invalid_icon && (!name || named);
+    bool ok = !ferror(f) && version && !invalid_icon && !invalid_editor && (!name || named);
     fclose(f);
     for (bool present : controls) ok = ok && present;
-    for (bool present : zones) ok = ok && present;
+    for (int k = 0; k < TZ_MAP; ++k) ok = ok && zones[k];
+    if (version >= 4) ok = ok && zones[TZ_MAP] && editor_present;
     if (version >= 2) for (int i : ICON_CONTROLS)
         if (version >= 3 || !is_ammo(i)) ok = ok && icons[i];
     if (combos) {
@@ -724,7 +745,7 @@ Zones g_zones, g_build;  // (g_build: the render thread's alone)
 bool g_build_menu;       // (render thread) a menu window of the game's in this frame
 std::atomic<uint64_t> g_menu_ns;  // when one was last drawn
 // how far each part's art reaches past its pieces' positions, in the game's units (left, top, right, bottom)
-const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}};
+const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}, {0, 0, 0, 0}};
 const float ZONE_SLOP = 10.0f;
 
 // The parts are gone (a menu over the hunt, a cutscene) once no frame has drawn them for three frames' time (at
@@ -799,7 +820,8 @@ struct EditorZone {
 EditorZone g_editor_zones[TZ_COUNT], g_build_editor[TZ_COUNT];
 
 Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_quest) {
-    if (!in_quest) return {};
+    (void)in_quest;
+    if (k < 0 || k >= TZ_COUNT) return {};
     EditorZone z;
     {
         std::lock_guard<std::mutex> l(g_zone_lock);
@@ -809,7 +831,8 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
     const bool moved = config_live_touch_hud() != 0;
     Rect r = z.bounds;
     if (!r.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != moved) {
-        // In quests, keep an editable handle even before this HUD part has appeared in the current scene.
+        if (k == TZ_MAP) return {};  // Use observed map pieces rather than an assumed map location or size.
+        // Keep an editable handle even before this HUD part has appeared in the current scene.
         const float aspect = g_render_aspect > 0 ? g_render_aspect : w / h;
         const float right = 640.0f * (1.0f + std::min(g_ui_anchor_aspect, aspect) / aspect);
         if (k == TZ_ITEM) {
@@ -828,6 +851,11 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
     r.x1 = p.x0 + (r.x1 + (layout.zx[k] + MARGIN[k][2] + ZONE_SLOP) * sx) * p.w / 1280.0f;
     r.y0 = p.y0 + (r.y0 + (layout.zy[k] - MARGIN[k][1] - ZONE_SLOP) * sy) * p.h / 720.0f;
     r.y1 = p.y0 + (r.y1 + (layout.zy[k] + MARGIN[k][3] + ZONE_SLOP) * sy) * p.h / 720.0f;
+    if (k == TZ_MAP) {
+        float side = std::max(48.0f, .09f * h), cx = (r.x0 + r.x1) * .5f, cy = (r.y0 + r.y1) * .5f;
+        r.x0 = std::min(r.x0, cx - side * .5f), r.x1 = std::max(r.x1, cx + side * .5f);
+        r.y0 = std::min(r.y0, cy - side * .5f), r.y1 = std::max(r.y1, cy + side * .5f);
+    }
     return r;
 }
 
@@ -880,7 +908,14 @@ int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] =
                 if (row >= 0) slots[row] = slots[row] == -1 ? slot : -2;
             }
         }
-        for (int i = 0; i < nr; i++) if (slots[i] < 0) slots[i] = -1;
+        unsigned identified = 0;
+        bool complete = true;
+        for (int i = 0; i < nr; i++) {
+            if (slots[i] < 0 || (identified & (1u << slots[i]))) complete = false;
+            else identified |= 1u << slots[i];
+        }
+        // v0.1.6 taps the visible row directly; partial icon metadata must not disable or alias those inputs.
+        if (!complete) for (int i = 0; i < nr; i++) slots[i] = i;
     }
     Pic p = picture(w, h);
     for (int i = 0; i < nr; i++)
@@ -893,7 +928,7 @@ Zones zones(void) {
 }
 
 // ------------------------------------------------------------------ fingers (host main thread)
-enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT, F_GAME_MENU };
+enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT, F_GAME_MENU, F_EDIT_PANEL };
 struct Finger {
     SDL_FingerID id;
     Kind kind;
@@ -1303,13 +1338,16 @@ void to_menu(const SDL_Event *e) {
     }
 }
 
-// ---- the layout editor: a panel at the top (smaller, bigger, defaults, cancel, save); drag a control to move it,
+// ---- the layout editor: a movable panel (smaller, bigger, defaults, cancel, save); drag a control to move it,
 // pinch (a second finger anywhere) or the panel's - / + to size it
-void editor_panel(float w, float h, Rect *panel, Rect btn[E_COUNT]) {
-    float pw = std::min(w * .9f, 1.8f * h), x0 = (w - pw) * .5f;
-    *panel = {x0, 0, x0 + pw, .06f * h, true};
-    float gap = .015f * h, bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = .005f * h, by1 = .055f * h;
-    for (int i = 0; i < E_COUNT; i++) btn[i] = {x0 + gap + i * (bw + gap), by0, x0 + gap + i * (bw + gap) + bw, by1, true};
+void editor_panel(const Layout &layout, float w, float h, Rect *panel, Rect btn[E_COUNT]) {
+    float pw = std::min(w * .94f, 1.5f * h), gap = .01f * h;
+    float header = std::max(.06f * h, 28.0f), bh = std::max(.10f * h, 48.0f), ph = header + bh + gap * 2;
+    float x0 = std::max(0.0f, w - pw) * layout.editor_x, y0 = std::max(0.0f, h - ph) * layout.editor_y;
+    *panel = {x0, y0, x0 + pw, y0 + ph, true};
+    float bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = y0 + header + gap;
+    for (int i = 0; i < E_COUNT; i++)
+        btn[i] = {x0 + gap + i * (bw + gap), by0, x0 + gap + i * (bw + gap) + bw, by0 + bh, true};
 }
 
 void edit_begin(State &s) {
@@ -1350,8 +1388,10 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         if (!f) return;
         *f = {};
         f->id = e->tfinger.fingerID, f->x = f->x0 = x, f->y = f->y0 = y, f->ctl = -1;
+        for (const Finger &g : s.f)
+            if (&g != f && g.kind == F_EDIT_PANEL) { f->kind = F_MENU; return; }
         Rect panel, btn[E_COUNT];
-        editor_panel(s.w, s.h, &panel, btn);
+        editor_panel(s.layout, s.w, s.h, &panel, btn);
         for (int i = 0; i < E_COUNT; i++)
             if (btn[i].in(x, y)) {
                 f->kind = F_MENU;  // (held until it lifts: nothing under it moves)
@@ -1367,7 +1407,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
                 }
                 return;
             }
-        if (panel.in(x, y)) { f->kind = F_MENU; return; }
+        if (panel.in(x, y)) { f->kind = F_EDIT_PANEL; return; }
         Finger *drag = nullptr;
         for (Finger &g : s.f)
             if (&g != f && g.kind == F_EDIT && g.ctl >= 0) drag = &g;
@@ -1392,6 +1432,14 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
     if (e->type == SDL_EVENT_FINGER_MOTION) {
         float dx = x - f->x, dy = y - f->y;
         f->x = x, f->y = y;
+        if (f->kind == F_EDIT_PANEL) {
+            Rect panel, btn[E_COUNT];
+            editor_panel(s.layout, s.w, s.h, &panel, btn);
+            float tx = s.w - (panel.x1 - panel.x0), ty = s.h - (panel.y1 - panel.y0);
+            s.layout.editor_x = tx > 0 ? std::clamp(s.layout.editor_x + dx / tx, 0.0f, 1.0f) : 0;
+            s.layout.editor_y = ty > 0 ? std::clamp(s.layout.editor_y + dy / ty, 0.0f, 1.0f) : 0;
+            return;
+        }
         if (f->kind != F_EDIT) return;
         if (s.pinch) {
             Finger *a = nullptr, *b = nullptr;
@@ -1541,7 +1589,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 float d = y < rows[i][0] ? rows[i][0] - y : y > rows[i][1] ? y - rows[i][1] : 0;
                 if (d < best) best = d, row = i;
             }
-            f->kind = F_ARTS, f->part = row >= 0 ? slots[row] : -1;  // use the native slot, not the visible row number
+            f->kind = F_ARTS, f->ctl = row, f->part = row >= 0 ? slots[row] : -1;
         } else if (!on_stick && menu_touch_begin(s, *f, e)) {
             return true;
         } else if (in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) && in_stick_zone(s, x, y, item)) {
@@ -1644,9 +1692,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && !f->part && now - f->t0 < 220 * MS &&
         fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
         pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
-    if (f->kind == F_ARTS && tap && f->part >= 0 && f->part < 3)  // a tap on a Hunter Art's panel: its d-pad direction
+    if (f->kind == F_ARTS && tap && f->part >= 0 && f->part < 3) {  // v0.1.6: send the Art's d-pad direction on release
         pulse(s, ART_FACE[f->part], 120 * MS),  // (its d-pad direction)
-            s.art_row = f->part, s.art_flash = now + 250 * MS, tap_due();
+            s.art_row = f->ctl, s.art_flash = now + 250 * MS, tap_due();
+        fprintf(stderr, "[touch] Hunter Art tap: row %d slot %d buttons %llx\n", f->ctl + 1, f->part + 1,
+                (unsigned long long)ART_FACE[f->part]);
+    }
     bool target_hold = f->kind == F_TARGET && !f->moved && !cancel && now - f->t0 >= 500 * MS;
     if (f->kind == F_TARGET && (tap || target_hold)) {
         tap_due();
@@ -2064,9 +2115,7 @@ extern "C" void touch_reset(void) {
 extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
                                  float offset_x, float offset_y) {
     (void)game_x;
-    if (zone < 0 || zone >= TZ_COUNT || g_build.n[zone] >= 32) return;
-    int i = g_build.n[zone]++;
-    g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
+    if (zone < 0 || zone >= TZ_COUNT) return;
     EditorZone &z = g_build_editor[zone];
     float x = canvas_x - offset_x, y = canvas_y - offset_y;
     if (!z.bounds.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != (g_touch_hud != 0)) {
@@ -2075,6 +2124,9 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
         z.bounds.x0 = std::min(z.bounds.x0, x), z.bounds.x1 = std::max(z.bounds.x1, x);
         z.bounds.y0 = std::min(z.bounds.y0, y), z.bounds.y1 = std::max(z.bounds.y1, y);
     }
+    if (g_build.n[zone] >= 32) return;  // Dense maps still contribute all origins to their editor bounds.
+    int i = g_build.n[zone]++;
+    g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
@@ -2103,8 +2155,8 @@ extern "C" void touch_hud_frame(void) {
         uint64_t now = SDL_GetTicksNS();
         frames++, with += any;
         if (now - since > 2000 * MS) {
-            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %d target %d)\n", with, frames, g_build.n[0],
-                    g_build.n[1], g_build.n[2]);
+            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %d target %d map %d)\n", with, frames, g_build.n[0],
+                    g_build.n[1], g_build.n[2], g_build.n[3]);
             since = now, frames = with = 0;
         }
     }
@@ -2943,7 +2995,7 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h) {
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 96));
     static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
-                                                    "Hunter Arts - drag to move", "Lock-on - drag to move"};
+                                                    "Hunter Arts - drag to move", "Lock-on - drag to move", "Map - drag to move"};
     for (int k = 0; k < TZ_COUNT; k++) {
         if (control_profile(s) < 0) break;
         Rect r = editor_zone_rect(s.layout, k, w, h, s.in_quest);
@@ -3021,20 +3073,18 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         }
     }
     Rect panel, btn[E_COUNT];
-    editor_panel(w, h, &panel, btn);
+    editor_panel(s.layout, w, h, &panel, btn);
     float line = .004f * h;
     plate(dl, panel, line, 1.0f, false);
-    const char *title = T("Universal layout");
-    // Keep the top buttons clear of Plus/Minus and the shoulder controls without moving saved positions.
-    auto caption = [&](const char *text, float size, float y, ImU32 color) {
-        float room = std::max(.3f * h, w - .9f * h), wide = font->CalcTextSizeA(size, FLT_MAX, 0, text).x;
-        if (wide > room) size *= room / wide;
-        text_center(dl, font, size, ImVec2(w * .5f, y), color, text);
-    };
-    caption(title, .028f * h, .21f * h, GLOW);
-    caption(T(s.save_failed ? "Could not save layout; please try again." : s.sel >= 0 ?
-                  "Drag to move  -  pinch or use - / + for its size" :
-                  "Save your edits, then save a custom template in Settings."), .018f * h, .235f * h, INK);
+    const char *title = T(s.save_failed ? "Could not save layout; please try again." : "Drag toolbar to move");
+    float header = std::max(.06f * h, 28.0f), title_size = std::max(.028f * h, 16.0f);
+    float title_width = font->CalcTextSizeA(title_size, FLT_MAX, 0, title).x, title_room = (panel.x1 - panel.x0) * .82f;
+    if (title_width > title_room) title_size *= title_room / title_width;
+    text_center(dl, font, title_size, ImVec2((panel.x0 + panel.x1) * .5f, panel.y0 + header * .5f), GLOW, title);
+    for (int i = -1; i <= 1; ++i) {
+        float y = panel.y0 + header * (.5f + i * .15f);
+        dl->AddLine(ImVec2(panel.x0 + .015f * h, y), ImVec2(panel.x0 + .045f * h, y), INK, line);
+    }
     const char *const LABEL[E_COUNT] = {"-", "+", "Defaults", "Cancel", "Save"};
     for (int i = 0; i < E_COUNT; i++) {
         bool off = (i == E_SMALLER || i == E_BIGGER) && (s.sel < 0 || s.sel >= C_COUNT);
@@ -3042,7 +3092,8 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         for (const Finger &f : s.f)
             if (f.kind == F_MENU && btn[i].in(f.x, f.y)) lit = true;
         plate(dl, btn[i], line * .8f, off ? .45f : 1.0f, lit);
-        float fs = (i < 2 ? .04f : .028f) * h, room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
+        float fs = std::max((i < 2 ? .05f : .033f) * h, i < 2 ? 24.0f : 16.0f);
+        float room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
         if (wide > room) fs *= room / wide;  // (a narrow screen, a long word: on one line, smaller)
         text_center(dl, font, fs, ImVec2((btn[i].x0 + btn[i].x1) * .5f, (btn[i].y0 + btn[i].y1) * .5f),
                     fade(i == E_SAVE ? GLOW : INK, off ? .45f : 1.0f), T(LABEL[i]));
@@ -3100,10 +3151,9 @@ extern "C" void touch_draw(float w, float h) {
     }
     if (arts.ok && now < s.art_flash) {
         float rows[3][2];
-        int slots[3], nr = arts_rows(z, w, h, rows, slots);
-        for (int i = 0; i < nr; i++)
-            if (slots[i] == s.art_row)
-                dl->AddRect(ImVec2(arts.x0, rows[i][0]), ImVec2(arts.x1, rows[i][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
+        int nr = arts_rows(z, w, h, rows);
+        if (s.art_row >= 0 && s.art_row < nr)
+            dl->AddRect(ImVec2(arts.x0, rows[s.art_row][0]), ImVec2(arts.x1, rows[s.art_row][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
     }
     if (target.ok && config_live_lock_on()) {  // the lock-on: a padlock by the target camera's icon, lit (and its ring) while on
         ImVec2 c((target.x0 + target.x1) * .5f, (target.y0 + target.y1) * .5f);
