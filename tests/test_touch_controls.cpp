@@ -43,12 +43,46 @@ static struct {
 static std::vector<int> item_steps;
 static int touch_item_pending;
 static int screen_w = 1280, screen_h = 720;
+static struct {
+    bool open=false, slider=false;
+    uint64_t id=123;
+    float x=500,y=200,w=90,h=35,dx=120,dy=50,tone=0;
+    int cols=2,cells=6,selected=-1,picks=0,selections=0,pages=0,slider_sets=0,confirms=0;
+} test_menu;
 extern "C" {
 volatile uint64_t g_town_ns;
 float g_render_aspect = 16.0f / 9.0f;
 float g_ui_anchor_aspect = 16.0f / 9.0f;
 uint64_t plat_now_ns(void) { return SDL_GetTicksNS(); }
 SDL_Window *ui_window(void) { return window; }
+bool host_input_press(const char *button,unsigned frames) {
+    assert(!strcmp(button,"A") && frames==12); ++test_menu.confirms; return true;
+}
+// Routing spy only; the real host_input_menu_point is compiled by run_touch_menu_point.py.
+bool host_input_menu_point(float u,float v,float *x,float *y) {
+    if(!std::isfinite(u) || !std::isfinite(v) || u<0 || u>=1 || v<0 || v>=1) return false;
+    *x=u*1280; *y=v*720; return true;
+}
+bool menuptr_open(void) { return test_menu.open; }
+bool menuptr_slider_open(void) { return test_menu.open && test_menu.slider; }
+uint64_t menuptr_menu_id(void) { return test_menu.slider?0:test_menu.id; }
+bool menuptr_slider_hit(float x,float y) { return x>=143 && x<511 && y>=300 && y<340; }
+bool menuptr_slider_panel(float x,float y) { return x>=20 && x<666 && y>=214 && y<558; }
+void menuptr_slider_set(float x,bool pick) { assert(!pick); test_menu.tone=x; ++test_menu.slider_sets; }
+void menuptr_page_turn(int dir) { test_menu.pages+=dir; }
+int menuptr_hit(float x,float y) {
+    if(!test_menu.open || test_menu.slider) return MENUPTR_NONE;
+    if(y>=60 && y<100 && x>=1000 && x<1100) return x<1050?MENUPTR_PAGE_LEFT:MENUPTR_PAGE_RIGHT;
+    for(int i=0;i<test_menu.cells;++i) {
+        const float x0=test_menu.x+i%test_menu.cols*test_menu.dx,y0=test_menu.y+i/test_menu.cols*test_menu.dy;
+        if(x>=x0 && x<x0+test_menu.w && y>=y0 && y<y0+test_menu.h) return i;
+    }
+    return MENUPTR_NONE;
+}
+void menuptr_select_at(int cell,bool pick,float x,float y) {
+    assert(cell>=0 && cell<test_menu.cells && std::isfinite(x) && std::isfinite(y));
+    test_menu.selected=cell; ++test_menu.selections; if(pick) ++test_menu.picks;
+}
 uint32_t weapon_hunter(void) { return local_hunter; }
 int weapon_drawn(void) { return drawn; }
 int weapon_ranged(uint32_t) { return ranged; }
@@ -197,6 +231,7 @@ static void at(Uint32 type, int ctl, SDL_FingerID id = 1, float ux = 0, float uy
     event(type, id, g.c.x + ux * g.r, g.c.y + uy * g.r);
 }
 static void fresh(int w = 1280, int h = 720) {
+    test_menu={};
     screen_w = w; screen_h = h; assert(SDL_SetWindowSize(window, w, h)); SDL_PumpEvents();
     g_render_aspect=(float)w/h;
     g_ui_anchor_aspect=16.0f/9.0f;
@@ -220,6 +255,204 @@ static void game_menu_state(bool menu) {
     g_menu_ns = menu ? SDL_GetTicksNS() : 0;
     if (menu) g_press_ns = g_menu_ns.load(), g_window_open = false;
     update(); assert(g_s.menu == menu);
+}
+static void editor_click(int button);
+static void menu_finger(Uint32 type,int cell=0,SDL_FingerID id=1,float ox=0,float oy=0) {
+    const float x=test_menu.x+(cell%test_menu.cols)*test_menu.dx+test_menu.w*.5f+ox;
+    const float y=test_menu.y+(cell/test_menu.cols)*test_menu.dy+test_menu.h*.5f+oy;
+    event(type,id,x/1280*screen_w,y/720*screen_h);
+}
+static void game_menu_taps() {
+    for(ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080)}) for(bool quest:{false,true}) {
+        fresh((int)size.x,(int)size.y); in_quest=quest; update(); game_menu_state(true); test_menu.open=true;
+        for(int cols:{1,2}) {
+            test_menu.cols=cols;
+            for(int cell=0;cell<test_menu.cells;++cell) {
+                const int picks=test_menu.picks;
+                menu_finger(SDL_EVENT_FINGER_DOWN,cell);
+                assert(finger(g_s,1)->kind==F_GAME_MENU && test_menu.selected==cell && test_menu.picks==picks);
+                Input v=update(); assert(!v.b && !v.lx && !v.ly && !v.dx && !v.dy);
+                menu_finger(SDL_EVENT_FINGER_UP,cell); assert(test_menu.picks==picks+1 && !finger(g_s,1));
+                menu_finger(SDL_EVENT_FINGER_UP,cell); assert(test_menu.picks==picks+1);
+            }
+        }
+        // A visible virtual button keeps its press even when it overlaps an actual menu row.
+        const Geo r=place(g_s.layout,C_R,size.x,size.y);
+        test_menu.x=r.c.x/size.x*1280-30; test_menu.y=r.c.y/size.y*720-15;
+        test_menu.w=60; test_menu.h=30; test_menu.cells=test_menu.cols=1;
+        const int picks=test_menu.picks;
+        menu_finger(SDL_EVENT_FINGER_DOWN); assert(finger(g_s,1)->kind==F_BUTTON && finger(g_s,1)->ctl==C_R && update().b==B(BTN_R));
+        menu_finger(SDL_EVENT_FINGER_CANCELED); assert(test_menu.picks==picks && !update().b);
+        // Hiding virtual controls does not disable direct game-menu taps.
+        cfg.touch_controls=TOUCH_OFF; update();
+        menu_finger(SDL_EVENT_FINGER_DOWN); menu_finger(SDL_EVENT_FINGER_UP); assert(test_menu.picks==picks+1);
+        cfg.touch_controls=TOUCH_AUTO; update(0,true);
+        menu_finger(SDL_EVENT_FINGER_DOWN); menu_finger(SDL_EVENT_FINGER_UP); assert(test_menu.picks==picks+2);
+        const Geo gear=place(g_s.layout,C_SETTINGS,size.x,size.y);
+        test_menu.x=gear.c.x/size.x*1280-30; test_menu.y=gear.c.y/size.y*720-15;
+        menu_finger(SDL_EVENT_FINGER_DOWN); assert(finger(g_s,1)->kind==F_BUTTON && finger(g_s,1)->ctl==C_SETTINGS);
+        menu_finger(SDL_EVENT_FINGER_UP); assert(settings_open && test_menu.picks==picks+2);
+    }
+    puts("PASS: direct list/grid menu taps select on DOWN and confirm once on UP at three resolutions in town/quest; visible R retains overlaps while Off/Auto-hidden controls allow the menu tap and preserve settings");
+}
+static void game_menu_button_coexist() {
+    struct Button { int ctl; uint64_t mask; float dx=0,dy=0; };
+    const Button buttons[]={{C_HEAVY,B(BTN_A)},{C_LIGHT,B(BTN_X)},{C_DODGE,B(BTN_B)},{C_SHEATHE,B(BTN_Y)},
+        {C_L,B(BTN_L)},{C_R,B(BTN_R)},{C_ZL,B(BTN_ZL)},{C_ZR,B(BTN_ZR)},
+        {C_MENU,B(BTN_PLUS)},{C_HMINUS,B(BTN_MINUS)},{C_MAP,B(BTN_LSTICK)},{C_R3,B(BTN_RSTICK)},
+        {C_HDPAD,DPAD_UP,0,-.65f},{C_HDPAD,DPAD_DOWN,0,.65f},
+        {C_HDPAD,DPAD_LEFT,-.65f,0},{C_HDPAD,DPAD_RIGHT,.65f,0},
+        {C_COMBO,B(BTN_X)|B(BTN_A)},{C_COMBO+1,B(BTN_L)|B(BTN_R)},
+        {C_COMBO+2,B(BTN_ZL)|B(BTN_ZR)},{C_COMBO+3,B(BTN_A)},
+        {C_COMBO+4,B(BTN_X)},{C_COMBO+5,B(BTN_Y)}};
+    const char *const combos[]={"X+A","L+R","ZL+ZR","A","X","Y"};
+    for(ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080)}) for(bool quest:{false,true})
+        for(const Button &button:buttons) {
+            fresh((int)size.x,(int)size.y); in_quest=quest; update(); game_menu_state(true);
+            std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),1);
+            for(int i=0;i<TOUCH_COMBOS;++i) strcpy(cfg.touch_weapon_combo[profile][i],combos[i]);
+            // Isolate a custom-positioned control on top of a menu cell.
+            for(int i=0;i<C_COUNT;++i) g_s.layout.x[i]=g_s.layout.y[i]=-20;
+            const int c=button.ctl; g_s.layout.x[c]=size.x/(2*size.y); g_s.layout.y[c]=.5f;
+            test_menu.open=true; test_menu.x=490; test_menu.y=240; test_menu.w=300; test_menu.h=240;
+            test_menu.cols=test_menu.cells=1;
+            const Geo g=place(g_s.layout,c,size.x,size.y);
+            const ImVec2 p(g.c.x+button.dx*g.r,g.c.y+button.dy*g.r);
+            const ImVec2 menu(500/1280.f*size.x,250/720.f*size.y);
+            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+            assert(finger(g_s,1)->kind==F_BUTTON && finger(g_s,1)->ctl==c);
+            assert(update().touch_b==button.mask && !test_menu.selections && !test_menu.picks);
+            event(SDL_EVENT_FINGER_DOWN,2,menu.x,menu.y);
+            assert(finger(g_s,2)->kind==F_GAME_MENU && update().touch_b==button.mask);
+            event(SDL_EVENT_FINGER_UP,2,menu.x,menu.y);
+            assert(test_menu.picks==1 && update().touch_b==button.mask && finger(g_s,1)->ctl==c);
+            finger(g_s,1)->t0=SDL_GetTicksNS()-MIN_PRESS-1;
+            event(SDL_EVENT_FINGER_UP,1,p.x,p.y);
+            assert(!update().touch_b && !finger(g_s,1) && !finger(g_s,2));
+            // The order of the two fingers is independent, including cancellation.
+            event(SDL_EVENT_FINGER_DOWN,2,menu.x,menu.y);
+            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+            assert(finger(g_s,2)->kind==F_GAME_MENU && finger(g_s,1)->ctl==c && update().touch_b==button.mask);
+            event(SDL_EVENT_FINGER_CANCELED,1,p.x,p.y);
+            assert(!update().touch_b && finger(g_s,2)->kind==F_GAME_MENU);
+            event(SDL_EVENT_FINGER_UP,2,menu.x,menu.y); assert(test_menu.picks==2 && !update().touch_b);
+            // Moving a menu finger over a key neither presses the key nor confirms after the drag.
+            event(SDL_EVENT_FINGER_DOWN,2,menu.x,menu.y);
+            event(SDL_EVENT_FINGER_MOTION,2,p.x,p.y);
+            assert(finger(g_s,2)->kind==F_GAME_MENU && !update().touch_b);
+            event(SDL_EVENT_FINGER_UP,2,p.x,p.y); assert(test_menu.picks==2 && !update().touch_b);
+            if(is_combo(c)) cfg.touch_weapon_combo[profile][c-C_COMBO][0]=0;
+            else cfg.touch_show[show_setting(c)]=0;
+            update(); event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+            assert(finger(g_s,1)->kind==F_GAME_MENU && !update().touch_b);
+            event(SDL_EVENT_FINGER_UP,1,p.x,p.y); assert(test_menu.picks==3 && !update().touch_b);
+        }
+    puts("PASS: every ordinary button, four D-pad directions and six custom-positioned combos retain menu overlaps; either finger order permits an independent menu tap, release/cancel never sticks, and hidden/empty controls pass through");
+}
+static void game_menu_stick_coexist() {
+    for(bool floating:{false,true}) {
+        fresh(); game_menu_state(true); cfg.touch_floating=floating; update();
+        for(int i=0;i<C_COUNT;++i) g_s.layout.x[i]=g_s.layout.y[i]=-20;
+        g_s.layout.x[C_STICK]=.3f*screen_w/screen_h; g_s.layout.y[C_STICK]=.4f;
+        const Geo g=place(g_s.layout,C_STICK,(float)screen_w,(float)screen_h);
+        test_menu.open=true; test_menu.x=g.c.x-40; test_menu.y=g.c.y-30;
+        test_menu.w=80; test_menu.h=60; test_menu.cols=test_menu.cells=1;
+        event(SDL_EVENT_FINGER_DOWN,1,g.c.x,g.c.y);
+        if(floating) {
+            assert(finger(g_s,1)->kind==F_GAME_MENU && !g_s.stick_on);
+            event(SDL_EVENT_FINGER_UP,1,g.c.x,g.c.y); assert(test_menu.picks==1);
+            const ImVec2 base(screen_w*.44f,screen_h*.36f);
+            event(SDL_EVENT_FINGER_DOWN,1,base.x,base.y);
+            event(SDL_EVENT_FINGER_MOTION,1,base.x+2*g.r,base.y);
+            Input v=update(); assert(finger(g_s,1)->kind==F_STICK && g_s.stick_on && v.lx>32000 && !v.ly);
+            const ImVec2 knob(g_s.kx+g.r*.4f,g_s.ky);
+            assert(hypotf(knob.x-base.x,knob.y-base.y)>g.r*1.22f && knob.x>screen_w*.45f);
+            const int selections=test_menu.selections, picks=test_menu.picks;
+            for(const ImVec2 second:{base,knob}) for(Uint32 end:{SDL_EVENT_FINGER_UP,SDL_EVENT_FINGER_CANCELED}) {
+                test_menu.x=second.x-40; test_menu.y=second.y-30;
+                event(SDL_EVENT_FINGER_DOWN,2,second.x,second.y);
+                assert(finger(g_s,2)->kind==F_MENU && finger(g_s,1)->kind==F_STICK);
+                event(SDL_EVENT_FINGER_MOTION,2,second.x+200,second.y-100);
+                v=update();
+                assert(g_s.stick_on && v.lx>32000 && !v.ly && !v.b && !v.rx && !v.ry && !v.dx && !v.dy);
+                assert(fabsf(g_s.bx-base.x)<.02f && fabsf(g_s.by-base.y)<.02f &&
+                       fabsf(g_s.kx-base.x-g.r)<.02f && fabsf(g_s.ky-base.y)<.02f);
+                event(end,2,second.x+300,second.y-150);
+                v=update();
+                assert(!finger(g_s,2) && finger(g_s,1)->kind==F_STICK && g_s.stick_on && v.lx>32000);
+                assert(!v.ly && !v.b && !v.rx && !v.ry && !v.dx && !v.dy);
+                assert(test_menu.selections==selections && test_menu.picks==picks);
+            }
+            event(SDL_EVENT_FINGER_UP,1,base.x+2*g.r,base.y);
+            v=update();
+            assert(!g_s.stick_on && !finger(g_s,1) && !v.b && !v.lx && !v.ly && !v.rx && !v.ry && !v.dx && !v.dy);
+        } else {
+            assert(finger(g_s,1)->kind==F_STICK && g_s.stick_on && !test_menu.selections);
+            event(SDL_EVENT_FINGER_MOTION,1,g.c.x+2*g.r,g.c.y);
+            assert(update().lx>30000 && !test_menu.picks);
+            event(SDL_EVENT_FINGER_CANCELED,1,g.c.x+2*g.r,g.c.y);
+            assert(!g_s.stick_on && !update().lx);
+        }
+    }
+    puts("PASS: the visible fixed stick retains a menu overlap; hidden floating activation permits menu taps, while second touches on its active base/protruding knob never take movement or menu ownership and release/cancel preserves the primary stick");
+}
+static void game_menu_gesture_lifecycle() {
+    for(int mode=0;mode<10;++mode) {
+        fresh(); game_menu_state(true); test_menu.open=true;
+        menu_finger(SDL_EVENT_FINGER_DOWN); assert(finger(g_s,1)->kind==F_GAME_MENU);
+        if(mode==0) menu_finger(SDL_EVENT_FINGER_CANCELED);
+        if(mode==1) menu_finger(SDL_EVENT_FINGER_MOTION,2);
+        if(mode==2) { ++test_menu.id; update(); }
+        if(mode==3) { test_menu.open=false; update(); test_menu.open=true; }
+        if(mode==4) { settings_open=true; update(); settings_open=false; }
+        if(mode==5) { update(0,false,true); update(); }
+        if(mode==6) { touch_edit_begin(); update(); editor_click(E_CANCEL); update(); }
+        if(mode==7) { touch_reset(); update(); }
+        if(mode==8) { assert(touch_template_save(39,"点击复位")); assert(touch_template_use(39)); update(); }
+        if(mode==9) { in_quest=false; update(); }
+        menu_finger(SDL_EVENT_FINGER_UP,mode==1?2:0); assert(test_menu.picks==0);
+        const Input v=update(); assert(!v.b && !v.lx && !v.ly && !v.dx && !v.dy);
+    }
+    fresh(); game_menu_state(true); test_menu.open=true;
+    menu_finger(SDL_EVENT_FINGER_DOWN); menu_finger(SDL_EVENT_FINGER_UP,2); assert(!test_menu.picks);
+    menu_finger(SDL_EVENT_FINGER_DOWN); event(SDL_EVENT_FINGER_UP,1,-10,-10); assert(!test_menu.picks);
+    // A second finger on the menu cannot confirm or take over after the first one releases.
+    menu_finger(SDL_EVENT_FINGER_DOWN); menu_finger(SDL_EVENT_FINGER_DOWN,1,2);
+    assert(finger(g_s,2)->kind==F_GAME_MENU && finger(g_s,2)->done);
+    menu_finger(SDL_EVENT_FINGER_UP); assert(test_menu.picks==1);
+    menu_finger(SDL_EVENT_FINGER_MOTION,1,2); menu_finger(SDL_EVENT_FINGER_UP,1,2); assert(test_menu.picks==1);
+    // Unknown menus and blank areas keep the old directional-swipe behavior, without blindly confirming.
+    test_menu.open=false; event(SDL_EVENT_FINGER_DOWN,3,640,100);
+    assert(finger(g_s,3)->kind==F_CAMERA);
+    event(SDL_EVENT_FINGER_MOTION,3,640,190); assert(update().b&B(BTN_DOWN));
+    event(SDL_EVENT_FINGER_UP,3,640,190); assert(test_menu.picks==1);
+    puts("PASS: menu taps never confirm after drag/flick/outside/cancel, changed/closed menus, overlays, typing, editor, reset, template or quest changes; secondary fingers stay suppressed and unknown menus retain directional swipes");
+}
+static void game_menu_pages_and_slider() {
+    fresh(); game_menu_state(true); test_menu.open=true;
+    for(int dir:{-1,1}) {
+        const float x=dir<0?1020:1070;
+        event(SDL_EVENT_FINGER_DOWN,1,x,80); assert(test_menu.pages==0);
+        event(SDL_EVENT_FINGER_UP,1,x,80); assert(test_menu.pages==dir);
+        test_menu.pages=0;
+    }
+    cfg.touch_show[TB_DPAD]=0; update(); // Keep this slider-only fixture clear of the visible virtual D-pad.
+    test_menu.slider=true;
+    event(SDL_EVENT_FINGER_DOWN,1,300,320);
+    assert(finger(g_s,1)->kind==F_GAME_MENU && test_menu.slider_sets==1 && !test_menu.picks);
+    event(SDL_EVENT_FINGER_MOTION,1,550,400); assert(test_menu.tone==550 && !update().b);
+    event(SDL_EVENT_FINGER_UP,1,570,400); assert(test_menu.tone==570 && !test_menu.picks && !update().b);
+    event(SDL_EVENT_FINGER_DOWN,1,100,240); event(SDL_EVENT_FINGER_UP,1,100,240);
+    assert(test_menu.confirms==1 && !update().b);
+    for(int mode:{TOUCH_OFF,TOUCH_AUTO}) {
+        cfg.touch_controls=mode; update(0,true);
+        event(SDL_EVENT_FINGER_DOWN,1,100,240); event(SDL_EVENT_FINGER_UP,1,100,240);
+        assert(test_menu.confirms==(mode==TOUCH_OFF?2:3) && !update(0,true).b);
+    }
+    fresh(); game_menu_state(true); cfg.touch_show[TB_DPAD]=0; update(); test_menu.open=true; test_menu.slider=true;
+    event(SDL_EVENT_FINGER_DOWN,1,300,320); test_menu.slider=false;
+    event(SDL_EVENT_FINGER_UP,1,300,320); assert(!test_menu.picks && !update().b);
+    puts("PASS: direct page-arrow taps page once; skin-tone slider follows the finger without camera/A input, panel taps confirm and changed slider screens cancel");
 }
 static ImVec2 hud(int zone, float x, float y) {
     touch_hud_piece(zone, x, y, x, y, 0, 0); touch_hud_frame();
@@ -2085,6 +2318,22 @@ static TestIcon test_icon(unsigned char seed,int width=8,int height=8) {
     }
     return stored_icon(bytes);
 }
+static TestIcon shaped_icon(int shape) {
+    const int width=shape==0?128:shape==1?32:96, height=shape==0?32:shape==1?128:96;
+    std::string bytes("TICO",4);
+    for(int dimension:{width,height}) { bytes+=(char)(dimension&255); bytes+=(char)(dimension>>8); }
+    for(int y=0;y<height;++y) for(int x=0;x<width;++x) {
+        float dx=2.f*(x+.5f)/width-1,dy=2.f*(y+.5f)/height-1;
+        if(shape==1) std::swap(dx,dy);
+        const bool inside=shape<2 ? fabsf(dy)<.2f || (dx>0 && fabsf(dy)<1-dx)
+            : hypotf(dx,dy)<.65f+.3f*cosf(5*atan2f(dy,dx));
+        bytes+=(char)(shape==0?60:shape==1?245:255);
+        bytes+=(char)(shape==0?210:shape==1?115:205);
+        bytes+=(char)(shape==0?245:shape==1?100:60);
+        bytes+=(char)(inside?(x%8?255:128):0);
+    }
+    return stored_icon(bytes);
+}
 static void expect_icon(int button,int expected,const char *hash="") {
     int choice=999; char actual[65]="stale";
     assert(touch_icon_get(button,&choice,actual) && choice==expected && !strcmp(actual,hash));
@@ -2220,6 +2469,80 @@ static void icon_resource_fallback() {
     ImGui::Render();
     puts("PASS: native image loader accepts the bounded 128px resource; absent/corrupt template resources retain their references and draw exactly the original R fallback; valid RGBA reaches the actual ImGui custom image texture");
 }
+static void freeform_icon_drawing() {
+    const TestIcon images[]={shaped_icon(0),shaped_icon(1),shaped_icon(2)};
+    for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080)}) {
+        fresh((int)size.x,(int)size.y); enable_universal_combos();
+        for(const TestIcon &image:images) for(float scale:{.6f,1.7f}) for(int floating:{0,1}) {
+            cfg.touch_floating=floating;
+            ImGuiIO &io=ImGui::GetIO(); io.DisplaySize=size; io.DeltaTime=1.f/60;
+            ImGui::NewFrame(); icon_textures_frame();
+            ImTextureData *tex=icon_texture(image.hash.c_str()); assert(tex);
+            assert(image.bytes.size()==8+tex->Width*tex->Height*4);
+            assert(!memcmp(tex->Pixels,image.bytes.data()+8,image.bytes.size()-8));
+            bool transparent=false,partial=false,opaque=false;
+            for(size_t i=11;i<image.bytes.size();i+=4) {
+                const unsigned char alpha=image.bytes[i];
+                transparent|=alpha==0; partial|=alpha==128; opaque|=alpha==255;
+            }
+            assert(transparent && partial && opaque);
+            ImDrawList *dl=ImGui::GetBackgroundDrawList();
+            for(int c:ICON_CONTROLS) for(int phase=0;phase<4;++phase) {
+                State s=g_s; s.edit=phase==3; s.stick_on=phase==1 || phase==2; s.run=phase==2;
+                for(Finger &f:s.f) f={};
+                if(phase==1 || phase==2) s.f[0].kind=F_BUTTON,s.f[0].ctl=c,s.f[0].part=1;
+                Layout l=s.layout; l.scale[c]=scale;
+                l.icons[c].choice=-1; SDL_strlcpy(l.icons[c].hash,image.hash.c_str(),sizeof l.icons[c].hash);
+                const Geo g=place(l,c,size.x,size.y);
+                s.bx=g.c.x+7; s.by=g.c.y-9; s.kx=s.bx+g.r*.7f; s.ky=s.by-g.r*.4f;
+                const int start=dl->VtxBuffer.Size,indices=dl->IdxBuffer.Size;
+                control(dl,ImGui::GetFont(),l,c,size.x,size.y,s,.75f);
+                if(c==C_STICK && floating && phase==0) {
+                    assert(dl->VtxBuffer.Size==start && dl->IdxBuffer.Size==indices); continue;
+                }
+                // Exactly the complete image: no circular face, border, badge, label or running ring.
+                assert(dl->VtxBuffer.Size-start==4 && dl->IdxBuffer.Size-indices==6);
+                const bool moving=c==C_STICK && s.stick_on && !s.edit;
+                const ImVec2 center=moving?ImVec2(s.kx,s.ky):g.c;
+                const float radius=c==C_STICK?g.r*KNOB:g.r*((phase==1 || phase==2)?.95f:1);
+                const float k=2*radius/std::max(tex->Width,tex->Height);
+                const ImVec2 half(tex->Width*k*.5f,tex->Height*k*.5f);
+                const float alpha=c==C_STICK && !moving?.75f*.8f:.75f;
+                for(int v=0;v<4;++v) {
+                    const bool right=v==1 || v==2,bottom=v>=2;
+                    const ImDrawVert &vertex=dl->VtxBuffer[start+v];
+                    assert(fabsf(vertex.pos.x-(center.x+(right?half.x:-half.x)))<.001f);
+                    assert(fabsf(vertex.pos.y-(center.y+(bottom?half.y:-half.y)))<.001f);
+                    assert(vertex.uv.x==(right?1.f:0.f) && vertex.uv.y==(bottom?1.f:0.f));
+                    assert(vertex.col==fade(IM_COL32_WHITE,alpha));
+                }
+            }
+            ImGui::Render();
+        }
+    }
+    fresh();
+    const TestIcon missing=test_icon(93); assert(SDL_RemovePath(missing.path.c_str()));
+    ImGui::NewFrame(); icon_textures_frame(); ImDrawList *dl=ImGui::GetBackgroundDrawList();
+    for(int choice:{0,1,-1}) {
+        IconChoice icon_choice{}; icon_choice.choice=choice;
+        if(choice==-1) SDL_strlcpy(icon_choice.hash,missing.hash.c_str(),sizeof icon_choice.hash);
+        const int before=dl->VtxBuffer.Size;
+        assert(!stick(dl,ImVec2(100,100),ImVec2(120,100),40,1,true,&icon_choice));
+        assert(dl->VtxBuffer.Size-before>4);
+        State s=g_s; s.stick_on=s.run=true; s.bx=s.by=100; s.kx=120; s.ky=100;
+        Layout l=s.layout; l.icons[C_STICK]=icon_choice;
+        const int start=dl->VtxBuffer.Size;
+        control(dl,ImGui::GetFont(),l,C_STICK,1280,720,s,1);
+        const int running=dl->VtxBuffer.Size-start; s.run=false;
+        control(dl,ImGui::GetFont(),l,C_STICK,1280,720,s,1);
+        assert(running>dl->VtxBuffer.Size-start-running);
+        l.icons[C_R]=icon_choice;
+        const int button=dl->VtxBuffer.Size;
+        control(dl,ImGui::GetFont(),l,C_R,1280,720,s,1); assert(dl->VtxBuffer.Size-button>4);
+    }
+    ImGui::Render();
+    puts("PASS: all 24 imported-image controls keep wide/tall/irregular RGBA shapes, full UVs and proportions without fixed discs/badges/labels at three resolutions and two scales, idle/pressed/running/editing and fixed/floating; defaults/builtins/missing-stick fallback retain native feedback");
+}
 static void auto_r_sources_and_ownership() {
     for(int floating:{0,1}) {
         fresh(); cfg.touch_auto_r=1; cfg.touch_floating=floating; update();
@@ -2353,13 +2676,14 @@ int main(int argc,char **argv) {
     touch_button_sources(); item_gestures(); auto_r(); floating_stick();
     dpad_visibility(1280,720); dpad_visibility(640,360); layout_roundtrip(); show_settings();
     common_editor_and_failure(); template_roundtrip_and_failure(); template_corrupt_input(); auto_r_sources_and_ownership(); auto_r_lifecycle();
-    icon_template_isolation(); icon_import_failures(); icon_resource_fallback();
+    icon_template_isolation(); icon_import_failures(); icon_resource_fallback(); freeform_icon_drawing();
     quest_dpad_camera(); universal_floating_stick(); universal_floating_boundaries(); universal_floating_priority_and_reset();
     common_floating_editor_roundtrip(); ordinary_button_drag(); button_drag_release_and_multitouch(); button_drag_lifecycle(); button_drag_exclusions();
     bow_charge_drag(); bow_drag_sources(); bow_drag_lifecycle(); bow_drag_manual_aim();
     editor_hud_quest_only(); editor_hud_dragging(); editor_hud_feedback(); editor_hud_priority_and_multitouch();
     ammo_repeat(); arrow_gesture_ownership(); ammo_visibility_and_editor(); arrow_gesture_lifecycle(); arrow_release_pending_and_overlap(); item_gesture_lifecycle();
     target_switch(1280,720); target_switch(2520,1080); target_switch(3840,1080); persistent_target_lock();
+    game_menu_taps(); game_menu_button_coexist(); game_menu_stick_coexist(); game_menu_gesture_lifecycle(); game_menu_pages_and_slider();
     ImGui::DestroyContext();
     for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080)}) {
         for(bool quest:{false,true}) {
@@ -2394,6 +2718,21 @@ int main(int argc,char **argv) {
         cfg.touch_show[TB_AMMO]=1; enable_universal_combos(); update(); char path[100];
         snprintf(path,sizeof path,"touch-common-ammo-combos-%dx%d.png",screen_w,screen_h); preview(path);
         touch_edit_begin(); update(); snprintf(path,sizeof path,"touch-common-ammo-editor-%dx%d.png",screen_w,screen_h); preview(path);
+        editor_click(E_CANCEL); update();
+    }
+    for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080)}) {
+        fresh((int)size.x,(int)size.y); cfg.language=2; cfg.touch_floating=0;
+        ranged=WEAPON_BOW; weapon_override=10; cfg.touch_show[TB_AMMO]=1; enable_universal_combos();
+        const TestIcon shapes[]={shaped_icon(0),shaped_icon(1),shaped_icon(2)};
+        for(int button:{0,2,4,14,16,22,23}) set_icon(button,-1,shapes[button%3].hash.c_str());
+        update(); char path[100];
+        snprintf(path,sizeof path,"touch-freeform-icons-%dx%d.png",screen_w,screen_h); preview(path);
+        at(SDL_EVENT_FINGER_DOWN,C_R); at(SDL_EVENT_FINGER_DOWN,C_STICK,2);
+        at(SDL_EVENT_FINGER_MOTION,C_STICK,2,1,0); cfg.touch_auto_r=1; update();
+        snprintf(path,sizeof path,"touch-freeform-active-%dx%d.png",screen_w,screen_h); preview(path);
+        event(SDL_EVENT_FINGER_CANCELED,1,0,0); event(SDL_EVENT_FINGER_CANCELED,2,0,0); update();
+        touch_edit_begin(); update();
+        snprintf(path,sizeof path,"touch-freeform-editor-%dx%d.png",screen_w,screen_h); preview(path);
         editor_click(E_CANCEL); update();
     }
     SDL_DestroyWindow(window); SDL_Quit();

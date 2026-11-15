@@ -34,6 +34,39 @@ static void file_equals(const char *path, const char *expected) {
     assert(!strcmp(actual, expected));
     free(actual);
 }
+static void removed_motion_settings(const char *path) {
+    const char *const keys[] = {"Motion", "MotionGain", "MotionInvertX", "MotionInvertY"};
+    char error[256], help[256];
+    float minimum, maximum;
+    for (int i = 0; i < 4; ++i) {
+        assert(!config_setting(keys[i]));
+        assert(!config_help(keys[i], help, sizeof help));
+        assert(!config_range(keys[i], &minimum, &maximum) && !config_restart_key(keys[i]));
+    }
+    assert(config_setting("ObjectMotion")); // FSR object motion is unrelated to sensor input.
+    remove(path);
+    g_config = config_defaults(); config_load();
+    char *text = read_file(path);
+    assert(!strstr(text, "\nMotion =") && !strstr(text, "MotionGain") &&
+           !strstr(text, "MotionInvertX") && !strstr(text, "MotionInvertY"));
+    free(text);
+
+    const char *legacy = "[Controls]\nMotion = Always\nMotionGain = not-a-number\n"
+                         "MotionInvertX = invalid\nMotionInvertY = On\n";
+    write_file(path, legacy);
+    g_config = config_defaults(); config_load();
+    Config expected = config_defaults(), loaded = config_editable();
+    for (int i = 0; i < g_nsettings; ++i) assert(config_equal(&g_settings[i], &loaded, &expected));
+    loaded.volume = expected.volume = 37;
+    assert(config_save(&loaded, error, sizeof error));
+    text = read_file(path);
+    assert(strstr(text, legacy)); // Preserve unknown lines, without letting them affect settings or validation.
+    free(text);
+    g_config = config_defaults(); config_load();
+    loaded = config_editable();
+    for (int i = 0; i < g_nsettings; ++i) assert(config_equal(&g_settings[i], &loaded, &expected));
+    puts("PASS: removed motion keys have no settings, help or defaults; legacy values including invalid values are ignored, preserved on Save and cannot affect current settings");
+}
 static void auto_r_roundtrip(const char *path) {
     char error[256];
     remove(path);
@@ -301,7 +334,6 @@ int main(int argc, char **argv) {
     assert(g_config.width == 900 && fabsf(g_config.fov - 1.6f) < 0.001f);
     assert(c.hp.quests == 2 && c.language == 0 && c.button_icons == 0);
     assert(!c.draw_grass && !config_grass_draw());
-    assert(c.motion_mode == MOTION_OFF && config_motion_mode() == MOTION_OFF);
     assert(c.touch_auto_r == 0 && config_live_touch_auto_r() == 0);
     assert(c.touch_floating == 0 && config_live_touch_floating() == 0);
     assert(!c.persistent_lock_on && !config_live_persistent_lock_on());
@@ -637,6 +669,7 @@ int main(int argc, char **argv) {
     companion_transaction(path);
     combo_text_bounds();
     auto_r_roundtrip(path);
+    removed_motion_settings(path);
     remove(path);
     puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish/Chinese, icons, hot settings, keybinds and restart classification.");
     return 0;

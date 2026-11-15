@@ -1,5 +1,8 @@
 MHGU Relink 0.2.2 · 2026-11-13
 
+2026-11-15: Retirar el control por giroscopio
+Se eliminan la puntería por giroscopio del teléfono y del mando, la lectura del sensor y sus ajustes. Los ajustes antiguos de movimiento dejan de aplicarse. Se conservan los deslizamientos táctiles, los botones virtuales, los sticks y los toques directos en los menús.
+
 r14: Arrastrar el botón de carga del arco para orientar el disparo
 Mientras cargas el arco, mantén Disparo y arrastra a izquierda, derecha, arriba o abajo para cambiar los ángulos horizontal y vertical de la guía amarilla nativa y la dirección real de esta flecha. No abre la mira automáticamente. Sin arrastrar se conserva la fijación existente; después de arrastrar, la dirección manual tiene prioridad durante esta carga y para esta flecha, evitando que la fijación la desvíe de inmediato.
 En el diseño a distancia fuera de misiones y los diseños de Arco, Ballesta pesada y Ballesta ligera durante las misiones, si no son clásicos, el botón de mira siempre envía R, sin cambiar a X al enfundar, desenfundar o cambiar el tipo de controles del arco. Se elimina el botón R independiente duplicado de la esquina superior derecha. El botón R de mira respeta el ajuste de visibilidad de R en Botones en pantalla al dibujarse, tocarse y editarse. Disparo sigue cargando el arco según el ajuste Tipo 1/Tipo 2 del juego.

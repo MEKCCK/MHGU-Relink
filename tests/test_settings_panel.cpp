@@ -747,6 +747,18 @@ static void touch_button_rows_regression() {
     }
     puts("PASS: common touch-button rows retain Aim (R), native item arrows and independent ammo arrows; ShowAmmo defaults On and saves both On/Off independently, while retired ranged controls stay hidden and their settings unchanged");
 }
+static void removed_motion_rows_regression() {
+    opened = true;
+    idle();
+    seek_row("lock.persistent");
+    down();
+    assert(focused_row("touch.buttons"));
+    down();
+    assert(focused_row("touch.camera") && !settings_panel_dirty());
+    opened = false;
+    frame();
+    puts("PASS: Controls moves directly from persistent lock-on to screen buttons and touch-camera speed, with no motion controls or sensitivity/inversion rows");
+}
 static void auto_r_regression() {
     char error[256];
     Config fixture = config_editable();
@@ -1016,6 +1028,7 @@ int main(int argc, char **argv) {
         combo_layout_regression();
         touch_button_rows_regression();
         auto_r_regression();
+        removed_motion_rows_regression();
         touch_icon_regression();
         template_previews();
         ImGui::DestroyContext();

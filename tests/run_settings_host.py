@@ -8,7 +8,7 @@ import sys
 project = Path(__file__).resolve().parents[1]
 workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis' / 'host-test-deps'
-output = workspace / 'analysis' / 'relink-compatible-build' / 'host-settings'
+output = Path(os.environ.get('MHGU_SETTINGS_HOST_OUTPUT', workspace / 'analysis/relink-compatible-build/host-settings'))
 output.mkdir(parents=True, exist_ok=True)
 vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True, text=True, check=True)

@@ -66,6 +66,13 @@ static int g_menu_key;
 static float g_font_size;
 static ImGuiStyle g_base_style;  // (unscaled; scaled copies follow the window's height)
 static float g_scale;
+#ifdef __ANDROID__
+static struct {
+    bool pressed, moving;
+    ImVec2 from;
+    float scroll;
+} g_forge_drag;
+#endif
 
 // ------------------------------------------------------------------ input (main thread -> game thread)
 struct Ev {
@@ -879,6 +886,28 @@ static void snap_clear(void) {
     g_snap.Valid = false;
 }
 
+#ifdef __ANDROID__
+static void forge_finger_scroll() {
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    ImGuiWindow *w = ImGui::GetCurrentWindow();
+    ImGuiIO &io = g.IO;
+    if (io.MouseSource != ImGuiMouseSource_TouchScreen || !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        g_forge_drag = {};
+        return;
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && g.HoveredWindow == w && io.MousePos.x < w->InnerRect.Max.x)
+        g_forge_drag = {true, false, io.MousePos, w->Scroll.y};
+    if (!g_forge_drag.pressed) return;
+    float dx = io.MousePos.x - g_forge_drag.from.x, dy = io.MousePos.y - g_forge_drag.from.y;
+    if (!g_forge_drag.moving && fabsf(dy) > io.DisplaySize.y * .022f && fabsf(dy) > fabsf(dx)) {
+        g_forge_drag.moving = true;
+        ImGui::ClearActiveID();  // A vertical swipe scrolls instead of clicking the starting option.
+    }
+    if (g_forge_drag.moving)
+        ImGui::SetScrollY(w, std::clamp(g_forge_drag.scroll - dy, 0.0f, w->ScrollMax.y));
+}
+#endif
+
 // A texture ImGui wants made whose descriptor set could not be had (VK_ERROR_OUT_OF_POOL_MEMORY: the backend's pool
 // full). The backend still made its image, gave it a null set and marked it ready, and the next draw naming it
 // asserts ("ImDrawCmd is referring to ImTextureData that wasn't uploaded"). Undo it and ask again next frame, by
@@ -953,6 +982,9 @@ void overlay_frame(void *cpu) {
     bool under = g_forge_over;  // (the settings wait under Forge's menu: neither drawn nor given input)
     if (!under) settings_panel_before_frame(g_settings_open);
     ImGui::NewFrame();
+#ifdef __ANDROID__
+    if (!g_forge_open) g_forge_drag = {};
+#endif
     if (!under) {
         bool settings = g_settings_open;
         settings_panel(&settings);
@@ -969,9 +1001,28 @@ void overlay_frame(void *cpu) {
         if (ImGui::IsKeyPressed(ImGuiKey_AppBack, false) ||
             (forge_idle && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) ||
                             ImGui::IsKeyPressed(ImGuiKey_Escape, false)))) keep = false;
+        ImGuiWindowFlags forge_flags = 0;
+#ifdef __ANDROID__
+        // Scope phone sizing to the menu; plugins' free-render HUD keeps Forge's original scale.
+        ImGui::PushFont(nullptr, std::max(22.0f, g_base_style.FontSizeBase));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12 * scale, 13 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12 * scale, 13 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(8 * scale, 6 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 32 * scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 32 * scale);
+        const ImGuiViewport *vp = ImGui::GetMainViewport();
+        float margin = std::min(vp->WorkSize.x, vp->WorkSize.y) * .03f;
+        ImVec2 size(std::min(vp->WorkSize.x - 2 * margin, 1280 * scale), vp->WorkSize.y - 2 * margin);
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - size.x) * .5f, vp->WorkPos.y + margin), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+        ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
+        forge_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+#else
         ImGui::SetNextWindowPos(ImVec2(40 * scale, 40 * scale), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420 * scale, 360 * scale), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("forge", &keep)) {
+#endif
+        if (ImGui::Begin("forge", &keep, forge_flags)) {
 #ifdef __ANDROID__
             // Keep a finger-sized exit visible even when a plugin's settings scroll.
             if (ImGui::Button(settings_text(config_language(), "Close Forge"), ImVec2(-FLT_MIN, 48 * scale))) keep = false;
@@ -997,10 +1048,15 @@ void overlay_frame(void *cpu) {
             }
             if (ImGui::CollapsingHeader("Plugin UI")) forge_imgui_run(cpu, FORGE_IMGUI_RENDER);
 #ifdef __ANDROID__
+            forge_finger_scroll();
             ImGui::EndChild();
 #endif
         }
         ImGui::End();
+#ifdef __ANDROID__
+        ImGui::PopStyleVar(5);
+        ImGui::PopFont();
+#endif
         if (!keep) set_open(false);
     }
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);

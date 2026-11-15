@@ -76,11 +76,14 @@ static char g_learned_path[1200];
 #define CALL_QUEST_RANK    0x9839b8u  // the Quest Counter: Training, Low, High, Hunt of the Day
 #define CALL_QUEST_STARS   0x984314u  // ... a rank's star levels
 #define CALL_QUEST_LIST    0x981f1cu  // ... a level's quests (the list widget's caller: list_widget)
+#define CALL_MIX_CONFIRM   0x38d1b0u  // Combo List's Combine / Stop (the mix helper's caller: mix_update)
 static const MenuGeom builtin[] = {
     {CALL_BISTRO, 868, 51, 364, 45, 0, 48, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_RANK, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_STARS, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_LIST, 740, 202, 540, 37, 0, 42, 0, 0, 0, 0, 0, true},
+    // This popup recolours two fixed rows; scope its measured layout to Combo List, not every mix helper caller.
+    {.lr = CALL_MIX_CONFIRM, .x = 738, .y = 408, .w = 114, .h = 34, .dy = 36, .builtin = true, .cols = 1},
     // the Palico Intense Training setup: # of times and Items (the learned bar, 36 apart), then Begin Training, a button
     // well below whose highlight is recoloured in place - nothing moves onto it, so its row's place is measured (the
     // button's piece 590,315 210 x 34)
@@ -579,6 +582,17 @@ static void list_widget(Cpu *c) {
     g_widget_lr = saved;
 }
 
+// The same mix helper also opens other screens' prompts; only Combo List has the fixed popup above.
+#define FN_MIX_UPDATE   0x38b034u
+#define CALL_MIX_CURSOR 0x38b0fcu
+static uint32_t g_mix_lr;
+static void mix_update(Cpu *c) {
+    uint32_t saved = g_mix_lr;
+    g_mix_lr = c->r[14] & ~1u;
+    fnhook_call_original(c, FN_MIX_UPDATE);
+    g_mix_lr = saved;
+}
+
 // Two list cursors that make one grid: one picks the row (Up / Down), the other the column (Left / Right) - the World Map's
 // 2 x 4 destinations. The row cursor's call is the menu (its cells are rows x columns, its column the other cursor's);
 // the column cursor only reports its column and takes the column of a jump, and is never a menu of its own.
@@ -603,6 +617,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
     uint32_t cur = c->r[0], lr = c->r[14] & ~1u;
     atomic_store(&g_any_cursor_ns, plat_now_ns());
     if ((lr == CALL_WIDGET_A || lr == CALL_WIDGET_B) && g_widget_lr) lr = g_widget_lr | (lr == CALL_WIDGET_B ? WIDGET_SECOND : 0);
+    if (lr == CALL_MIX_CURSOR && g_mix_lr == CALL_MIX_CONFIRM) lr = g_mix_lr;
     // (the host's nudge - a short Down that makes a quiet cursor run - never moves anything itself: a jump puts its own
     // step in, and with none, or for another menu than the one that runs, it would walk the selection down)
     if (plat_now_ns() - atomic_load(&g_nudge_ns) < 150000000ull) c->r[1] &= ~BIT_DOWN;
@@ -965,4 +980,5 @@ void menuptr_init(void) {
     fnhook_set(FN_SLIDER_UPDATE, hle_register("menuptr:slider_update", slider_update));
     fnhook_set(FN_CHOICE_UPDATE, hle_register("menuptr:choice_update", choice_update));
     fnhook_set(FN_LIST_WIDGET, hle_register("menuptr:list_widget", list_widget));
+    fnhook_set(FN_MIX_UPDATE, hle_register("menuptr:mix_update", mix_update));
 }

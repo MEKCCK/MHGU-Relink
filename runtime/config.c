@@ -130,10 +130,6 @@
     .touch_combo_pad = {0, 0, 0, 0, 0, 0},                                                          \
     .touch_combo_name = {"", "", "", "", "", ""},                                                   \
     /* [Mouse] */                                                                                   \
-    .motion_mode = MOTION_OFF,                                                                      \
-    .motion_gain = 1.0f,                                                                            \
-    .motion_flip_x = 0,                                                                             \
-    .motion_flip_y = 0,                                                                             \
     .mouse_sensitivity = 1.0f,                                                                      \
     .mouse_sensitivity_y = 1.0f,                                                                    \
     .mouse_invert_y = 0,                                                                            \
@@ -487,14 +483,6 @@ static const char DEFAULT_INI[] =
     "; Tap the target icon to switch monsters; hold it for half a second or click the right stick to toggle the lock.\n"
     "; Requires LockOn. Default: Off\n"
     "PersistentLockOn = Off\n"
-    "\n"
-    "; The phone or selected controller's gyro turns the aim: Off or Aiming (bows and bowguns only).\n"
-    "; Legacy Always values are accepted and use the same aiming-only behavior.\n"
-    "; Default: Off\n"
-    "Motion = Off\n"
-    "MotionGain = 1.0\n"
-    "MotionInvertX = Off\n"
-    "MotionInvertY = Off\n"
     "\n"
     "[Mouse]\n"
     "; Mouse sensitivity\n"
@@ -1084,10 +1072,6 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     ON_OFF("Controls", "LockOn", lock_on, false),
     ON_OFF("Controls", "PersistentLockOn", persistent_lock_on, false),
-    {"Controls", "Motion", SET_CHOICE, F(motion_mode), 0, 0, 0, "Off,Aiming,Always", NULL, false, ERR_MISC},
-    {"Controls", "MotionGain", SET_FLOAT, F(motion_gain), 0, 0.1f, 5.0f, NULL, NULL, false, ERR_MISC},
-    ON_OFF("Controls", "MotionInvertX", motion_flip_x, false),
-    ON_OFF("Controls", "MotionInvertY", motion_flip_y, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
     ON_OFF("Touch", "MoveHUD", touch_hud, false),
     ON_OFF("Touch", "AutoR", touch_auto_r, false),

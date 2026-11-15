@@ -7,7 +7,7 @@ import subprocess
 project = Path(__file__).resolve().parents[1]
 workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis/host-test-deps'
-output = workspace / 'analysis/relink-settings-panel-build'
+output = Path(os.environ.get('MHGU_SETTINGS_PANEL_OUTPUT', workspace / 'analysis/relink-settings-panel-build'))
 output.mkdir(parents=True, exist_ok=True)
 (output / 'obj/settings-test').mkdir(parents=True, exist_ok=True)
 vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')

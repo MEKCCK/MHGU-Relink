@@ -12,7 +12,6 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };
 enum { TOUCH_AUTO, TOUCH_ON, TOUCH_OFF };  // [Touch] Controls (runtime/touch.cpp)
-enum { MOTION_OFF, MOTION_AIM, MOTION_ALWAYS };  // MOTION_ALWAYS: legacy alias for aiming only
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };  // [Performance] ShowBattery
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
@@ -73,10 +72,6 @@ typedef struct {
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)
     HpScale hp;               // large monster HP in Hub-type quests (runtime/hle/hpscale.c)
-    int motion_mode;          // [Controls] Motion: MOTION_*, the phone turning the hunt camera
-    float motion_gain;        // [Controls] MotionGain: times the angle the phone turned
-    int motion_flip_x;        // [Controls] MotionInvertX: horizontal turned round
-    int motion_flip_y;        // [Controls] MotionInvertY: vertical turned round
     float mouse_sensitivity;  // mouse look: times the hunt camera's angle per count (runtime/hle/mousecam.c), and
                               // the speed for full right stick tilt elsewhere is divided by it (runtime/host_input.c)
     float mouse_sensitivity_y;  // [Mouse] MouseSensitivityY: times the vertical angle per count, on top of the above
@@ -278,10 +273,6 @@ void config_runtime_init(const Config *effective); // After environment/Auto res
 float config_live_fps(void);
 void config_set_live_fps(float fps);
 float config_live_fov(void);
-float config_motion_gain(void);
-int config_motion_mode(void);
-int config_motion_flip_x(void);
-int config_motion_flip_y(void);
 float config_live_mouse_sensitivity(void);
 float config_live_mouse_sensitivity_y(void);
 int config_live_mouse_invert_y(void);

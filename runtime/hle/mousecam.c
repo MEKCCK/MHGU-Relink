@@ -78,7 +78,6 @@
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static float g_dx, g_dy;           // counts moved since the handler last ran (x right, y down)
-static float g_mot_yaw, g_mot_pitch;  // radians the phone turned since then (see mousecam_motion_add; yaw right, pitch up)
 static int g_cycle_req;            // (host thread) lock-on targets asked for, taken one per hunt camera update
 static volatile uint64_t g_seen_ns;  // when a handler last ran
 static float g_rest_yaw, g_rest_pitch;  // (the fractions of a unit left over, so slow movements add up)
@@ -112,19 +111,6 @@ void mousecam_add(float dx, float dy) {
     pthread_mutex_unlock(&g_lock);
 }
 
-void mousecam_motion_add(float yaw, float pitch) {
-    if (!isfinite(yaw) || !isfinite(pitch)) return;
-    pthread_mutex_lock(&g_lock);
-    g_mot_yaw += yaw, g_mot_pitch += pitch;
-    pthread_mutex_unlock(&g_lock);
-}
-
-void mousecam_motion_reset(void) {
-    pthread_mutex_lock(&g_lock);
-    g_mot_yaw = g_mot_pitch = 0.0f;
-    pthread_mutex_unlock(&g_lock);
-}
-
 void mousecam_target_cycle(void) {
     pthread_mutex_lock(&g_lock);
     if (g_cycle_req < 8) g_cycle_req++;  // (no runaway: a queued tap each is a target)
@@ -148,7 +134,7 @@ bool touch_lock_on(void);      // (the lock-on is on, whatever the camera is doi
 #define LOCK_NEAR0 120.0f    // closer than this (under the monster) the camera holds its heading,
 #define LOCK_NEAR1 380.0f    // farther than this the full follow (eased between)
 
-// The touch owner is separate from ordinary camera movement and gyro. A serial guards against a cancel or
+// The touch owner is separate from ordinary camera movement. A serial guards against a cancel or
 // a new finger arriving while a native action query runs. The game thread alone writes hunter angles.
 static struct {
     uint32_t hunter;
@@ -227,7 +213,7 @@ void mousecam_bow_charge_tick(Cpu *c) {
         Cpu query = *c;
         query.r[0] = h, query.r[1] = 1, query.r[2] = 0;
         guest_call(&query, FN_AIMING);
-        valid = !query.r[0];  // a manually opened aim mode keeps the existing aim/gyro/lock path
+        valid = !query.r[0];  // a manually opened aim mode keeps the existing aim/lock path
         if (valid) {
             query = *c;
             query.r[0] = h;
@@ -538,16 +524,16 @@ static void camlog(uint32_t cam) {
     }
 }
 
-// The mouse's and the phone's movement since the last update, as whole units of yaw and pitch (false: neither moved).
+// Mouse and touch movement since the last update, as whole units of yaw and pitch (false: no movement).
 static bool take_turn(uint32_t invert, int *iy, int *ip) {
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
     g_seen_ns = now;
     pthread_mutex_lock(&g_lock);
-    float dx = g_dx, dy = g_dy, myaw = g_mot_yaw, mpitch = g_mot_pitch;
-    g_dx = g_dy = g_mot_yaw = g_mot_pitch = 0;
+    float dx = g_dx, dy = g_dy;
+    g_dx = g_dy = 0;
     pthread_mutex_unlock(&g_lock);
     if (!seen || now - seen >= ACTIVE_NS)  // (moved while it didn't run)
-        g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0, dx = dy = 0, myaw = mpitch = 0;
+        g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0, dx = dy = 0;
     float sm = config_live_mouse_smoothing();  // (smoothing: each update takes the share of what is waiting that 1 - sm says)
     if (sm > 0.0f) {
         g_trail_dx += dx, g_trail_dy += dy;
@@ -558,15 +544,12 @@ static bool take_turn(uint32_t invert, int *iy, int *ip) {
     } else {
         g_trail_dx = g_trail_dy = 0;
     }
-    if (dx == 0 && dy == 0 && myaw == 0.0f && mpitch == 0.0f) return false;
+    if (dx == 0 && dy == 0) return false;
     float s = MOUSECAM_DEG_PER_COUNT * UNITS_PER_DEG * config_live_mouse_sensitivity();
     float yaw = -dx * s, pitch = -dy * s * config_live_mouse_sensitivity_y();  // (right turns the yaw down, up raises the pitch: as the stick)
     if (config_live_mouse_invert_y()) pitch = -pitch;
     if (invert & 1) pitch = -pitch;
     if (invert & 2) yaw = -yaw;
-    // (the phone's turning, in radians: [Controls] MotionGain, and its own invert options; the stick's invert is not its)
-    float mot = UNITS_PER_RAD * config_motion_gain();
-    yaw -= myaw * mot, pitch += mpitch * mot;
     yaw += g_rest_yaw, pitch += g_rest_pitch;
     *iy = (int)yaw, *ip = (int)pitch;
     g_rest_yaw = yaw - (float)*iy, g_rest_pitch = pitch - (float)*ip;

@@ -10,6 +10,7 @@
 //     screen drag outside the controls moves the cursor with d-pad taps; the stick does not select menu entries
 //     The visible buttons keep their layout and positions when menus open or close. A screen drag elsewhere also
 //     moves the cursor, a step every so far, as a list on a phone
+//     A tap on a recognized menu cell outside visible controls selects and confirms it; game buttons keep their presses.
 //   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): a tap on the item bar (bottom middle)
 //     uses the item, a swipe on it turns the bar; a tap on a Hunter Art's panel (top right) performs it; a tap on the
 //     target camera's icon enables the lock-on, then cycles the target (the camera keeps turning to the selected monster;
@@ -48,8 +49,10 @@ extern volatile uint64_t g_town_ns;  // (hle/quickhunt.c: a town's walking-aroun
 int weapon_drawn(void);  // (hle/weapon.c: 1 the weapon out, 0 sheathed, -1 not known)
 #include "hle/input.h"
 #include "hle/itembar.h"
+#include "hle/menuptr.h"
 #include "hle/mousecam.h"
 SDL_Window *ui_window(void);
+bool host_input_press(const char *button, unsigned frames);
 }
 #include "haptics.h"  // (a short tick on the phone when a control is pressed)
 #include "overlay.h"
@@ -859,7 +862,7 @@ Zones zones(void) {
 }
 
 // ------------------------------------------------------------------ fingers (host main thread)
-enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT };
+enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT, F_GAME_MENU };
 struct Finger {
     SDL_FingerID id;
     Kind kind;
@@ -868,7 +871,7 @@ struct Finger {
     uint64_t t0, step_at;
     float swipe, swipe_y;  // the item bar, a menu's cursor: pixels swiped since the last step
     bool moved, done, bar_open, bow_drag_blocked, camera_drag_blocked, item_arrow;
-    uint64_t btn;          // a control of the ranged layout: what it pressed when it landed (the weapon may go out under it)
+    uint64_t btn;          // ranged buttons at landing; F_GAME_MENU: the menu's identity at landing
 };
 struct Pulse {
     uint64_t buttons, from, until;  // (held from .. until: a sequence starts some later)
@@ -909,7 +912,7 @@ struct State {
     int layout_profile;
     int detected_weapon;
     bool save_failed;
-    bool loaded, touched, auto_wait;
+    bool loaded, touched, auto_wait, typing;
     bool menu;  // the menu layout is shown (game_menu, at the last touch_input)  // (auto_wait: a desktop's Auto, waiting for the first finger)
     bool in_quest;
     bool edit, edit_request;  // the layout editor
@@ -1198,6 +1201,52 @@ void item_motion(State &s, Finger &f, float dx, float dy, uint64_t now) {
     item_swipe(s, f, now);
 }
 
+enum { MENU_TOUCH_SLIDER = -4, MENU_TOUCH_PANEL = -5 };
+int menu_touch_hit(const SDL_Event *e, float *x, float *y) {
+    if (!host_input_menu_point(e->tfinger.x, e->tfinger.y, x, y)) return MENUPTR_NONE;
+    if (menuptr_slider_open())
+        return menuptr_slider_hit(*x, *y) ? MENU_TOUCH_SLIDER : menuptr_slider_panel(*x, *y) ? MENU_TOUCH_PANEL : MENUPTR_NONE;
+    return menuptr_hit(*x, *y);
+}
+bool menu_touch_begin(State &s, Finger &f, const SDL_Event *e) {
+    if (s.typing || !menuptr_open()) return false;
+    float x, y;
+    int target = menu_touch_hit(e, &x, &y);
+    if (target == MENUPTR_NONE) return false;
+    f.kind = F_GAME_MENU, f.ctl = target, f.btn = menuptr_menu_id();
+    // One menu gesture at a time; a second finger must not confirm or inherit the first one's press.
+    for (const Finger &other : s.f)
+        if (&other != &f && other.kind == F_GAME_MENU) f.done = true;
+    if (!f.done) {
+        if (target >= 0) menuptr_select_at(target, false, x, y);
+        else if (target == MENU_TOUCH_SLIDER) menuptr_slider_set(x, false);
+        tap_due();
+    }
+    return true;
+}
+void menu_touch_event(State &s, Finger &f, const SDL_Event *e, float x, float y) {
+    if (overlay_menu_open() || s.edit || s.typing || !menuptr_open() || f.btn != menuptr_menu_id() ||
+        ((f.ctl == MENU_TOUCH_SLIDER || f.ctl == MENU_TOUCH_PANEL) != menuptr_slider_open()))
+        f.done = true;
+    if (hypotf(x-f.x0, y-f.y0) > .025f*s.h) f.moved = true;
+    if (!f.done && e->type != SDL_EVENT_FINGER_CANCELED) {
+        float gx, gy;
+        int target = menu_touch_hit(e, &gx, &gy);
+        if (f.ctl == MENU_TOUCH_SLIDER) {
+            if (host_input_menu_point(e->tfinger.x, e->tfinger.y, &gx, &gy)) menuptr_slider_set(gx, false);
+        } else if (e->type == SDL_EVENT_FINGER_UP && !f.moved && target == f.ctl) {
+            if (target >= 0) menuptr_select_at(target, true, gx, gy);
+            else if (target == MENUPTR_PAGE_LEFT || target == MENUPTR_PAGE_RIGHT)
+                menuptr_page_turn(target == MENUPTR_PAGE_LEFT ? -1 : 1);
+            else if (target == MENU_TOUCH_PANEL) host_input_press("A", 12);
+        } else if (e->type == SDL_EVENT_FINGER_MOTION && target >= 0) {
+            menuptr_select_at(target, false, gx, gy);
+        }
+    }
+    f.x = x, f.y = y;
+    if (e->type != SDL_EVENT_FINGER_MOTION) f.kind = F_NONE;
+}
+
 // the port's settings menu takes the fingers as its mouse (overlay.cpp)
 void to_menu(const SDL_Event *e) {
     SDL_Window *win = ui_window();
@@ -1382,6 +1431,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 tap_due();
                 return true;
             }
+            if (menu_touch_begin(s, *f, e)) return true;
             f->kind = F_CAMERA;  // (hidden: a drag still turns the camera)
             return true;
         }
@@ -1404,6 +1454,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
             Geo g = place(s.layout, ammo, s.w, s.h);
             if (hypotf(x - g.c.x, y - g.c.y) < g.r * 1.2f) { c = ammo; part = 0; break; }
         }
+        Geo stick = place(s.layout, C_STICK, s.w, s.h);
+        // Only the visible stick owns a menu overlap, not the floating stick's whole activation area.
+        bool on_stick = in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) &&
+                        ((!floating_stick_enabled(s) && hypotf(x-stick.c.x, y-stick.c.y) < stick.r*1.22f) ||
+                         (s.stick_on && (hypotf(x-s.bx, y-s.by) < stick.r*1.22f ||
+                                        hypotf(x-s.kx, y-s.ky) < stick.r*KNOB*1.25f)));
         if (classic && c == C_STICK) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = c;
@@ -1455,6 +1511,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 if (d < best) best = d, row = i;
             }
             f->kind = F_ARTS, f->part = row;  // (performed on the tap, when it lifts: a drag turns the camera)
+        } else if (!on_stick && menu_touch_begin(s, *f, e)) {
+            return true;
         } else if (in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) && in_stick_zone(s, x, y, item)) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = C_STICK;
@@ -1479,6 +1537,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
     }
     Finger *f = finger(s, e->tfinger.fingerID);
     if (!f) return true;
+    if (f->kind == F_GAME_MENU) {
+        menu_touch_event(s, *f, e, x, y);
+        return true;
+    }
     if (f->kind == F_MENU) {
         if (overlay_menu_open() && f->part) to_menu(e);
         if (e->type != SDL_EVENT_FINGER_MOTION) f->kind = F_NONE;
@@ -1588,6 +1650,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     ensure_loaded(s);
+    s.typing = typing;
     uint64_t now = SDL_GetTicksNS();
     bool menu = overlay_menu_open();
     uint32_t hunter = weapon_hunter();
@@ -1613,6 +1676,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     if (game != s.menu) {  // Menu input changes, but the quest's controls remain in place under held fingers.
         s.menu = game;
+        if (!game) for (Finger &f : s.f) if (f.kind == F_GAME_MENU) f.done = true;
         cancel_button_camera(s);
         release_dpad(s);  // Do not turn a camera press into menu navigation, or the reverse.
         if (game) cancel_item_gestures(s);
@@ -1651,6 +1715,9 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     if (!visible || menu || s.menu || s.edit) cancel_item_gestures(s);
     if (!visible || menu || s.menu || s.edit) reset_bow_drag(s);
     if (menu || s.menu || s.edit) cancel_button_camera(s);
+    for (Finger &f : s.f)
+        if (f.kind == F_GAME_MENU && (menu || typing || s.edit || !menuptr_open() || f.btn != menuptr_menu_id()))
+            f.done = true;
     if (was_visible && !visible) {
         cancel_button_camera(s);
         for (Finger &f : s.f)
@@ -2369,7 +2436,7 @@ bool custom_icon(ImDrawList *dl, const IconChoice &choice, ImVec2 c, float r, Im
     if (choice.choice != -1) return false;
     ImTextureData *tex = icon_texture(choice.hash);
     if (!tex) return false; // Missing or corrupt resource: preserve the reference but show the default face.
-    float scale = r * 1.38f / std::max(tex->Width, tex->Height);
+    float scale = r * 2.0f / std::max(tex->Width, tex->Height);
     ImVec2 half(tex->Width * scale * .5f, tex->Height * scale * .5f);
     dl->AddImage(tex->GetTexRef(), ImVec2(c.x-half.x, c.y-half.y), ImVec2(c.x+half.x, c.y+half.y),
                  ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32_WHITE, a));
@@ -2638,8 +2705,10 @@ void dpad(ImDrawList *dl, Geo g, int part, float a) {
     }
 }
 
-void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, const IconChoice *choice = nullptr) {
+bool stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, const IconChoice *choice = nullptr) {
     float kr = r * KNOB;
+    // Imported artwork supplies the complete shape, including its transparent outline.
+    if (choice && choice->choice == -1 && custom_icon(dl, *choice, knob, kr, IM_COL32_WHITE, a)) return true;
     dl->AddCircleFilled(base, r, fade(IM_COL32(10, 7, 5, 255), a * (on ? .42f : .26f)), 48);
     dl->AddCircle(base, r, fade(BRONZE, a), 48, r * .07f);
     dl->AddCircle(base, r * .955f, fade(GOLD, a * .85f), 48, r * .025f);
@@ -2652,10 +2721,11 @@ void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, 
         dl->AddConvexPolyFilled(q, 4, fade(GOLD, a * .8f));
     }
     disc(dl, knob, kr, on, a);
-    if (choice && custom_icon(dl, *choice, knob, kr, fade(GOLD, a), a)) return;
+    if (choice && custom_icon(dl, *choice, knob, kr, fade(GOLD, a), a)) return false;
     float d = kr * .32f;
     ImVec2 q[4] = {ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y)};
     dl->AddConvexPolyFilled(q, 4, fade(GOLD, a));
+    return false;
 }
 
 void combo_label(int i, int profile, char *out, size_t size) {
@@ -2691,8 +2761,8 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
     }
     if (i == C_STICK) {
         if (s.stick_on && !s.edit) {
-            stick(dl, ImVec2(s.bx, s.by), ImVec2(s.kx, s.ky), g.r, a, true, &l.icons[i]);
-            if (s.run) {  // (running: a gold ring round the rim, and streaks behind the knob)
+            bool image = stick(dl, ImVec2(s.bx, s.by), ImVec2(s.kx, s.ky), g.r, a, true, &l.icons[i]);
+            if (s.run && !image) {  // (running: a gold ring round the rim, and streaks behind the knob)
                 dl->AddCircle(ImVec2(s.bx, s.by), g.r * 1.12f, fade(GLOW, a * .85f), 48, g.r * .07f);
                 float dx = s.kx - s.bx, dy = s.ky - s.by, n = std::max(1.0f, hypotf(dx, dy));
                 dx /= n, dy /= n;
@@ -2719,6 +2789,7 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
         bool available = l.icons[i].choice > 0 || icon_texture(l.icons[i].hash);
         if (available) {
             float r = mask ? g.r * .95f : g.r;
+            if (l.icons[i].choice == -1 && custom_icon(dl, l.icons[i], g.c, r, IM_COL32_WHITE, a)) return;
             disc(dl, g.c, r, mask != 0, a);
             custom_icon(dl, l.icons[i], g.c, r, fade(mask ? GLOW : INK, a), a);
             if (is_combo(i)) {

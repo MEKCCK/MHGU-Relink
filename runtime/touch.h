@@ -11,6 +11,8 @@ extern "C" {
 #endif
 
 // host main thread (runtime/host_input.c)
+// Map an SDL normalized finger position through the same renderer menu transform as the mouse.
+bool host_input_menu_point(float u, float v, float *x, float *y);
 bool touch_event(const SDL_Event *e);  // a finger event: true when it was the controls'
 // ORs into buttons and returns the buttons contributed by touch, including overlaps with other input sources.
 uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
