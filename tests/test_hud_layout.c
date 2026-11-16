@@ -14,44 +14,64 @@ static void touch_zones(void) {
         {1170, 16, 100, HUD_TOUCH_TARGET}, {1230, 95, 100, HUD_TOUCH_TARGET},
         {1200, 50, 100.49f, HUD_TOUCH_TARGET}, {1169.9f, 50, 100, HUD_TOUCH_NONE},
         {1230.1f, 50, 100, HUD_TOUCH_NONE}, {1200, 15.9f, 100, HUD_TOUCH_NONE},
-        {1200, 95.1f, 100, HUD_TOUCH_NONE}, {1200, 50, 101, HUD_TOUCH_NONE},
+        {1200, 95.1f, 100, HUD_TOUCH_NONE}, {1200, 50, 101, HUD_TOUCH_TARGET},
         {1000, 650, 103, HUD_TOUCH_ITEM}, {850, 500, 103, HUD_TOUCH_ITEM},
         // Ammo is above the item bar, but remains part of the same movable group.
         {1010, 420, 103, HUD_TOUCH_ITEM}, {950, 305, 102.51f, HUD_TOUCH_ITEM},
         {900, 499, 103.49f, HUD_TOUCH_ITEM}, {899, 499, 103, HUD_TOUCH_NONE},
         {1000, 650, 102.5f, HUD_TOUCH_NONE}, {1000, 650, 103.5f, HUD_TOUCH_NONE},
         {800, 650, 103, HUD_TOUCH_ITEM}, {1000, 650, 100, HUD_TOUCH_NONE},
-        {1150, 180, 105, HUD_TOUCH_NONE}, {980, 75, 104.51f, HUD_TOUCH_NONE},
-        {1230, 310, 105.49f, HUD_TOUCH_NONE}, {1150, 180, 104.5f, HUD_TOUCH_NONE},
+        {1150, 180, 105, HUD_TOUCH_MAP}, {980, 75, 104.51f, HUD_TOUCH_MAP},
+        {1230, 310, 105.49f, HUD_TOUCH_MAP}, {1150, 180, 104.5f, HUD_TOUCH_MAP},
         {1150, 180, 105.5f, HUD_TOUCH_NONE},
+        {800, 50, 100, HUD_TOUCH_MAP}, {800, 50, 101, HUD_TOUCH_MAP},
+        {1200, 50, 101, HUD_TOUCH_TARGET},
+        {400, 0, 104.5f, HUD_TOUCH_NONE}, {400, 0, 105, HUD_TOUCH_NONE},
+        {1100, 360, 105.49f, HUD_TOUCH_MAP}, {399.9f, 200, 105, HUD_TOUCH_NONE},
+        {1280.1f, 200, 105, HUD_TOUCH_NONE}, {800, 360.1f, 105, HUD_TOUCH_NONE},
+        {800, 180, 103, HUD_TOUCH_MAP}, {950, 305, 102.51f, HUD_TOUCH_ITEM},
+        {215, 0, 105, HUD_TOUCH_NONE}, // Meownster Hunters' map-frame sentinel.
     };
     for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i) {
-        assert(hud_touch_zone(cases[i].x, cases[i].y, cases[i].z, true) == cases[i].zone);
+        int actual = hud_touch_zone(cases[i].x, cases[i].y, cases[i].z, true);
+        if (actual != cases[i].zone) fprintf(stderr, "zone case %u at %.1f,%.1f z %.2f: got %d, expected %d\n", i, cases[i].x,
+                                               cases[i].y, cases[i].z, actual, cases[i].zone);
+        assert(actual == cases[i].zone);
         assert(hud_touch_zone(cases[i].x, cases[i].y, cases[i].z, false) == HUD_TOUCH_NONE);
     }
 }
 
-static void fixed_map(void) {
-    // Layer 105 uses the original canvas anchors, never a manual touch HUD offset.
-    const float layers[] = {104.5f, 104.51f, 105.0f, 105.49f, 105.5f};
+static void movable_map_and_loading_gate(void) {
+    const float layers[] = {99.5f, 100.0f, 101.0f, 102.0f, 102.5f, 104.5f, 105.0f, 105.49f, 105.5f};
     for (unsigned i = 0; i < sizeof layers / sizeof *layers; ++i) {
-        assert(hud_touch_zone(1150, 180, layers[i], true) == HUD_TOUCH_NONE);
+        int expected = layers[i] >= 99.5f && layers[i] < 105.5f ? HUD_TOUCH_MAP : HUD_TOUCH_NONE;
+        assert(hud_touch_zone(800, 180, layers[i], true) == expected);
         assert(hud_touch_zone(1150, 180, layers[i], false) == HUD_TOUCH_NONE);
     }
-    const float scale[][2] = {{1, 1}, {16.0f / 21.0f, 1}, {0.5f, 1}, {1, 0.9f}};
-    for (unsigned i = 0; i < sizeof scale / sizeof *scale; ++i)
-        for (int sign = -1; sign <= 1; sign += 2)
-            for (int visible = 0; visible <= 1; ++visible) {
-                volatile float dx[HUD_TOUCH_COUNT] = {21, 42, 63, sign * 1400.0f};
-                volatile float dy[HUD_TOUCH_COUNT] = {-14, -28, -56, sign * 800.0f};
-                HudTouchOffset offset = hud_touch_offset(HUD_TOUCH_MAP, visible != 0, dx, dy, scale[i][0], scale[i][1]);
-                assert(!offset.active && !offset.moved); near(offset.x, 0); near(offset.y, 0);
-                assert(hud_touch_group_allowed(true, offset));
-                assert(!hud_touch_relax_scissor(false, offset));
-            }
+    assert(hud_touch_zone_for_frame(800, 180, 105, true, true) == HUD_TOUCH_NONE);
+    assert(hud_touch_zone_for_frame(800, 50, 101, true, true) == HUD_TOUCH_NONE);
+    assert(hud_touch_zone_for_frame(800, 180, 105, false, false) == HUD_TOUCH_NONE);
+    assert(hud_loading_candidate(1, 10, 0));
+    assert(hud_loading_candidate(0, 10, 8));
+    assert(!hud_loading_candidate(0, 11, 8));
+    assert(!hud_loading_candidate(0, 7, 8));
+    int horizontal = HUD_CENTER, vertical = HUD_V_BOTTOM;
+    hud_touch_anchor(HUD_TOUCH_MAP, &horizontal, &vertical);
+    assert(horizontal == HUD_RIGHT && vertical == HUD_V_TOP);
+    horizontal = HUD_CENTER, vertical = HUD_V_BOTTOM;
+    hud_touch_anchor(HUD_TOUCH_ITEM, &horizontal, &vertical);
+    assert(horizontal == HUD_CENTER && vertical == HUD_V_BOTTOM);
+    volatile float dx[HUD_TOUCH_COUNT] = {0, 0, 0, 36};
+    volatile float dy[HUD_TOUCH_COUNT] = {0, 0, 0, -24};
+    HudTouchOffset offset = hud_touch_offset(HUD_TOUCH_MAP, true, dx, dy, 0.5f, 0.75f);
+    assert(offset.active && offset.moved); near(offset.x, 18); near(offset.y, -18);
+    assert(!hud_touch_group_allowed(true, offset));
+    assert(hud_touch_relax_scissor(false, offset));
+    offset = hud_touch_offset(HUD_TOUCH_MAP, false, dx, dy, 1, 1);
+    assert(!offset.active && !offset.moved); near(offset.x, 0); near(offset.y, 0);
     assert(hud_canvas_anchor(105, HUD_RIGHT, false, false, false) == HUD_RIGHT);
     assert(hud_canvas_anchor(105, HUD_RIGHT, true, false, false) == HUD_LEFT);
-    puts("HUD fixed map regressions: OK");
+    puts("HUD movable map/loading exclusion regressions: OK");
 }
 
 static void touch_offsets(void) {
@@ -68,7 +88,7 @@ static void touch_offsets(void) {
         for (int sign = -1; sign <= 1; sign += 2) {
             volatile float dx[HUD_TOUCH_COUNT] = {sign * 21.0f, sign * 42.0f, sign * 63.0f, sign * 84.0f};
             volatile float dy[HUD_TOUCH_COUNT] = {sign * -14.0f, sign * -28.0f, sign * -56.0f, sign * -70.0f};
-            for (int zone = 0; zone < HUD_TOUCH_MAP; ++zone) {
+            for (int zone = 0; zone < HUD_TOUCH_COUNT; ++zone) {
                 HudTouchOffset offset = hud_touch_offset(zone, true, dx, dy, canvases[i].sx, canvases[i].sy);
                 assert(offset.active && offset.moved);
                 near(offset.x, sign * canvases[i].x[zone]);
@@ -89,7 +109,7 @@ static void touch_offsets(void) {
         printf("HUD manual offsets at %s: positive/negative/hidden regions OK\n", canvases[i].aspect);
     }
     volatile float dx[HUD_TOUCH_COUNT] = {0}, dy[HUD_TOUCH_COUNT] = {0};
-    for (int zone = 0; zone < HUD_TOUCH_MAP; ++zone) {
+    for (int zone = 0; zone < HUD_TOUCH_COUNT; ++zone) {
         HudTouchOffset offset = hud_touch_offset(zone, true, dx, dy, 1, 1);
         assert(offset.active && !offset.moved);
         near(offset.x, 0); near(offset.y, 0);
@@ -166,7 +186,7 @@ int main(void) {
     assert(!hud_menu_panel_allowed(270, 270, true, false));
     assert(!hud_menu_panel_allowed(640, 53, false, true));
     touch_zones();
-    fixed_map();
+    movable_map_and_loading_gate();
     touch_offsets();
     puts("HUD layout regressions: OK");
     return 0;

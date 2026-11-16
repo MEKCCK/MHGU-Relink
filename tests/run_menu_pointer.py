@@ -37,13 +37,13 @@ try:
             env[key] = value
     for key in ('MHGU_MENUPTR_NO_BUILTIN', 'MHGU_MENUPTR_NO_SHIPPED'):
         env.pop(key, None)
-    compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+    compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
     exe = output / 'test-menu-pointer.exe'
     compiled = subprocess.run([
         str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=gnu11',
         '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE',
         '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers', '-Wno-unused-parameter',
-        '-I' + str(workspace / 'analysis/host-test-deps'),
+        '-I' + str(project / 'tests/host_compat'), '-I' + str(workspace / 'analysis/host-test-deps'),
         '-I' + str(project / 'runtime'), str(project / 'tests/test_menu_pointer.c'),
         str(project / 'runtime/menulearn.c'), '-o', str(exe),
     ], env=env, cwd=output, capture_output=True, timeout=120)
@@ -52,7 +52,7 @@ try:
     if compiled.returncode:
         print((compiled.stdout + compiled.stderr).decode('utf-8', errors='replace'), end='')
     compiled.check_returncode()
-    for case in ('known', 'select', 'nudge', 'unknown', 'expiry', 'mapping', 'mix', 'context'):
+    for case in ('known', 'select', 'nudge', 'unknown', 'expiry', 'mapping', 'mix', 'context', 'mix-repeat', 'mix-guards'):
         with tempfile.TemporaryDirectory(prefix='menu-pointer-', dir=output) as scratch:
             result = subprocess.run([str(exe), case], env=env, cwd=scratch,
                                     capture_output=True, timeout=30)

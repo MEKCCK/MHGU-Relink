@@ -18,6 +18,7 @@ bool touch_event(const SDL_Event *e);  // a finger event: true when it was the c
 uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
                      float *cam_dx, float *cam_dy);
 bool touch_running(void);  // full left stick requests running only, independently of native R
+bool touch_virtual_right_stick_active(void);  // the virtual stick remains native input; its axes are not camera input
 // game thread (runtime/overlay.cpp): drawn over the game, under the port's menus
 bool touch_visible(void);
 bool touch_drawn(void);  // (something of them is on the screen: the settings button alone, when they are hidden)
@@ -29,7 +30,7 @@ enum { TOUCH_TEMPLATE_COUNT = 40, TOUCH_TEMPLATE_NAME_MAX = 64 };
 bool touch_template_info(int slot, char *name, int name_size); // false for empty or invalid slots (0..39)
 bool touch_template_save(int slot, const char *name); // snapshot the current layout, including an editor draft
 bool touch_template_use(int slot); // save and apply the snapshot; unavailable during layout editing
-enum { TOUCH_ICON_BUTTON_COUNT = 24, TOUCH_ICON_HASH_SIZE = 65 };
+enum { TOUCH_ICON_BUTTON_COUNT = 25, TOUCH_ICON_HASH_SIZE = 65 };
 // Icon choice: 0 default, 1..builtin_count built-in, -1 immutable custom image.
 const char *touch_icon_button_name(int button);
 int touch_icon_builtin_count(void);
@@ -42,6 +43,7 @@ void touch_lock_toggle(void);  // the lock-on (a controller's right stick click 
 // the lock-on's L presses, given every button pressed now and whether the camera is being turned (host_input.c)
 uint64_t touch_lock_buttons(uint64_t buttons, bool cam_input);
 void touch_reset(void);  // every finger gone (the app went to the background: runtime/ui.c)
+void touch_background(void);  // also retain whether an in-game menu was open for foreground touch routing
 // while shown, the HUD moves out of the thumbs' way: the status to the left edge, the item bar to the bottom middle,
 // the Hunter Arts and the target camera to the top right (nvn/vulkan/exec.c)
 extern volatile int g_touch_hud;
@@ -50,7 +52,7 @@ extern volatile int g_touch_hud;
 // and subsequent taps select the next monster; holding the icon for 500 ms toggles the lock. The render thread passes
 // each moved part's place (the game's
 // position, and where it went on the 1280x720 canvas: nvn/vulkan/exec.c cbuf_info), and closes each frame (device.c).
-enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_COUNT };  // MAP is reserved for saved-layout compatibility; not editable.
+enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_COUNT };
 // where the player put them in the layout editor: an offset from their default place, in the game's 16:9 canvas
 // units (1280 x 720); the render thread adds it (nvn/vulkan/exec.c)
 extern volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];

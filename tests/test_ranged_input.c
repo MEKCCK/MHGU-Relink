@@ -26,6 +26,8 @@ static int pthread_mutex_unlock(pthread_mutex_t *lock) { (void)lock; return 0; }
 
 static uint64_t clock_ns = 1000000000ull, buttons;
 static int32_t stick_state[4];
+static bool virtual_right_stick;
+static int camera_original_calls;
 static bool locked = true, persistent, native_aim = true;
 static float aim_up = 45, aim_down = 30;
 static bool clobber_query;
@@ -36,11 +38,12 @@ bool touch_lock_on(void) { return locked; }
 bool touch_lock_active(void) { return locked; }
 int config_live_persistent_lock_on(void) { return persistent; }
 void input_get(uint64_t *b, int32_t sticks[4]) { *b = buttons; memcpy(sticks, stick_state, sizeof stick_state); }
+bool touch_virtual_right_stick_active(void) { return virtual_right_stick; }
 float config_live_mouse_smoothing(void) { return 0; }
 float config_live_mouse_sensitivity(void) { return 1; }
 float config_live_mouse_sensitivity_y(void) { return 1; }
 int config_live_mouse_invert_y(void) { return 0; }
-void fnhook_call_original(Cpu *c, uint32_t fn) { (void)c; (void)fn; }
+void fnhook_call_original(Cpu *c, uint32_t fn) { (void)c; if (fn == FN_CAMERA_STICK) camera_original_calls++; }
 // Independent fixture of the original 0x13b93dc action switch (same local main as the guide regression).
 static bool charging_fixture(uint32_t h) {
     unsigned st = LD16(h + PL_ACT_ST), no = LD16(h + PL_ACT_NO);
@@ -569,13 +572,34 @@ static void bow_charge_drag_races(void) {
     puts("PASS: a cancel/new finger during a native query invalidates the old charge write and leaves only the new gesture pending.");
 }
 
+static void virtual_right_stick_camera_routing(void) {
+    world(); locked = false; virtual_right_stick = false; camera_original_calls = 0;
+    g_dx = g_dy = g_trail_dx = g_trail_dy = g_rest_yaw = g_rest_pitch = 0;
+    g_seen_ns = clock_ns;
+    stick_state[2] = 12000; stick_state[3] = -7000;
+    const int32_t original_axes[4] = {stick_state[0], stick_state[1], stick_state[2], stick_state[3]};
+    Cpu c = {0}; c.r[0] = camera;
+    camera_stick(&c); assert(camera_original_calls == 1);
+    virtual_right_stick = true;
+    uint32_t yaw = LD32(camera + QC_YAW_TO);
+    clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) == yaw);
+    mousecam_add(12, 0); clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) != yaw);
+    assert(stick_state[0] == original_axes[0] && stick_state[1] == original_axes[1] &&
+           stick_state[2] == original_axes[2] && stick_state[3] == original_axes[3]);
+    virtual_right_stick = false; clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 2);
+    puts("PASS: virtual right-stick axes stay available to game logic but do not turn the camera; independent mouse/touch deltas still turn it");
+}
+
 int main(void) {
     world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
     shot_left_stick(VT_HEAVY, 0); shot_left_stick(VT_LIGHT, 0); shot_left_stick(VT_BOW, 0); shot_left_stick(VT_BOW, 1);
     shot_identity_reset();
     actual_aim(); persistent_scope(); scope_left_stick(VT_HEAVY); scope_left_stick(VT_LIGHT); scope_left_stick(VT_BOW);
     no_unscoped_steering(); relative_drag();
-    bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races();
+    bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races(); virtual_right_stick_camera_routing();
     puts("PASS: sticky target/cycle, standing bowgun fire, manual aim/crouch, bow charge gates, actual aim states, relative drag.");
     return 0;
 }

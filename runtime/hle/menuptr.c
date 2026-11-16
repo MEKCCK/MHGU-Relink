@@ -77,6 +77,8 @@ static char g_learned_path[1200];
 #define CALL_QUEST_STARS   0x984314u  // ... a rank's star levels
 #define CALL_QUEST_LIST    0x981f1cu  // ... a level's quests (the list widget's caller: list_widget)
 #define CALL_MIX_CONFIRM   0x38d1b0u  // Combo List's Combine / Stop (the mix helper's caller: mix_update)
+#define CALL_MIX_LIST      0x38d468u
+#define FN_MIX_LIST_UPDATE 0x38d018u
 static const MenuGeom builtin[] = {
     {CALL_BISTRO, 868, 51, 364, 45, 0, 48, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_RANK, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
@@ -351,6 +353,15 @@ typedef struct {
 } Cursor;
 static Cursor g_cursors[MAX_CURSORS];
 static pthread_mutex_t g_cur_lock = PTHREAD_MUTEX_INITIALIZER;
+// The result waits for A without updating a cursor. Keep it alive from its own update, not an old menu timeout.
+static struct {
+    uint32_t box;
+    int state;
+    uint64_t seen_ns;
+    Cursor cursor;
+    MenuGeom geometry;
+    bool ready, confirm;
+} g_mix_result;
 static int cursor_cells(uint32_t lr) {  // (its cells now; 0: not seen)
     int n = 0;
     pthread_mutex_lock(&g_cur_lock);
@@ -378,9 +389,13 @@ enum { PICK_POINTER, PICK_LEARN, PICK_RECENT };
 static Cursor *pick(int how) {
     uint64_t now = plat_now_ns(), best_t = 0;
     Cursor *best = NULL;
+    bool result = how == PICK_POINTER && g_mix_result.seen_ns && now - g_mix_result.seen_ns < OPEN_NS &&
+                  g_mix_result.state >= 2 && g_mix_result.state <= 4;
+    if (result && g_mix_result.ready) best = &g_mix_result.cursor, best_t = best->appeared_ns;
     for (int i = 0; i < MAX_CURSORS; i++) {
         Cursor *c = &g_cursors[i];
         if (!c->lr) continue;
+        if (result && (c->lr == CALL_MIX_LIST || c->lr == CALL_MIX_CONFIRM)) continue;
         bool open = how == PICK_POINTER ? now - c->seen_ns < OPEN_NS || now - c->bar_ns < OPEN_NS
                     : how == PICK_LEARN ? now - c->seen_ns < LEARN_NS
                                         : now - c->seen_ns < RECENT_NS;
@@ -388,6 +403,7 @@ static Cursor *pick(int how) {
         // (one known only from its frame on screen, never run, comes last: a small frame's key piece can sit where
         // another screen happens to have a piece too - the Face grid's corner on the Style screen)
         uint64_t t = !c->seen_ns ? 0 : c->moved_ns > c->appeared_ns ? c->moved_ns : c->appeared_ns;
+        if (result && t < g_mix_result.cursor.appeared_ns) continue;
         if (!best || t >= best_t) best = c, best_t = t;
     }
     // A screen in front that isn't known - a running cursor of several cells that appeared well after the known one (a
@@ -712,6 +728,54 @@ static void grid_update(Cpu *c) { cursor_update_as(c, &GRID); }
 static void grid_update2(Cpu *c) { cursor_update_as(c, &GRID2); }
 static void choice_update(Cpu *c) { cursor_update_as(c, &CHOICE); }
 
+static void mix_list_update(Cpu *c) {
+    uint32_t box = c->r[0];
+    fnhook_call_original(c, FN_MIX_LIST_UPDATE);
+    int state = LD8(box + 0x80);
+    uint64_t now = plat_now_ns();
+    MenuGeom geometry = {0};
+    bool ready = false;
+    if (state == 4) {
+        uint32_t helper = LD32(box + 4);
+        float delay;
+        if (helper) {
+            memcpy(&delay, G2H(helper + 0x20), sizeof delay);
+            ready = isfinite(delay) && delay <= 0 && menuptr_variants(CALL_MIX_LIST, &geometry, 1) > 0;
+        }
+        if (ready) {
+            int row = LD8(box + 0x14 + LIST.row), cells = cells_now(box + 0x14, &LIST);
+            ready = row >= 0 && row < cells;
+            float x0, y0, x1, y1;
+            menuptr_row_rect(&geometry, row, 1, &x0, &y0, &x1, &y1);
+            geometry = (MenuGeom){.lr = FN_MIX_LIST_UPDATE, .x = x0, .y = y0, .w = x1-x0, .h = y1-y0,
+                                  .builtin = true, .cols = 1};
+        }
+    }
+    pthread_mutex_lock(&g_cur_lock);
+    bool changed = g_mix_result.box != box || g_mix_result.state != state ||
+                   !g_mix_result.seen_ns || now - g_mix_result.seen_ns >= OPEN_NS;
+    if (changed) {
+        g_mix_result.confirm = false;
+        g_mix_result.cursor = (Cursor){.lr = FN_MIX_LIST_UPDATE, .appeared_ns = now, .since = g_present_count,
+                                      .cells = 1, .cols = 1, .pages = 1, .known = true};
+        // Retire the old list/popup as the result begins; reopening either must get a new touch identity.
+        if (state >= 2 && state <= 4) {
+            for (int i = 0; i < MAX_CURSORS; ++i)
+                if (g_cursors[i].lr == CALL_MIX_LIST || g_cursors[i].lr == CALL_MIX_CONFIRM)
+                    memset(&g_cursors[i], 0, sizeof g_cursors[i]);
+            uint32_t target = atomic_load(&g_target_lr), page = atomic_load(&g_page_lr);
+            if (target == CALL_MIX_LIST || target == CALL_MIX_CONFIRM) {
+                atomic_store(&g_target, -1), atomic_store(&g_click, false), atomic_store(&g_confirm, false);
+            }
+            if (page == CALL_MIX_LIST || page == CALL_MIX_CONFIRM) atomic_store(&g_page_dir, 0);
+        }
+    }
+    g_mix_result.box = box, g_mix_result.state = state, g_mix_result.seen_ns = now;
+    g_mix_result.ready = ready, g_mix_result.geometry = geometry, g_mix_result.cursor.seen_ns = now;
+    pthread_mutex_unlock(&g_cur_lock);
+    if (state >= 2 && state <= 4) atomic_store(&g_any_cursor_ns, now);
+}
+
 static uint64_t pointer_opened(uint32_t lr) {  // when that call's cursor appeared (0: not open)
     uint64_t t = 0;
     pthread_mutex_lock(&g_cur_lock);
@@ -774,6 +838,13 @@ uint64_t menuptr_menu_id(void) {
 bool menuptr_geometry(MenuGeom *out) {
     Cursor c;
     if (!pointer_menu(&c)) return false;
+    if (c.lr == FN_MIX_LIST_UPDATE) {
+        pthread_mutex_lock(&g_cur_lock);
+        bool same = c.appeared_ns == g_mix_result.cursor.appeared_ns && g_mix_result.ready;
+        if (same) *out = g_mix_result.geometry;
+        pthread_mutex_unlock(&g_cur_lock);
+        return same;
+    }
     pthread_mutex_lock(&g_live_lock);
     bool live = g_live_ns && g_live.lr == c.lr && plat_now_ns() - g_live_ns < LIVE_NS && (!g_live.count || g_live.count == c.cells);
     if (live) *out = g_live;
@@ -829,6 +900,9 @@ int menuptr_hit(float x, float y) {
     Cursor c;
     MenuGeom g;
     if (!pointer_menu(&c) || !menuptr_geometry(&g)) return MENUPTR_NONE;
+    // The selected recipe and the visible result/message panels all dismiss the result with the game's normal A.
+    if (c.lr == FN_MIX_LIST_UPDATE &&
+        ((x >= 472 && x < 852 && y >= 230 && y < 386) || (x >= 18 && x < 600 && y >= 600 && y < 698))) return 0;
     static const struct { uint32_t lr; float y0, y1, lx0, lx1, rx0, rx1; } arrows[] = {  // (page arrows, 1280x720)
         {CALL_PAUSE_MENU, 64, 97, 1108, 1146, 1214, 1252},
         {CALL_QUEST_LIST, 146, 184, 1144, 1182, 1236, 1274},
@@ -869,8 +943,21 @@ void menuptr_nudged(void) { atomic_store(&g_nudge_ns, plat_now_ns()); }
 static void select_cell(int cell, bool pick_it) {
     Cursor c;
     if (cell < 0 || !pointer_menu(&c)) return;
+    pthread_mutex_lock(&g_cur_lock);
+    Cursor *active = pick(PICK_POINTER);
+    if (!active || active->lr != c.lr || active->appeared_ns != c.appeared_ns) {
+        pthread_mutex_unlock(&g_cur_lock);
+        return;
+    }
+    if (c.lr == FN_MIX_LIST_UPDATE) {
+        if (cell == 0 && pick_it) g_mix_result.confirm = true;
+        pthread_mutex_unlock(&g_cur_lock);
+        return;
+    }
     if (pick_it && cell == c.row * c.cols + c.col) {
+        atomic_store(&g_target_lr, c.lr);
         atomic_store(&g_target, -1), atomic_store(&g_click, false), atomic_store(&g_confirm, true);
+        pthread_mutex_unlock(&g_cur_lock);
         return;
     }
     atomic_store(&g_target, -1);
@@ -878,6 +965,7 @@ static void select_cell(int cell, bool pick_it) {
     atomic_store(&g_click, pick_it);
     atomic_store(&g_asked_ns, plat_now_ns());
     atomic_store(&g_target, cell);
+    pthread_mutex_unlock(&g_cur_lock);
 }
 
 void menuptr_page_turn(int dir) {
@@ -888,7 +976,14 @@ void menuptr_page_turn(int dir) {
     atomic_store(&g_page_dir, dir > 0 ? 1 : -1);
 }
 
-bool menuptr_take_confirm(void) { return atomic_exchange(&g_confirm, false); }
+bool menuptr_take_confirm(void) {
+    pthread_mutex_lock(&g_cur_lock);
+    bool confirm = atomic_exchange(&g_confirm, false);
+    bool result = g_mix_result.confirm && pick(PICK_POINTER) == &g_mix_result.cursor;
+    g_mix_result.confirm = false;
+    pthread_mutex_unlock(&g_cur_lock);
+    return confirm || result;
+}
 
 // ---- character creation's Skin Tone slider: a gradient of 184 tones (1..184, 0xb8) with a marker. Its update
 // 0x8babe4(slider, ..., pad bits r2), every frame from 0x8ba920: Left (0x80) / Right (0x20) step the tone by 1 (10 with
@@ -981,4 +1076,5 @@ void menuptr_init(void) {
     fnhook_set(FN_CHOICE_UPDATE, hle_register("menuptr:choice_update", choice_update));
     fnhook_set(FN_LIST_WIDGET, hle_register("menuptr:list_widget", list_widget));
     fnhook_set(FN_MIX_UPDATE, hle_register("menuptr:mix_update", mix_update));
+    fnhook_set(FN_MIX_LIST_UPDATE, hle_register("menuptr:mix_list_update", mix_list_update));
 }

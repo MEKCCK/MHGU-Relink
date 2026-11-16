@@ -1010,6 +1010,7 @@ static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot
                                              // this pass began)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static unsigned ui_loading_rows;  // the loading backdrop's rows seen in this pass (1: y 168, 2: 433, 4: 570)
+static uint64_t ui_loading_seen_frame;  // loading can draw in another render pass before its backdrop rows are encountered
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
@@ -3659,6 +3660,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // through one of those heights mid-hunt made the pass a loading screen, and the HUD drawn after it for
                     // that frame sat centred (its top pieces ~94 px lower at 16:10, the item bar higher): a flash.
                     ui_loading_rows |= row;
+                    if (loading_strip) ui_loading_seen_frame = g_present_count;
                     if (ui_loading_rows & (ui_loading_rows - 1)) ui_loading_pass = true;
                     if (loading_strip || ui_loading_pass) sy = 1.0f;
                 }
@@ -3686,10 +3688,11 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool item_bar_move = false, arts_move = false, target_move = false, status_edge = false;
                 // the hunt's HUD (not a menu, the results, a loading screen, the title): its item bar, Hunter Arts and
                 // target camera answer a finger (runtime/touch.cpp), moved or not; with the touch controls they move
-                bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !ui_title_pass &&
-                                !ui_meownster_pass;
-                int touch_zone = hud_touch_zone(pos_x, pos_y, pos_z, hunt_hud);
-                bool item_bar_part = false, arts_part = false, target_part = false;
+                bool loading_candidate = hud_loading_candidate(ui_loading_rows, g_present_count, ui_loading_seen_frame);
+                bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !loading_candidate &&
+                                !ui_title_pass && !ui_meownster_pass;
+                int touch_zone = hud_touch_zone_for_frame(pos_x, pos_y, pos_z, hunt_hud, loading_candidate);
+                bool item_bar_part = false, arts_part = false, target_part = false, map_part = false;
                 bool grouped = false;
                 int vgroup = 1;
 
@@ -3808,6 +3811,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // 105.0: Minimap & Target Cam
                         anchor = ANCHOR_RIGHT;
                         vanchor = V_TOP;
+                        map_part = touch_zone == HUD_TOUCH_MAP;
                     } else {
                         // General fallback for other layers
                         if (pos_x <= 430.0f) anchor = ANCHOR_LEFT;
@@ -3856,6 +3860,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     if (!aiming && ui_menu_pass && !ui_stamp_pass && !ui_loading_pass && !ui_results_pass && !ui_results_last &&
                         pos_z >= 95.5f && pos_z < 109.5f)
                         menu_canvas = true;
+                    if (map_part) {
+                        int horizontal = anchor, vertical = vanchor;
+                        hud_touch_anchor(touch_zone, &horizontal, &vertical);
+                        anchor = horizontal, vanchor = vertical;
+                        status_edge = false;
+                    }
                     anchor = hud_canvas_anchor(pos_z, anchor, menu_canvas, aiming, loading_strip || ui_loading_pass);
                     if (aiming && pos_z > 96.5f && pos_z < 98.5f) vanchor = V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
@@ -3900,6 +3910,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         ui_art_piece = true, ui_art_game_y = pos_y;
                     }
                     if (target_part) touch_hud_piece(TZ_TARGET, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    if (map_part) touch_hud_piece(TZ_MAP, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                     // One anchor per window (ui_group_end), on a picture narrower than 16:9. Not for the hunt's status HUD
                     // and item bar (103), the minimap (105), the loading screen, or the bars that belong to an edge (a
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).

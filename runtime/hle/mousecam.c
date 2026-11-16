@@ -45,6 +45,7 @@
 #include "../hle.h"
 #include "input.h"
 #include "mousecam.h"
+extern bool touch_virtual_right_stick_active(void);
 
 #define FN_CAMERA_STICK 0x2255ccu  // uQuestCamera's right stick handler: r0 = the camera, r1 = the invert bits
 #define FN_AIM_TURN     0x4a1738u  // the hunter's turn while aiming: r0 = the player, r1 = the mode
@@ -574,7 +575,7 @@ void mousecam_status(void) {
 
 static void camera_stick(Cpu *c) {
     uint32_t cam = c->r[0], invert = c->r[1];
-    fnhook_call_original(c, FN_CAMERA_STICK);
+    if (!touch_virtual_right_stick_active()) fnhook_call_original(c, FN_CAMERA_STICK);
     camlog(cam);
     g_cam = cam, g_stick_runs++;
     uint64_t now = plat_now_ns(), seen = g_seen_ns;

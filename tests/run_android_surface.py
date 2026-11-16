@@ -16,7 +16,7 @@ for line in setup.stdout.splitlines():
     key, sep, value = line.partition('=')
     if sep and key:
         env[key] = value
-compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/30.0.16248370'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
 
 def function(source, name):
     match = re.search(r'^static [^\n]*\b' + name + r'\([^\n]*\)\s*\{', source, re.M)

@@ -253,7 +253,7 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
         // (SDL's main thread now blocks until the app is back: the buttons and sticks it gave the game would stay held,
         // and the fingers' ups will not come)
         input_set(0, 0, 0, 0, 0);
-        touch_reset();
+        touch_background();
         haptics_stop();  // (a rumble playing would run out its last pulse)
         if (config_live_pause_background() && !ldn_net_up()) vi_set_paused(true);
         break;

@@ -215,7 +215,7 @@ def main():
         key, separator, value = line.partition('=')
         if separator and key:
             env[key] = value
-    ndk = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/ndk/30.0.16248370')))
+    ndk = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/ndk/27.0.12077973')))
     compiler = ndk / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe'
     assert compiler.is_file(), compiler
     probe = OUTPUT / 'touch-storage-probe.cpp'

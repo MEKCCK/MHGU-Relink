@@ -33,8 +33,10 @@ void menulearn_frame(void);
 
 static struct { HostFn fn; uint32_t address; } hooks[8];
 static unsigned hook_count, native_calls, helper_calls;
+static unsigned mix_calls, combinations;
 static uint32_t last_native_bits;
 static const uint32_t list_cursor = 0x08000100u, other_cursor = 0x08000200u;
+static const uint32_t mix_box = 0x08001000u, mix_result_helper = 0x08001200u;
 static const uint32_t mix_helper = 0x38b034u, mix_inner_lr = 0x38b0fcu, mix_prompt_lr = 0x38d1b0u;
 
 static void dispatch_hook(Cpu *cpu, uint32_t address) {
@@ -64,6 +66,36 @@ void guest_call(Cpu *cpu, uint32_t address) {
     assert(!"This menu-pointer case must not need another guest function");
 }
 void fnhook_call_original(Cpu *cpu, uint32_t address) {
+    if (address == FN_MIX_LIST_UPDATE) {
+        ++mix_calls;
+        uint32_t box = cpu->r[0], bits = cpu->r[1], saved[16];
+        memcpy(saved, cpu->r, sizeof saved);
+        int state = LD8(box + 0x80);
+        if (state == 0 || state == 1) {
+            cpu->r[0] = box + (state == 0 ? 0x14 : 0x5c);
+            cpu->r[14] = state == 0 ? CALL_MIX_LIST : CALL_MIX_CONFIRM;
+            dispatch_hook(cpu, state == 0 ? FN_CURSOR_UPDATE : mix_helper);
+            if (bits & 0x2000) ST8(box + 0x80, state == 0 ? 1 : LD8(box + 0x5c + LIST.row) == 0 ? 2 : 0);
+        } else if (state == 2) {
+            ++combinations;
+            ST8(box + 0x80, 3);
+        } else if (state == 3) {
+            ST8(box + 0x80, 4);
+        } else if (state == 4 && LD32(box + 4)) {
+            // The real result helper waits on a float countdown, then accepts a new A/B without running a cursor.
+            float delay;
+            memcpy(&delay, G2H(LD32(box + 4) + 0x20), sizeof delay);
+            if (delay > 0) {
+                delay -= 1.0f / 30;
+                memcpy(G2H(LD32(box + 4) + 0x20), &delay, sizeof delay);
+            } else if (bits & 0x6000) {
+                ST8(box + 0x80, 1);
+            }
+        }
+        memcpy(cpu->r, saved, sizeof saved);
+        cpu->r[0] = 0;
+        return;
+    }
     if (address == mix_helper) {
         ++helper_calls;
         uint32_t saved[16];
@@ -317,10 +349,130 @@ static void mix_context_isolation(void) {
     puts("PASS: only the Combine prompt return address specializes the shared helper and its context is restored after returning");
 }
 
+static void mix_tick(uint32_t bits) {
+    advance(16666667ull);
+    Cpu cpu = {0};
+    cpu.r[0] = mix_box; cpu.r[1] = bits;
+    unsigned before = mix_calls;
+    dispatch_hook(&cpu, FN_MIX_LIST_UPDATE);
+    assert(mix_calls == before + 1);
+}
+static void mix_delay(float delay) { memcpy(G2H(mix_result_helper + 0x20), &delay, sizeof delay); }
+static void prepare_mix(void) {
+    prepare_list(mix_box + 0x14, 8, 23, 184);
+    prepare_list(mix_box + 0x5c, 2, 1, 2);
+    ST32(mix_box + 4, mix_result_helper);
+}
+static void mix_result_repeat(void) {
+    prepare_mix();
+    mix_tick(0);
+    menuptr_select_at(3, false, 1100, 226);
+    mix_tick(0);
+    assert(LD8(mix_box + 0x14 + LIST.row) == 3);
+    menuptr_select_at(3, true, 1100, 226);
+    assert(menuptr_take_confirm() && !menuptr_take_confirm());
+    mix_tick(0x2000);
+    mix_tick(0);
+    uint64_t popup_id = menuptr_menu_id();
+    const float points[][2] = {{1100, 226}, {600, 300}, {300, 650}};
+    for (unsigned cycle = 0; cycle < 3; ++cycle) {
+        assert(menuptr_hit(795, 425) == 0 && menuptr_hit(795, 461) == 1);
+        menuptr_select_at(0, true, 795, 425);
+        assert(menuptr_take_confirm() && !menuptr_take_confirm());
+        mix_delay(.1f);
+        mix_tick(0x2000);
+        assert(LD8(mix_box + 0x80) == 2 && !menuptr_open());
+        mix_tick(0);
+        assert(LD8(mix_box + 0x80) == 3 && !menuptr_open());
+        mix_tick(0);
+        assert(LD8(mix_box + 0x80) == 4 && !menuptr_open());
+        unsigned cursors = native_calls;
+        for (int frame = 0; frame < 90; ++frame) mix_tick(0);
+        assert(native_calls == cursors && menuptr_open() && menuptr_cursor_ran(OPEN_NS));
+        assert(menuptr_hit(1100, 118) == MENUPTR_NONE && menuptr_hit(795, 425) == MENUPTR_NONE);
+        float x = points[cycle][0], y = points[cycle][1];
+        assert(menuptr_hit(x, y) == 0);
+        uint64_t result_id = menuptr_menu_id();
+        assert(result_id && result_id != popup_id);
+        menuptr_select_at(0, false, x, y);
+        assert(!menuptr_take_confirm() && !menuptr_needs_nudge());
+        menuptr_select_at(0, true, x, y);
+        menuptr_select_at(0, true, x, y);
+        assert(menuptr_take_confirm() && !menuptr_take_confirm());
+        menuptr_select_at(0, true, x, y);
+        assert(menuptr_take_confirm() && !menuptr_take_confirm()); // A later tap can retry a press merged with held A.
+        mix_tick(0x2000);
+        mix_tick(0);
+        assert(LD8(mix_box + 0x80) == 1 && menuptr_menu_id() != popup_id && menuptr_menu_id() != result_id);
+        assert(LD8(mix_box + 0x14 + LIST.row) == 3 && combinations == cycle + 1);
+        popup_id = menuptr_menu_id();
+    }
+    puts("PASS: three complete Combine/result/popup cycles remain clickable after long cursor-free waits and accept single confirms plus explicit retries");
+}
+static void mix_result_guards(void) {
+    prepare_list(list_cursor, 5, 1, 5);
+    invoke(FN_CURSOR_UPDATE, list_cursor, CALL_TITLE_MENU, 0);
+    advance(10000000ull);
+    prepare_mix();
+    ST8(mix_box + 0x80, 4);
+    const float blocked[] = {1.0f, NAN, INFINITY};
+    for (unsigned i = 0; i < sizeof blocked / sizeof *blocked; ++i) {
+        mix_delay(blocked[i]); mix_tick(0);
+        assert(!menuptr_open());
+        menuptr_select(0, true);
+        assert(!menuptr_take_confirm());
+    }
+    ST32(mix_box + 4, 0); mix_tick(0);
+    assert(!menuptr_open());
+    ST32(mix_box + 4, mix_result_helper);
+    mix_delay(-.01f); mix_tick(0);
+    assert(menuptr_hit(1100, 118) == 0);
+    menuptr_select(0, true);
+    advance(OPEN_NS + 1);
+    assert(!menuptr_open() && !menuptr_take_confirm());
+    mix_delay(0); mix_tick(0);
+    assert(menuptr_open());
+    menuptr_select(0, true);
+    mix_tick(0x4000); // A real B closes the result before its queued tap is polled.
+    assert(!menuptr_take_confirm());
+    mix_tick(0);
+    menuptr_select(1, true); // Pending Stop selection must not leak into the next result.
+    menuptr_page_turn(1);
+    ST8(mix_box + 0x80, 2); mix_tick(0); mix_tick(0);
+    assert(!menuptr_take_confirm());
+    mix_tick(0x4000); mix_tick(0);
+    assert(LD8(mix_box + 0x5c + LIST.row) == 0 && !menuptr_take_confirm());
+    ST8(mix_box + 0x80, 4); mix_tick(0);
+    advance(120000000ull); mix_tick(0);
+    prepare_list(other_cursor, 2, 1, 2);
+    invoke(FN_CURSOR_UPDATE, other_cursor, 0x123456u, 0);
+    assert(!menuptr_open());
+    menuptr_select(0, true);
+    assert(!menuptr_take_confirm());
+    advance(OPEN_NS + 1); mix_tick(0);
+    menuptr_select(0, true);
+    advance(120000000ull); mix_tick(0);
+    prepare_list(list_cursor, 4, 1, 4);
+    invoke(FN_CURSOR_UPDATE, list_cursor, CALL_TITLE_OPTIONS, 0);
+    assert(!menuptr_take_confirm());
+    MenuGeom geometry;
+    assert(menuptr_geometry(&geometry) && geometry.lr == CALL_TITLE_OPTIONS);
+    advance(OPEN_NS + 1); mix_tick(0);
+    g_render_aspect = 20.0f / 9.0f;
+    piece_frame(1100, 118, 97, 10, 5, .8f, 140, 1, 0);
+    float mapping[4];
+    assert(menuptr_screen_map(mapping));
+    float sx = .8f * 1100 + 140;
+    assert(menuptr_hit((sx - mapping[1]) / mapping[0], 118) == 0);
+    ST8(mix_box + 0x80, 7); mix_tick(0);
+    assert(!menuptr_open() && !menuptr_take_confirm());
+    puts("PASS: result countdown, expiry, cancellation, unrelated foregrounds and wide-screen mapping preserve input isolation");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     menuptr_init();
-    assert(hook_count == 7);
+    assert(hook_count == 8);
     if (!strcmp(argv[1], "known")) known_first_open();
     else if (!strcmp(argv[1], "select")) selection_and_confirmation();
     else if (!strcmp(argv[1], "nudge")) quiet_cursor_nudge();
@@ -329,6 +481,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "mapping")) wide_screen_mapping();
     else if (!strcmp(argv[1], "mix")) mix_prompt();
     else if (!strcmp(argv[1], "context")) mix_context_isolation();
+    else if (!strcmp(argv[1], "mix-repeat")) mix_result_repeat();
+    else if (!strcmp(argv[1], "mix-guards")) mix_result_guards();
     else assert(!"Unknown test case");
     return 0;
 }

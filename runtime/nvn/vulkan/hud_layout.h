@@ -1,34 +1,64 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 #include <math.h>
 
 enum { HUD_LEFT, HUD_RIGHT, HUD_CENTER };
+enum { HUD_V_TOP, HUD_V_BOTTOM, HUD_V_CENTER };
 
 enum { HUD_TOUCH_NONE = -1, HUD_TOUCH_ITEM, HUD_TOUCH_ARTS, HUD_TOUCH_TARGET, HUD_TOUCH_MAP, HUD_TOUCH_COUNT };
 
+static inline bool hud_touch_map_piece(float x, float y, float z) {
+    bool ammo_layer = fabsf(z - 103.0f) < 0.5f && x >= 900.0f;
+    bool target_controls = z >= 99.5f && z < 101.5f && x >= 1160.0f && x <= 1240.0f && y <= 105.0f;
+    return !ammo_layer && !target_controls && z >= 99.5f && z < 105.5f && x >= 740.0f && x <= 1280.0f && y >= 0.0f && y <= 360.0f;
+}
+
+static inline bool hud_touch_target_piece(float x, float y, float z) {
+    return z >= 99.5f && z < 101.5f && x >= 1170.0f && x <= 1230.0f && y >= 16.0f && y <= 95.0f;
+}
+
+static inline bool hud_loading_candidate(unsigned rows, uint64_t frame, uint64_t seen_frame) {
+    return rows != 0 || (seen_frame && frame >= seen_frame && frame - seen_frame <= 2);
+}
+
 // The entire item group includes the bowgun's ammo list above y 500.
-static inline int hud_touch_zone(float x, float y, float z, bool hunt_hud) {
+static inline int hud_touch_zone_for_frame(float x, float y, float z, bool hunt_hud, bool loading_candidate) {
     if (!hunt_hud) return HUD_TOUCH_NONE;
     if (fabsf(z - 100.0f) < 0.5f) {
         if (x >= 700.0f && x <= 900.0f && y > 560.0f) return HUD_TOUCH_ARTS;
-        if (x >= 1170.0f && x <= 1230.0f && y >= 16.0f && y <= 95.0f) return HUD_TOUCH_TARGET;
-    } else if (fabsf(z - 103.0f) < 0.5f && !(y < 500.0f && x < 900.0f)) {
+    }
+    if (hud_touch_target_piece(x, y, z)) return HUD_TOUCH_TARGET;
+    if (!loading_candidate && hud_touch_map_piece(x, y, z)) return HUD_TOUCH_MAP;
+    if (fabsf(z - 103.0f) < 0.5f && !(y < 500.0f && x < 900.0f)) {
         return HUD_TOUCH_ITEM;
     }
     return HUD_TOUCH_NONE;
 }
 
+static inline int hud_touch_zone(float x, float y, float z, bool hunt_hud) {
+    return hud_touch_zone_for_frame(x, y, z, hunt_hud, false);
+}
+
+static inline void hud_touch_anchor(int zone, int *horizontal, int *vertical) {
+    if (zone == HUD_TOUCH_MAP) {
+        *horizontal = HUD_RIGHT;
+        *vertical = HUD_V_TOP;
+    }
+}
+
+/*
+ * Manual placement follows touch visibility, independently of automatic MoveHUD.
+ */
 typedef struct HudTouchOffset {
     float x, y;
     bool active, moved;
 } HudTouchOffset;
 
-// Manual placement follows touch visibility, independently of automatic MoveHUD.
 static inline HudTouchOffset hud_touch_offset(int zone, bool visible, const volatile float dx[HUD_TOUCH_COUNT],
                                               const volatile float dy[HUD_TOUCH_COUNT], float sx, float sy) {
     HudTouchOffset offset = {0};
-    // The former map slot remains in saved layouts only; it never moves the map.
-    offset.active = visible && zone >= 0 && zone < HUD_TOUCH_MAP;
+    offset.active = visible && zone >= 0 && zone < HUD_TOUCH_COUNT;
     if (offset.active) {
         offset.x = dx[zone] * sx;
         offset.y = dy[zone] * sy;
