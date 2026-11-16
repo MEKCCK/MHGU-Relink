@@ -48,6 +48,7 @@ fn parse_args() -> Config {
             "-max-hubs" => cfg.max_hubs = number(&mut args, "-max-hubs"),
             "-max-hubs-per-ip" => cfg.max_hubs_per_ip = number(&mut args, "-max-hubs-per-ip"),
             "-list-max" => cfg.list_max = number(&mut args, "-list-max"),
+            "-list-search-max" => cfg.list_search_max = number(&mut args, "-list-search-max"),
             "-min-proto" => cfg.min_proto = number(&mut args, "-min-proto"),
             "-separate-phones" => {
                 cfg.separate_phones = match args.next().as_deref() {
@@ -99,6 +100,7 @@ Usage: mhgu-hub [options]\n\
   -max-hubs N           hubs listed at once (default 2000)\n\
   -max-hubs-per-ip N    hubs one IP may host (default 4)\n\
   -list-max N           hubs in one search answer (default 18)\n\
+  -list-search-max N    Hunter Search networks in one answer, after the hubs (default 6)\n\
   -bandwidth N          bytes a second per player link and direction (default 1048576)
 \
   -min-proto N          oldest link protocol served; older games are refused (default 0: any)

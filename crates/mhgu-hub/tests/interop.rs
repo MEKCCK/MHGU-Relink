@@ -59,6 +59,17 @@ fn test_info(players: u8) -> Vec<u8> {
     i
 }
 
+fn hunt_info(players: u8) -> Vec<u8> {
+    let mut i = test_info(players);
+    i[proto::NI_NODE_MAX] = 2;
+    i[proto::NI_ADV_SIZE] = 0x20;
+    i[proto::NI_ADV..proto::NI_ADV + 0x14].fill(0);
+    i[proto::NI_ADV + 0x14..proto::NI_ADV + 0x18].copy_from_slice(&0x90ab_cdefu32.to_le_bytes());
+    i[proto::NI_ADV + 0x18..proto::NI_ADV + 0x1c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+    i[proto::NI_ADV + 0x1c] = 0xff;
+    i
+}
+
 fn send(c: &mut TcpStream, t: u8, payloads: &[&[u8]]) {
     c.write_all(&frame(t, payloads)).expect("write frame");
 }
@@ -321,6 +332,31 @@ fn keyed_server_serves_only_its_room() {
     let mut jc = dial(&ts);
     send(&mut jc, proto::T_JOIN, &[&pubh[..], &id.to_le_bytes()]);
     assert_eq!(err_code(&expect(&mut jc, proto::T_ERROR)), proto::ERR_NOT_FOUND);
+}
+
+/// A Hunter Search network is not a hub: the server gives it its own places after the hubs, so it cannot
+/// crowd out Join Hub's 18.
+#[test]
+fn hunter_search_gets_its_own_places() {
+    let ts = start(|c| { c.list_max = 1; c.list_search_max = 1; });
+    let mut held = Vec::new();
+    let (hc, hub_id) = host(&ts, 0, 1);
+    held.push(hc);
+    let mut sc = dial(&ts);
+    let h = header(2, 0);
+    send(&mut sc, proto::T_HOST, &[&h[..], &hunt_info(1)]);
+    let search_id = u64::from_le_bytes(expect(&mut sc, proto::T_HOSTED)[..8].try_into().unwrap());
+    held.push(sc);
+
+    let mut lc = dial(&ts);
+    send(&mut lc, proto::T_LIST, &[&h[..]]);
+    let p = expect(&mut lc, proto::T_HUBS);
+    let n = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
+    assert_eq!(n, 2, "one hub and one Hunter Search network");
+    let first = u64::from_le_bytes(p[4..12].try_into().unwrap());
+    let second = u64::from_le_bytes(p[4 + 8 + NETINFO_SIZE..12 + 8 + NETINFO_SIZE].try_into().unwrap());
+    assert_eq!(first, hub_id);
+    assert_eq!(second, search_id);
 }
 
 #[test]

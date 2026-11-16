@@ -507,42 +507,60 @@ fn send_error(c: &mut TcpStream, code: u32) -> io::Result<()> {
 
 // ---- LIST -----------------------------------------------------------------
 
-fn list(c: &mut TcpStream, shared: &Arc<Mutex<Shared>>, link_proto: u16, room: [u8; 16]) {
-    let (mut es, list_max) = {
-        let s = shared.lock().unwrap();
-        let v: Vec<(u64, NetInfo, Instant)> = s
-            .hubs
-            .values()
-            .filter(|h| h.link_proto == link_proto && h.room == room)
-            .map(|h| (h.id, h.info, h.created))
-            .collect();
-        (v, s.live.list_max)
-    };
+type HubEntry = (u64, NetInfo, Instant);
+
+// A Hunter Search network, not a hub: 2-player, and 0xFF at advertise byte 0x1C where hubs have 1
+// (the same test as the Go server's huntSearch).
+fn hunt_search(info: &NetInfo) -> bool {
+    let adv = u16::from_le_bytes([info[proto::NI_ADV_SIZE], info[proto::NI_ADV_SIZE + 1]]) as usize;
+    info[proto::NI_NODE_MAX] == 2
+        && adv > 0x1c
+        && u32::from_le_bytes(info[proto::NI_ADV + 0x14..proto::NI_ADV + 0x18].try_into().unwrap()) == 0x90ab_cdef
+        && u32::from_le_bytes(info[proto::NI_ADV + 0x18..proto::NI_ADV + 0x1c].try_into().unwrap()) == 0x1234_5678
+        && info[proto::NI_ADV + 0x1c] == 0xff
+}
+
+// At most max entries: a random choice by rank (so passcoded hubs only take the places open hubs with room
+// leave), then sorted: open with room first, then the fullest, then the newest.
+fn pick(mut es: Vec<HubEntry>, max: usize) -> Vec<HubEntry> {
     let free = |info: &NetInfo| info[proto::NI_NODE_COUNT] < info[proto::NI_NODE_MAX];
     // 0 room and no passcode, 1 room and a passcode, 2 full, 3 full with a passcode
-    let rank = |info: &NetInfo| {
-        let r = if free(info) { 0 } else { 2 };
-        r + u8::from(proto::passcoded(info))
-    };
-
-    // More hubs than one answer holds: a random choice, by rank (so passcoded hubs only take the places
-    // open hubs with room leave), so each search (the game's Retry) can show others.
-    if es.len() > list_max {
+    let rank = |info: &NetInfo| (if free(info) { 0 } else { 2 }) + u8::from(proto::passcoded(info));
+    if es.len() > max {
         shuffle(&mut es);
         es.sort_by_key(|e| rank(&e.1));
-        es.truncate(list_max);
+        es.truncate(max);
     }
     es.sort_by(|a, b| {
         let (ra, rb) = (rank(&a.1), rank(&b.1));
         if ra != rb {
-            return ra.cmp(&rb); // free and open first
+            return ra.cmp(&rb);
         }
         let (ca, cb) = (a.1[proto::NI_NODE_COUNT], b.1[proto::NI_NODE_COUNT]);
         if ca != cb {
-            return cb.cmp(&ca); // more players first
+            return cb.cmp(&ca);
         }
-        b.2.cmp(&a.2) // newest first
+        b.2.cmp(&a.2)
     });
+    es
+}
+
+fn list(c: &mut TcpStream, shared: &Arc<Mutex<Shared>>, link_proto: u16, room: [u8; 16]) {
+    let (hubs, searches, list_max, search_max) = {
+        let s = shared.lock().unwrap();
+        let mut hubs = Vec::new();
+        let mut searches = Vec::new();
+        for h in s.hubs.values() {
+            if h.link_proto != link_proto || h.room != room {
+                continue;
+            }
+            let e = (h.id, h.info, h.created);
+            if hunt_search(&h.info) { searches.push(e) } else { hubs.push(e) }
+        }
+        (hubs, searches, s.live.list_max, s.live.list_search_max)
+    };
+    let mut es = pick(hubs, list_max);
+    es.extend(pick(searches, search_max));
 
     let mut out = Vec::with_capacity(4 + es.len() * (8 + proto::NETINFO_SIZE));
     out.extend_from_slice(&(es.len() as u32).to_le_bytes());

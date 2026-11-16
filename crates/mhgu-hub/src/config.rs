@@ -15,6 +15,8 @@ pub struct Config {
     pub max_hubs_per_ip: usize,
     /// Hubs in one LIST answer (the game shows 18: 3 pages of 6).
     pub list_max: usize,
+    /// Hunter Search networks in one LIST answer, after the hubs (the game shows 6).
+    pub list_search_max: usize,
     /// LIST/JOIN requests a second per IP address.
     pub req_rate: f64,
     /// Burst of requests per IP address.
@@ -53,6 +55,7 @@ impl Default for Config {
             max_hubs: 2000,
             max_hubs_per_ip: 4,
             list_max: 18,
+            list_search_max: 6,
             req_rate: 2.0,
             req_burst: 15.0,
             bandwidth: 1024.0 * 1024.0,
@@ -81,6 +84,7 @@ pub struct Live {
     pub max_hubs: usize,
     pub max_hubs_per_ip: usize,
     pub list_max: usize,
+    pub list_search_max: usize,
     pub req_rate: f64,
     pub req_burst: f64,
     pub bandwidth: f64,
@@ -97,6 +101,7 @@ impl Live {
             max_hubs: c.max_hubs,
             max_hubs_per_ip: c.max_hubs_per_ip,
             list_max: c.list_max,
+            list_search_max: c.list_search_max,
             req_rate: c.req_rate,
             req_burst: c.req_burst,
             bandwidth: c.bandwidth,

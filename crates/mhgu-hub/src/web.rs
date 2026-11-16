@@ -104,6 +104,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "max hubs" => s!("Max hubs", "最大房间数", "Salas máximas"),
         "max hubs per ip" => s!("Max hubs / IP", "每 IP 最大房间", "Salas máximas / IP"),
         "list max" => s!("Hubs per search", "每次搜索房间数", "Salas por búsqueda"),
+        "hunter search max" => s!("Hunter Search per answer", "每次搜索的猎人搜索数", "Búsquedas de cazador por respuesta"),
         "requests rate" => s!("Requests / second", "每秒请求数", "Solicitudes / segundo"),
         "request burst" => s!("Request burst", "请求突发", "Ráfaga de solicitudes"),
         "bandwidth" => s!("Bandwidth (bytes/s)", "带宽（字节/秒）", "Ancho de banda (bytes/s)"),
@@ -651,6 +652,7 @@ fn settings_form(w: &Web, l: Lang, v: &Live) -> String {
          <label>{} <input type=number name=max_hubs min=1 value=\"{}\"></label>\
          <label>{} <input type=number name=max_hubs_per_ip min=1 value=\"{}\"></label>\
          <label>{} <input type=number name=list_max min=1 max=64 value=\"{}\"></label>\
+         <label>{} <input type=number name=list_search_max min=0 max=64 value=\"{}\"></label>\
          <label>{} <input type=number name=req_rate min=0.01 step=0.01 value=\"{}\"></label>\
          <label>{} <input type=number name=req_burst min=1 step=1 value=\"{}\"></label>\
          <label>{} <input type=number name=bandwidth min=1 step=1 value=\"{}\"></label>\
@@ -664,6 +666,7 @@ fn settings_form(w: &Web, l: Lang, v: &Live) -> String {
         t(l, "max hubs"), v.max_hubs,
         t(l, "max hubs per ip"), v.max_hubs_per_ip,
         t(l, "list max"), v.list_max,
+        t(l, "hunter search max"), v.list_search_max,
         t(l, "requests rate"), v.req_rate,
         t(l, "request burst"), v.req_burst,
         t(l, "bandwidth"), v.bandwidth,
@@ -693,10 +696,11 @@ fn parse_live(body: &str, cur: &Live) -> Result<Live, String> {
     let max_hubs = uint("max_hubs", cur.max_hubs)?;
     let max_hubs_per_ip = uint("max_hubs_per_ip", cur.max_hubs_per_ip)?;
     let list_max = uint("list_max", cur.list_max)?;
+    let list_search_max = uint("list_search_max", cur.list_search_max)?;
     let req_rate = parse("req_rate", cur.req_rate)?;
     let req_burst = parse("req_burst", cur.req_burst)?;
     let bandwidth = parse("bandwidth", cur.bandwidth)?;
-    if max_conns == 0 || max_conns_per_ip == 0 || max_hubs == 0 || max_hubs_per_ip == 0 || list_max == 0 || list_max > 64 {
+    if max_conns == 0 || max_conns_per_ip == 0 || max_hubs == 0 || max_hubs_per_ip == 0 || list_max == 0 || list_max > 64 || list_search_max > 64 {
         return Err("connection/hub/list limits must be positive (list at most 64)".into());
     }
     if !(req_rate.is_finite() && req_rate > 0.0 && req_burst.is_finite() && req_burst >= 1.0) {
@@ -709,7 +713,7 @@ fn parse_live(body: &str, cur: &Live) -> Result<Live, String> {
         min_proto: min_proto as u16,
         separate_phones: num("separate_phones").is_some(),
         verbose: num("verbose").is_some(),
-        max_conns, max_conns_per_ip, max_hubs, max_hubs_per_ip, list_max, req_rate, req_burst, bandwidth,
+        max_conns, max_conns_per_ip, max_hubs, max_hubs_per_ip, list_max, list_search_max, req_rate, req_burst, bandwidth,
     })
 }
 
