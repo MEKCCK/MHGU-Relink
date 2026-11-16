@@ -1574,7 +1574,6 @@ static void editor_hud_scenes() {
         for(int cache=0;cache<3;++cache) {
             if(cache==1) {
                 for(int k=0;k<TZ_COUNT;++k) {
-                    if(k==TZ_MAP && !quest) continue;
                     const float x=640,y=260.f+k*90,ox=g_s.layout.zx[k]*squeeze(),oy=g_s.layout.zy[k]*squeeze_y();
                     touch_hud_piece(k,x,y,x+ox,y+oy,ox,oy);
                     if(k==TZ_ARTS) hud_art_slot(y,0);
@@ -1582,14 +1581,11 @@ static void editor_hud_scenes() {
                 touch_hud_frame();
             } else if(cache==2) for(int k=0;k<TZ_COUNT;++k) hud_timestamp(g_zones.ns,k)=SDL_GetTicksNS()-stale_limit()-1;
             for(int k=0;k<TZ_COUNT;++k) {
-                if(k==TZ_MAP && !quest) { assert(!editor_hud_rect(k).ok); continue; }
                 assert(editor_hud_rect(k).ok); drag_editor_hud(k,6,4);
             }
         }
-        for(int k=0;k<TZ_COUNT;++k) {
-            if(k==TZ_MAP && !quest) assert(g_s.layout.zx[k]==original.zx[k] && g_s.layout.zy[k]==original.zy[k]);
-            else assert(g_s.layout.zx[k]!=original.zx[k] && g_s.layout.zy[k]!=original.zy[k]);
-        }
+        for(int k=0;k<TZ_COUNT;++k)
+            assert(g_s.layout.zx[k]!=original.zx[k] && g_s.layout.zy[k]!=original.zy[k]);
         const Layout edited=g_s.layout; editor_click(E_SAVE); update();
         Layout stored; assert(load_layout_file(&stored,COMMON_PATH)); same_layout(stored,edited);
         touch_edit_begin(); update();
@@ -1600,11 +1596,11 @@ static void editor_hud_scenes() {
         assert(g_s.edit && g_s.in_quest==!quest && !finger(g_s,1) && g_s.sel==-1 && !g_s.pinch);
         same_layout(g_s.layout,draft); same_layout(g_s.saved,saved);
         assert(load_layout_file(&stored,COMMON_PATH)); same_layout(stored,saved);
-        for(int k=0;k<TZ_COUNT;++k) assert(editor_hud_rect(k).ok==(k!=TZ_MAP || g_s.in_quest));
+        for(int k=0;k<TZ_COUNT;++k) assert(editor_hud_rect(k).ok);
         event(SDL_EVENT_FINGER_MOTION,1,point.x+24,point.y+16); event(SDL_EVENT_FINGER_UP,1,point.x+24,point.y+16);
         same_layout(g_s.layout,draft); editor_click(E_CANCEL); update(); same_layout(g_s.layout,saved);
     }
-    puts("PASS: items, Arts and target remain editable in town and quests; the minimap is editable only in quests, with absent/live/stale caches, MoveHUD on/off, Save/Cancel and scene transitions");
+    puts("PASS: items, Arts, target and the minimap remain editable in town and quests, with absent/live/stale caches, MoveHUD on/off, Save/Cancel and scene transitions");
 }
 static void editor_hud_dragging() {
     for (const auto size:{ImVec2(1280,720),ImVec2(2520,1080),ImVec2(3840,1080),ImVec2(1280,800)}) {
@@ -1695,50 +1691,44 @@ static void map_editable_scenes() {
         fresh((int)size.x,(int)size.y); cfg.touch_hud=moved; in_quest=quest; update(); editor_isolate_hud();
         g_s.layout.zx[TZ_MAP]=37; g_s.layout.zy[TZ_MAP]=-19; publish_zones(g_s.layout);
         assert(save_layout_file(g_s.layout,COMMON_PATH));
-        assert(editor_hud_rect(TZ_MAP).ok==quest);
+
+        // The map handle is available in town and in quests, and stays compact over the whole touch zone.
+        Rect fallback=editor_hud_rect(TZ_MAP); assert(fallback.ok);
+        assert(fallback.x1-fallback.x0<=size.x*.35f && fallback.y1-fallback.y0<=size.y*.55f);
+        map_feedback();
+        assert(g_zones.n[TZ_MAP] && g_editor_zones[TZ_MAP].bounds.ok);
+        Rect map=editor_hud_rect(TZ_MAP); assert(map.ok);
+        assert(map.x1-map.x0<=size.x*.35f && map.y1-map.y0<=size.y*.55f);
+        assert(map.x1-map.x0>=size.x*.10f && map.y1-map.y0>=size.y*.10f);
+
+        touch_edit_begin(); update();
+        const float zx=g_s.layout.zx[TZ_MAP],zy=g_s.layout.zy[TZ_MAP];
+        drag_editor_hud(TZ_MAP,24,16);
+        assert(g_s.layout.zx[TZ_MAP]!=zx && g_s.layout.zy[TZ_MAP]!=zy);
+        const Layout saved=g_s.layout;
+        editor_click(E_SAVE); update(); Layout disk; assert(load_layout_file(&disk,COMMON_PATH)); same_layout(disk,saved);
+        assert(touch_template_save(38,"Movable map"));
+        g_s.layout.zx[TZ_MAP]=-137; g_s.layout.zy[TZ_MAP]=91; const Layout alternate=g_s.layout;
+        assert(touch_template_save(39,"Independent map"));
+        assert(touch_template_use(38)); same_layout(g_s.layout,saved);
+        assert(touch_template_use(39)); same_layout(g_s.layout,alternate);
+
+        touch_edit_begin(); update(); assert(editor_hud_rect(TZ_MAP).ok);
+        editor_click(E_CANCEL); update();
         if (quest) {
-            Rect fallback=editor_hud_rect(TZ_MAP);
-            assert(fallback.x1-fallback.x0>=size.x*.20f && fallback.y1-fallback.y0>=size.y*.15f);
-            map_feedback();
-            assert(g_zones.n[TZ_MAP] && g_editor_zones[TZ_MAP].bounds.ok);
-            Rect map=editor_hud_rect(TZ_MAP);
-            assert(map.x1-map.x0>=size.x*.20f && map.y1-map.y0>=size.y*.15f);
-            Pic map_pic=picture((float)screen_w,(float)screen_h);
-            assert(map.x1-map.x0>=545.0f*squeeze()*map_pic.w/1280.0f);
-            assert(map.y1-map.y0>=400.0f*squeeze_y()*map_pic.h/720.0f);
-            touch_edit_begin(); update();
-            const float zx=g_s.layout.zx[TZ_MAP],zy=g_s.layout.zy[TZ_MAP];
-            drag_editor_hud(TZ_MAP,24,16);
-            assert(g_s.layout.zx[TZ_MAP]!=zx && g_s.layout.zy[TZ_MAP]!=zy);
-            const Layout saved=g_s.layout;
-            editor_click(E_SAVE); update(); Layout disk; assert(load_layout_file(&disk,COMMON_PATH)); same_layout(disk,saved);
-            assert(touch_template_save(38,"Movable map"));
-            g_s.layout.zx[TZ_MAP]=-137; g_s.layout.zy[TZ_MAP]=91; const Layout alternate=g_s.layout;
-            assert(touch_template_save(39,"Independent map"));
-            assert(touch_template_use(38)); same_layout(g_s.layout,saved);
-            assert(touch_template_use(39)); same_layout(g_s.layout,alternate);
-            touch_edit_begin(); update(); assert(editor_hud_rect(TZ_MAP).ok);
-            editor_click(E_CANCEL); update();
             cfg.touch_show[TB_L3]=1; update();
             at(SDL_EVENT_FINGER_DOWN,C_MAP); at(SDL_EVENT_FINGER_UP,C_MAP);
             assert(update().touch_b==B(BTN_LSTICK));
-            in_quest=false; update(); assert(!editor_hud_rect(TZ_MAP).ok);
-            in_quest=true; update(); assert(editor_hud_rect(TZ_MAP).ok);
-        } else {
-            map_feedback();
-            assert(!editor_hud_rect(TZ_MAP).ok);
-            touch_edit_begin(); update(); assert(!editor_hud_rect(TZ_MAP).ok);
-            const Layout saved=g_s.layout;
-            const Pic pic=picture((float)screen_w,(float)screen_h);
-            const ImVec2 p(pic.x0+500*pic.w/1280,pic.y0+380*pic.h/720);
-            event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
-            assert(finger(g_s,1)->kind==F_EDIT && finger(g_s,1)->ctl<0 && g_s.sel<0);
-            event(SDL_EVENT_FINGER_MOTION,1,p.x+24,p.y+16); event(SDL_EVENT_FINGER_UP,1,p.x+24,p.y+16);
-            same_layout(g_s.layout,saved);
-            editor_click(E_CANCEL); update();
         }
+        in_quest=!quest; update();
+        touch_edit_begin(); update(); assert(editor_hud_rect(TZ_MAP).ok);
+        const Layout before_scene=g_s.layout;
+        event(SDL_EVENT_FINGER_DOWN,1,map.x0+(map.x1-map.x0)*.5f,map.y0+(map.y1-map.y0)*.5f);
+        event(SDL_EVENT_FINGER_UP,1,map.x0+(map.x1-map.x0)*.5f,map.y0+(map.y1-map.y0)*.5f);
+        same_layout(g_s.layout,before_scene);
+        editor_click(E_CANCEL); update();
     }
-    puts("PASS: map-editable-scenes: minimap handle appears only during quests, moves/saves independently per template, preserves L3 map toggle, and hides across quest transitions at four sizes with MoveHUD on/off");
+    puts("PASS: map-editable-scenes: a compact minimap handle is editable in town and quests, moves/saves independently per template, preserves L3 map toggle, and survives scene changes at four sizes with MoveHUD on/off");
 }
 
 static void hunter_art_zone_lifetime() {
@@ -3486,7 +3476,7 @@ int main(int argc,char **argv) {
     for(const MapPreview &test:maps) {
         fresh(test.w,test.h); in_quest=test.quest; cfg.language=2; cfg.touch_hud=1; enable_universal_combos(); update();
         touch_edit_begin(); update(); editor_move_panel(test.x,test.y);
-        assert(editor_hud_rect(TZ_MAP).ok==test.quest);
+        assert(editor_hud_rect(TZ_MAP).ok);
         preview(test.name); editor_click(E_CANCEL); update();
     }
     SDL_DestroyWindow(window); SDL_Quit();

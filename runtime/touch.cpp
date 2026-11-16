@@ -836,7 +836,8 @@ struct EditorZone {
 EditorZone g_editor_zones[TZ_COUNT], g_build_editor[TZ_COUNT];
 
 Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_quest) {
-    if (k < 0 || k >= TZ_COUNT || (k == TZ_MAP && !in_quest)) return {};
+    (void)in_quest;  // the minimap handle is also editable in town now
+    if (k < 0 || k >= TZ_COUNT) return {};
     EditorZone z;
     {
         std::lock_guard<std::mutex> l(g_zone_lock);
@@ -858,16 +859,9 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
         } else if (k == TZ_TARGET) {
             float x = moved ? 1280.0f - 330.0f * sx : right - 80.0f * sx;
             r = {x, 55.0f * sy, x, 82.0f * sy, true};
-        } else {
-            r = {right - 520.0f * sx, 0.0f, right + 25.0f * sx, 400.0f * sy, true};
+        } else {  // the minimap: a compact handle, not the whole touch zone around it
+            r = {right - 260.0f * sx, 0.0f, right, 260.0f * sy, true};
         }
-    }
-    if (k == TZ_MAP && r.ok) {
-        const float min_w = 545.0f * sx, min_h = 400.0f * sy;
-        float cx = (r.x0 + r.x1) * 0.5f, cy = (r.y0 + r.y1) * 0.5f;
-        float rw = std::max(r.x1 - r.x0, min_w), rh = std::max(r.y1 - r.y0, min_h);
-        r.x0 = cx - rw * 0.5f, r.x1 = cx + rw * 0.5f;
-        r.y0 = cy - rh * 0.5f, r.y1 = cy + rh * 0.5f;
     }
     Pic p = picture(w, h);
     r.x0 = p.x0 + (r.x0 + (layout.zx[k] - MARGIN[k][0] - ZONE_SLOP) * sx) * p.w / 1280.0f;
@@ -1488,7 +1482,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             if (a && b && c >= 0 && c < C_COUNT) s.layout.scale[c] = s.pinch_s0 * hypotf(a->x - b->x, a->y - b->y) / s.pinch_d0, clamp_place(s, c);
         } else if (f->ctl >= ZONE_SEL) {  // a HUD part: in the canvas' units (the HUD keeps its 16:9 shape: squeeze)
             int k = f->ctl - ZONE_SEL;
-            if (k < 0 || k >= TZ_COUNT || (k == TZ_MAP && !s.in_quest)) return;
+            if (k < 0 || k >= TZ_COUNT) return;
             Pic pic = picture(s.w, s.h);
             s.layout.zx[k] = std::clamp(s.layout.zx[k] + dx * 1280.0f / pic.w / squeeze(), -1400.0f, 1400.0f);
             s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h / squeeze_y(), -800.0f, 800.0f);
@@ -3038,7 +3032,10 @@ void plate(ImDrawList *dl, Rect r, float line, float a, bool lit) {
 
 void text_center(ImDrawList *dl, ImFont *font, float size, ImVec2 c, ImU32 col, const char *t, float w = 0) {
     ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, t);
-    if (w > 0) c.x = std::clamp(c.x, ts.x * .5f + size * .3f, w - ts.x * .5f - size * .3f);  // (inside the screen)
+    if (w > 0) {
+        float lo = ts.x * .5f + size * .3f, hi = w - ts.x * .5f - size * .3f;
+        c.x = hi < lo ? w * .5f : std::clamp(c.x, lo, hi);  // (inside the screen; a long hint may be wider)
+    }
     dl->AddText(font, size, ImVec2(c.x - ts.x * .5f + size * .05f, c.y - ts.y * .5f + size * .06f), IM_COL32(0, 0, 0, 200), t);
     dl->AddText(font, size, ImVec2(c.x - ts.x * .5f, c.y - ts.y * .5f), col, t);
 }
