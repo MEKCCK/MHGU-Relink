@@ -90,7 +90,7 @@ static uint32_t g_kc_seen[256];
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
 static volatile uint64_t g_hunt_menu_ns;  // when that handler last ran (0: not in this hunt yet)
-static bool g_core_hooked, g_hooked;  // pad snapshot / run, and the optional rebinding hooks
+static bool g_core_hooked, g_hooked;  // pad snapshot, and the optional rebinding hooks
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
@@ -294,15 +294,6 @@ static bool kcr_weapon_caller(uint32_t lr) {
 static void kc_r(Cpu *c) {
     uint32_t lr = c->r[14];
     fnhook_call_next(c, FN_KC_R);
-    // Only these held-R sites request running. A synthetic pad bit also reaches weapon-specific consumers.
-    uint32_t site = lr & ~1u;
-    if (g_snap.touch_run && (site == 0x47cd3cu || site == 0x48d358u)) {
-        uint32_t pl = c->r[4];
-        if (sane(pl) && call(c, FN_PL_IS_LOCAL, pl, 0, 0) == 1) {
-            call(c, FN_PL_EVENT, pl, 0, 0);
-            if (site == 0x47cd3cu) call(c, FN_PL_EVENT, pl, 31, 0);
-        }
-    }
     if (g_kclog) {
         bool seen = false;
         for (int i = 0; i < g_kc_n; i++) seen |= g_kc_seen[i] == lr;
@@ -326,8 +317,8 @@ void input_view_init(void) {
     input_view_apply();
 }
 
-// The touch-run channel needs the pad snapshot and R-role hooks even with action rebinding disabled. Other hooks
-// are added the first time rebinding is enabled; turning it off later makes them pass through.
+// The pad snapshot and R-role hooks are always installed; other hooks are added the first time rebinding is
+// enabled, and turning it off later makes them pass through.
 void input_view_apply(void) {
     if (!g_core_hooked) {
         fnhook_set_outer(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));

@@ -1,8 +1,8 @@
 // Touch controls for phones, in the Monster Hunter style: bronze-rimmed dark discs with cream glyphs and the game's
 // button letter on a small badge.
 //   - left thumb: floating mode hides the idle stick and places it at the initial touch; fixed mode uses the saved
-//     layout position. The knob follows the thumb inside the rim; a light tilt walks, a full one runs
-//     AutoR optionally requests running at full tilt, separately from the native R button; it never sends camera input
+//     layout position. The knob follows the thumb inside the rim; a light tilt walks, and sliding past the rim runs
+//     [Touch] AutoR optionally holds the native R there, only with the weapon sheathed; it never sends camera input
 //   - one common layout in town, quests and every weapon: A / X attack buttons, R aim, B dodge,
 //     Y sheathe, optional shoulders and six named combo buttons; no layout-cycle control
 //   - while a menu of the game's is open (the pause menu, the item pouch, a shop, a yes / no: its windows are drawn
@@ -1949,10 +1949,12 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     bool was_run = s.run;
     s.run = false;
-    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0) {
+    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0 && s.drawn != 1) {
         float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
-        // A small edge hysteresis prevents repeated R presses while the thumb rests on the rim.
-        s.run = r > 0 && hypotf(s.fx - s.bx, s.fy - s.by) >= r * (was_run ? .95f : .98f);
+        float m = r > 0 ? hypotf((s.kx - s.bx) / r, (s.by - s.ky) / r) : 0;
+        // The thumb past the rim holds native R, as on the Android mainline. Hysteresis keeps the edge quiet.
+        s.run = r > 0 && m > .3f && hypotf(s.fx - s.bx, s.fy - s.by) > r * (was_run ? 1.45f : 1.60f);
+        if (s.run) *buttons |= B(BTN_R);
     }
     if (classic || s.layout_profile == UNIVERSAL_LAYOUT) {
         if (s.stick_on && s.h > 0) {
@@ -2001,11 +2003,6 @@ extern "C" void touch_edit_begin(void) {
 extern "C" void touch_edit_cancel(void) {  // (the settings menu stayed open: "Cancel" in its unsaved-changes dialog)
     std::lock_guard<std::mutex> l(g_lock);
     g_s.edit_request = false;
-}
-
-extern "C" bool touch_running(void) {
-    std::lock_guard<std::mutex> l(g_lock);
-    return g_s.run;
 }
 
 extern "C" bool touch_virtual_right_stick_active(void) {

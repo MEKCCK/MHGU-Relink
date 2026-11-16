@@ -181,7 +181,6 @@ typedef struct {
     uint64_t pulse[ACT_VARS];  // pressed since the last sample (a press shorter than a game frame is still delivered)
     int ptr_x, ptr_y;          // pointer feed (M2), in the 1280x720 UI space
     bool ptr_down, ptr_valid;
-    bool touch_run;           // independent touch-stick run request, never a native R/weapon action
 } ActSnap;
 
 typedef struct {

@@ -7,9 +7,8 @@
 
 #include "actions.h"
 
-static uint64_t requested_touch, clock_ns = 1000000000ull;
-static uint64_t host_buttons;
-static bool requested_run, mapping_active, dash_zr;
+static uint64_t requested_touch, host_buttons, clock_ns = 1000000000ull;
+static bool mapping_active, dash_zr;
 static int held_key;
 static ActSnap staged;
 volatile uint64_t g_a_pressed_ns, g_present_count;
@@ -18,7 +17,6 @@ static struct { bool valid, down; int x, y; } test_ptr;
 static uint64_t plat_now_ns(void) { return clock_ns; }
 static void act_wheel_step(void) {}
 static bool input_view_dash_zr(void) { return dash_zr; }
-static bool touch_running(void) { return requested_run; }
 static bool padmap_active(void) { return mapping_active; }
 static bool act_phys_held(void *user, int code) { (void)user; return held_key && code == held_key; }
 static int act_sw_sources(void *user, int btn, int dev, int *codes, int max) {
@@ -46,7 +44,7 @@ static void profile(const char *ini) {
     act_use_profile(&p);
     held_key = 0;
     requested_touch = 0;
-    requested_run = mapping_active = dash_zr = false;
+    mapping_active = dash_zr = false;
     host_touch_sample(0, 0, UINT64_MAX, false, false);
     g_a_pressed_ns = 0;
 }
@@ -55,79 +53,6 @@ static void sample(uint64_t touch, uint64_t physical, uint64_t allowed, bool men
     clock_ns += 16000000ull;
     ++g_present_count;
     host_touch_sample(physical, 0, allowed, menu, typing);
-}
-
-static void only_run(bool expected) {
-    assert(staged.touch_run == expected && !host_buttons);
-    for (int variant = 0; variant < ACT_VARS; ++variant)
-        assert(!staged.hold[variant] && !staged.pulse[variant]);
-}
-
-static void running_source(void) {
-    const uint64_t native_r = 1ull << 7, native_lr = native_r | (1ull << 6);
-    for (int enabled = 0; enabled <= 1; ++enabled)
-        for (int zr = 0; zr <= 1; ++zr) {
-            const char *ini = enabled ? "[Actions]\nEnable=1\nManageMenus=1\n" : "[Actions]\nEnable=0\n";
-            profile(ini);
-            dash_zr = zr;
-            requested_run = true;
-            sample(0, 0, UINT64_MAX, false, false);
-            only_run(true);  // No Dash/WeaponR/menu action is synthesized from the separate run request.
-            sample(0, 0, 0, false, false);
-            only_run(true);  // Button filtering is independent of a live stick request.
-            sample(0, 0, UINT64_MAX, true, false);
-            only_run(false);
-            sample(0, 0, UINT64_MAX, false, true);
-            only_run(false);
-            mapping_active = true;
-            sample(0, 0, UINT64_MAX, false, false);
-            only_run(false);
-            mapping_active = false;
-            sample(0, 0, UINT64_MAX, false, false);
-            only_run(true);
-            requested_run = false;
-            sample(0, 0, UINT64_MAX, false, false);
-            only_run(false);
-
-            for (int source = 0; source < 3; ++source) {
-                profile(ini);
-                dash_zr = zr;
-                const uint64_t touch = source == 0 ? native_r : source == 1 ? native_lr : 0;
-                const uint64_t physical = source == 2 ? native_r : 0;
-                held_key = source == 2 ? SDL_SCANCODE_A + 7 : 0;
-                sample(touch, physical, UINT64_MAX, false, false);
-                const ActSnap manual = staged;
-                assert(!staged.touch_run && host_buttons == (touch | physical));
-                for (int running = 1; running >= 0; --running) {
-                    requested_run = running;
-                    sample(touch, physical, UINT64_MAX, false, false);
-                    assert(staged.touch_run == (running != 0) && host_buttons == (touch | physical));
-                    for (int variant = 0; variant < ACT_VARS; ++variant) {
-                        assert(staged.hold[variant] == manual.hold[variant]);
-                        assert(!staged.pulse[variant]);  // Run edges cannot generate new native R actions.
-                    }
-                }
-                requested_run = true;
-                sample(touch, physical, UINT64_MAX, false, false);
-                held_key = 0;
-                sample(0, 0, UINT64_MAX, false, false);
-                only_run(true);  // Releasing manual R cannot release the separate run request.
-                requested_run = false;
-                sample(0, 0, UINT64_MAX, false, false);
-                only_run(false);
-            }
-        }
-
-    profile("[Actions]\nEnable=1\nSplitDashWeaponR=1\n[Actions.Kbm]\nDash=key:a\nWeaponR=key:z\n");
-    requested_run = true;
-    sample(0, 0, UINT64_MAX, false, false);
-    only_run(true);  // Per-action bindings/fallbacks never see the running-only source.
-    sample(native_r, 0, UINT64_MAX, false, false);
-    assert(staged.touch_run && (staged.hold[0] >> ACT_WEAPON_R & 1));
-    assert(host_buttons == native_r);
-    profile("[Actions]\nEnable=0\n");
-    only_run(false);  // Disabling actions publishes a fresh snapshot, not the last held WeaponR.
-    puts("PASS: running-only touch source survives Actions On/Off and R/ZR roles, respects menu/text/mapping suppression, bypasses action bindings and preserves manual touch R, L+R and physical R in both release orders");
 }
 
 int main(void) {
@@ -180,6 +105,5 @@ int main(void) {
     host_touch_sample(0, 2, UINT64_MAX, false, false);
     assert(act_view(ACT_VIEW_MB2, 0x4000, staged.hold[0], false) == 0x4000);
     puts("PASS: real host touch/action wiring preserves all native buttons, confirmation edges, remapped controls, overlapping physical input and input suppression");
-    running_source();
     return 0;
 }

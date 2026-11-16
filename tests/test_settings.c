@@ -480,8 +480,8 @@ int main(int argc, char **argv) {
     assert(config_help("Key", help, sizeof help) && !strncmp(help, "Matchmaking key:", 16));
     assert(config_help("DrawDistance", help, sizeof help) && strstr(help, "twice as far, 0.5 half") && strstr(help, "\nBetween 0"));
     assert(config_help("AutoR", help, sizeof help) && strstr(help, "when the game allows running") &&
-           strstr(help, "Only running is automatic; other R actions are not triggered") &&
-           strstr(help, "R button keeps all native functions and can be used at the same time") &&
+           strstr(help, "1.60x the radius") && strstr(help, "With the weapon drawn it does not run") &&
+           strstr(help, "Manual R, combos and a controller's R work as before") &&
            strstr(help, "Default: Off"));
     assert(!config_help("NoSuchKey", help, sizeof help));
     // A second save must not append duplicate sections or change resolved Auto settings.

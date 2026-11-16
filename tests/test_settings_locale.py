@@ -211,10 +211,10 @@ class SettingsLocaleTest(unittest.TestCase):
         auto_r = source.split('add_bool(r, "touch.auto_r",', 1)[1].split(";", 1)[0]
         self.assertIn('&c.touch_auto_r, ini("AutoR")', auto_r)
         help_key = literals(source.split('add_bool(r, "touch.auto_r",', 1)[1].split('r.back().help = tr(', 1)[1])[0]
-        for phrase in ("fixed or floating", "when the game allows it", "never triggers other R actions",
-                       "R button keeps all native functions", "at the same time", "Default: Off"):
+        for phrase in ("fixed or floating", "when the game allows running", "with the weapon drawn it does not trigger",
+                       "Manual R, combos and a controller's R work as before", "Default: Off"):
             self.assertIn(phrase, help_key)
-        for phrase in ("固定或浮动", "游戏允许时自动跑步", "不触发 R 的其他动作", "全部功能", "可同时使用", "默认：关闭"):
+        for phrase in ("固定或浮动", "游戏允许跑步", "1.60 倍半径", "拔刀时不触发", "默认：关闭"):
             self.assertIn(phrase, labels[help_key])
         floating_help = literals(source.split('add_bool(r, "touch.floating",', 1)[1].split('r.back().help = tr(', 1)[1])[0]
         self.assertIn("never the camera", floating_help)
@@ -224,11 +224,10 @@ class SettingsLocaleTest(unittest.TestCase):
         self.assertNotIn("weapon drawn or sheathed", help_key)
         self.assertLess(source.index('"touch.floating"'), source.index('"touch.auto_r"'))
         help_rows = dict(rows(chinese.split("static inline const char *settings_help_zh(", 1)[1], 2))
-        self.assertIn("不触发 R 的其他动作", help_rows["AutoR"])
-        self.assertIn("可同时使用", help_rows["AutoR"])
+        self.assertIn("收刀时", help_rows["AutoR"])
+        self.assertIn("1.60 倍半径", help_rows["AutoR"])
+        self.assertIn("拔刀时不触发", help_rows["AutoR"])
         self.assertIn("默认：关闭", help_rows["AutoR"])
-        self.assertNotIn("拔刀、收刀", help_rows["AutoR"])
-        self.assertNotIn("兼容旧配置", help_rows["AutoR"])
 
     def test_common_ammo_and_item_arrow_help(self):
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")

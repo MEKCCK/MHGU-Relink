@@ -86,13 +86,11 @@ here with `MHGU_ACTION_KCLOG=1`, which logs each one once): the 15 classes' code
 `0x47caa8 0x47cad0 0x47cb48 0x47cc24 0x47cd3c 0x47e7fc` and the two at `0x48d358 / 0x48d3f0` keep the real bit. A mod
 that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input (log line).
 
-**Touch-stick automatic running** is a separate `ActSnap.touch_run` request, published and latched with the same pad
-sample even with action rebinding disabled. It never sets native R or a virtual gameplay-word bit. At the two native
-held-dash getter return sites only (`0x47cd3c` in a hunt, `0x48d358` in town), the local player's original event setter
-`f_485de4` receives the same run events as held R (hunt: 0 and 31; town: 0). The getter's mask and all other callers stay
-unchanged, including the existing optional WeaponR split. The game's own state/stamina rules still decide whether to run.
-The pressed town R site `0x48d3f0` and the mask selector `0x47e7fc` are not run requests. A synthetic high bit would be
-truncated by the player's 16-bit copies; `0x1000` is also unsafe because the game synthesizes it for other actions.
+**Touch-stick automatic running** is the Android mainline's rim gesture, optional through `[Touch] AutoR=On`. With
+the weapon sheathed, sliding the left thumb past 1.60x the stick's radius holds the game's native R; it keeps holding
+down to 1.45x and stops below that (the same hysteresis as the Android mainline). With the weapon drawn it does not run:
+R would be a guard or a weapon action. It adds the real `BTN_R` bit to the same pad sample, so manual R, a combo's R and
+a physical controller's R remain the same input and no separate request channel exists.
 
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.

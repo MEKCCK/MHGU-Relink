@@ -30,7 +30,6 @@ void input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry)
     for (int v = 0; v < ACT_VARS; v++) act_pub.hold[v] = act_staged.hold[v], act_pub.pulse[v] |= act_staged.pulse[v];
     act_pub.ptr_x = act_staged.ptr_x, act_pub.ptr_y = act_staged.ptr_y;
     act_pub.ptr_down = act_staged.ptr_down, act_pub.ptr_valid = act_staged.ptr_valid;
-    act_pub.touch_run = act_staged.touch_run;
     memset(act_staged.pulse, 0, sizeof act_staged.pulse);
     g_buttons = buttons;
     g_sticks[0] = lx, g_sticks[1] = ly, g_sticks[2] = rx, g_sticks[3] = ry;
@@ -86,7 +85,6 @@ static void fill_state(Cpu *c) {
     for (int v = 0; v < ACT_VARS; v++) act_delivered.hold[v] = act_pub.hold[v], act_delivered.pulse[v] |= act_pub.pulse[v];
     act_delivered.ptr_x = act_pub.ptr_x, act_delivered.ptr_y = act_pub.ptr_y;
     act_delivered.ptr_down = act_pub.ptr_down, act_delivered.ptr_valid = act_pub.ptr_valid;
-    act_delivered.touch_run = act_pub.touch_run;
     memset(act_pub.pulse, 0, sizeof act_pub.pulse);
     pthread_mutex_unlock(&act_lock);
     int32_t lx = st[0], ly = st[1], rx = st[2], ry = st[3];

@@ -1311,7 +1311,6 @@ static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
         if (act_profile()->menus && (s.pulse[0] >> ACT_MENU_CONFIRM & 1)) g_a_pressed_ns = plat_now_ns();  // (a cutscene's skip)
         if (test_ptr.valid) s.ptr_x = test_ptr.x, s.ptr_y = test_ptr.y, s.ptr_down = test_ptr.down, s.ptr_valid = true;
     }
-    s.touch_run = !suppress && !padmap_active() && touch_running();
     input_act_stage(&s);
 }
 

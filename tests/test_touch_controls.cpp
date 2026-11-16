@@ -226,13 +226,13 @@ struct Input { uint64_t b{}, touch_b{}; int lx{}, ly{}, rx{}, ry{}; float dx{}, 
 static Input update(uint64_t controller = 0, bool pad = false, bool typing = false) {
     Input v; v.b = controller;
     v.touch_b = touch_input(pad, typing, &v.b, &v.lx, &v.ly, &v.rx, &v.ry, &v.dx, &v.dy);
-    v.run = touch_running();
+    v.run = g_s.run;
     return v;
 }
 static Input update_axes(uint64_t buttons,int lx,int ly,int rx,int ry) {
     Input v; v.b=buttons; v.lx=lx; v.ly=ly; v.rx=rx; v.ry=ry;
     v.touch_b=touch_input(true,false,&v.b,&v.lx,&v.ly,&v.rx,&v.ry,&v.dx,&v.dy);
-    v.run=touch_running();
+    v.run=g_s.run;
     return v;
 }
 static void event(Uint32 type, SDL_FingerID id, float x, float y) {
@@ -588,28 +588,31 @@ static void auto_r() {
         const Geo g=place(g_s.layout,C_STICK,(float)screen_w,(float)screen_h);
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y); assert(finger(g_s,1)->kind==F_STICK);
-        auto check=[&](Input v,bool full) {
-            const bool expected=flag&&full;
-            assert(!v.b && !v.touch_b && v.run==expected && g_s.run==expected);
+        auto check=[&](Input v,bool expected) {
+            const bool run=flag&&!out&&expected;
+            assert(v.run==run && g_s.run==run);
+            assert(v.b==(run?B(BTN_R):0) && !v.touch_b);
             assert(!v.rx && !v.ry && !v.dx && !v.dy);
         };
-        auto move=[&](float x,float y,bool full) {
-            event(SDL_EVENT_FINGER_MOTION,1,origin.x+x*g.r,origin.y+y*g.r);
-            check(update(),full);
+        auto move=[&](float radius,bool expected) {
+            event(SDL_EVENT_FINGER_MOTION,1,origin.x+radius*g.r,origin.y);
+            check(update(),expected);
         };
         check(update(),false);
-        move(.97f,0,false); move(.9801f,0,true); assert(update().lx>32000);
-        move(.951f,0,true); move(.949f,0,false); move(.97f,0,false);
-        move(.99f,0,true); drawn=1-out; check(update(),true);
-        move(2,0,true); move(.25f,0,false); assert(abs(update().lx-8191)<250);
-        move(.7f,.7f,true); move(.67f,.67f,false);
-        move(.99f,0,true); event(SDL_EVENT_FINGER_UP,1,origin.x+g.r,origin.y);
+        move(1.55f,false);
+        move(1.6001f,true);
+        move(1.5001f,true);
+        move(1.4499f,false);
+        move(1.6001f,true);
+        drawn=1; check(update(),false);          // weapon out: R would be a guard/attack
+        drawn=out; move(1.6001f,true);
+        event(SDL_EVENT_FINGER_UP,1,origin.x+1.6001f*g.r,origin.y);
         check(update(),false); assert(!update().lx && !update().ly);
         event(SDL_EVENT_FINGER_DOWN,2,origin.x,origin.y);
-        event(SDL_EVENT_FINGER_MOTION,2,origin.x+.97f*g.r,origin.y); check(update(),false);
-        event(SDL_EVENT_FINGER_CANCELED,2,origin.x+g.r,origin.y); check(update(),false);
+        event(SDL_EVENT_FINGER_MOTION,2,origin.x+1.6001f*g.r,origin.y); check(update(),true);
+        event(SDL_EVENT_FINGER_CANCELED,2,origin.x+1.6001f*g.r,origin.y); check(update(),false);
     }
-    puts("PASS: optional AutoR defaults off in the fixture; fixed/floating common sticks at four sizes request running only at 0.98 radius and release below 0.95 in town/quest with drawn/sheathed weapons; native R remains absent, radial hysteresis is per touch and movement remains linear without camera output");
+    puts("PASS: optional AutoR holds native R only past 1.60 rim radius (1.45 hold) for fixed/floating sticks in town/quests, never with the weapon drawn, and clears on release at four sizes");
 }
 
 static void floating_stick() {
@@ -3232,7 +3235,7 @@ static void freeform_icon_drawing() {
 }
 static void auto_r_sources_and_ownership() {
     for(int floating:{0,1}) {
-        fresh(); cfg.touch_auto_r=1; cfg.touch_floating=floating; update();
+        fresh(); cfg.touch_auto_r=1; cfg.touch_floating=floating; drawn=0; update();
         const Geo g=place(g_s.layout,C_STICK,(float)screen_w,(float)screen_h);
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         auto down=[&]() { event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y); };
@@ -3240,42 +3243,43 @@ static void auto_r_sources_and_ownership() {
         auto cancel=[&]() { event(SDL_EVENT_FINGER_CANCELED,1,origin.x,origin.y); };
         auto expect=[&](bool run,uint64_t touch=0,uint64_t physical=0) {
             const Input v=update(physical,physical!=0);
-            assert(v.run==run && g_s.run==run && v.touch_b==touch && v.b==(touch|physical)); no_stick_camera(v);
+            assert(v.run==run && g_s.run==run);
+            assert(v.touch_b==touch && v.b==(touch|physical|(run?B(BTN_R):0))); no_stick_camera(v);
         };
-        down(); at(SDL_EVENT_FINGER_DOWN,C_R,2); move(.99f); expect(true,B(BTN_R));
+        down(); at(SDL_EVENT_FINGER_DOWN,C_R,2); move(1.7001f); expect(true,B(BTN_R));
         at(SDL_EVENT_FINGER_CANCELED,C_R,2); expect(true);
         at(SDL_EVENT_FINGER_DOWN,C_R,2); expect(true,B(BTN_R));
-        move(.4f); expect(false,B(BTN_R)); cancel(); expect(false,B(BTN_R));
+        move(1.4499f); expect(false,B(BTN_R));
         at(SDL_EVENT_FINGER_CANCELED,C_R,2); expect(false);
         strcpy(cfg.touch_weapon_combo[TOUCH_UNIVERSAL_PROFILE][0],"L+R");
-        down(); move(.99f); at(SDL_EVENT_FINGER_DOWN,C_COMBO,3); expect(true,B(BTN_L)|B(BTN_R));
+        down(); move(1.7001f); at(SDL_EVENT_FINGER_DOWN,C_COMBO,3); expect(true,B(BTN_L)|B(BTN_R));
         at(SDL_EVENT_FINGER_CANCELED,C_COMBO,3); expect(true);
         at(SDL_EVENT_FINGER_DOWN,C_COMBO,3); expect(true,B(BTN_L)|B(BTN_R));
-        move(.4f); expect(false,B(BTN_L)|B(BTN_R));
+        move(1.4499f); expect(false,B(BTN_L)|B(BTN_R));
         at(SDL_EVENT_FINGER_CANCELED,C_COMBO,3); expect(false); cancel(); expect(false);
-        down(); move(.99f); expect(true,0,B(BTN_R)); expect(true);
-        cfg.touch_auto_r=0; expect(false,0,B(BTN_R));
-        cfg.touch_auto_r=1; expect(true,0,B(BTN_R));
-        move(.4f); expect(false,0,B(BTN_R)); cancel(); expect(false,0,B(BTN_R));
-        down(); move(.5f); expect(false);
+        down(); move(1.7001f); expect(true); cfg.touch_auto_r=0; expect(false);
+        cfg.touch_auto_r=1; expect(true);
+        move(1.4499f); expect(false);
+        // A second finger while the first stick is active cannot own or duplicate the run.
         event(SDL_EVENT_FINGER_DOWN,2,origin.x+g.r*.25f,origin.y);
         const Finger *extra=finger(g_s,2); assert(!extra || (extra->kind!=F_STICK && extra->kind!=F_CAMERA));
         event(SDL_EVENT_FINGER_MOTION,2,origin.x+g.r*2,origin.y); expect(false);
-        move(.99f); expect(true); cancel(); expect(false);
-        event(SDL_EVENT_FINGER_MOTION,2,origin.x+g.r*3,origin.y); expect(false);
-        event(SDL_EVENT_FINGER_UP,2,origin.x+g.r*3,origin.y); expect(false);
+        move(1.7001f); expect(true);
+        event(SDL_EVENT_FINGER_CANCELED,2,origin.x+g.r*2,origin.y);
+        cancel(); expect(false);
     }
-    puts("PASS: running-only AutoR and native manual R are independent in both release orders for touch R, L+R combos and physical R; live Off/On updates work, and secondary stick touches cannot activate running or inherit ownership");
+    puts("PASS: rim AutoR is the same native R bit as manual R, combo R and physical R (no separate touch channel), follows live Off/On, and secondary stick touches cannot copy or steal the run");
 }
+
 static void auto_r_lifecycle() {
-    for(int floating:{0,1}) for(int mode=0;mode<10;++mode) {
-        fresh(); cfg.touch_auto_r=1; cfg.touch_floating=floating; update();
+    for(int floating:{0,1}) for(int mode=0;mode<9;++mode) {
+        fresh(); cfg.touch_auto_r=1; cfg.touch_floating=floating; drawn=0; update();
         if(mode==8) assert(touch_template_save(19,"AutoR lifecycle"));
         const Geo g=place(g_s.layout,C_STICK,(float)screen_w,(float)screen_h);
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y);
-        event(SDL_EVENT_FINGER_MOTION,1,origin.x+g.r*.99f,origin.y);
-        Input v=update(B(BTN_R),true); assert(v.run && g_s.run && !v.touch_b && v.b==B(BTN_R)); no_stick_camera(v);
+        event(SDL_EVENT_FINGER_MOTION,1,origin.x+g.r*1.7f,origin.y);
+        Input v=update(); assert(v.run && g_s.run && v.b==B(BTN_R) && !v.touch_b); no_stick_camera(v);
         switch(mode) {
             case 0: game_menu_state(true); break;
             case 1: settings_open=true; break;
@@ -3286,21 +3290,21 @@ static void auto_r_lifecycle() {
             case 6: touch_reset(); break;
             case 7: in_quest=false; break;
             case 8: assert(touch_template_use(19)); break;
-            case 9: cfg.touch_controls=TOUCH_AUTO; break;
         }
         auto stopped=[&]() {
-            const Input input=update(B(BTN_R),true,mode==5);
-            if(input.run || g_s.run || input.touch_b) fprintf(stderr,"AUTOR LIFECYCLE FAILURE: floating=%d mode=%d run=%d touch=%llu\n",floating,mode,input.run,(unsigned long long)input.touch_b);
-            assert(!input.run && !g_s.run && !input.touch_b && input.b==B(BTN_R)); no_stick_camera(input);
+            const Input input=update(0,false,mode==5);
+            if(input.run || g_s.run || (input.b&B(BTN_R))) fprintf(stderr,"AUTOR LIFECYCLE FAILURE: floating=%d mode=%d run=%d b=%llx\n",floating,mode,input.run,(unsigned long long)input.b);
+            assert(!input.run && !g_s.run && !(input.b&B(BTN_R))); no_stick_camera(input);
         };
         stopped(); event(SDL_EVENT_FINGER_UP,1,screen_w+10000.f,-10000.f); stopped();
         if(mode==0) game_menu_state(false);
         settings_open=false; cfg.touch_controls=TOUCH_ON; cfg.touch_show[TB_STICK]=1;
         if(g_s.edit) { editor_click(E_CANCEL); update(); }
-        v=update(B(BTN_R),true); assert(!v.run && !g_s.run && !v.touch_b && v.b==B(BTN_R)); no_stick_camera(v);
+        v=update(); assert(!v.run && !g_s.run && !(v.b&B(BTN_R))); no_stick_camera(v);
     }
-    puts("PASS: fixed/floating running-only AutoR clears in game menus, overlays, editor, Off, hidden stick, typing, reset, scene/template changes and Auto controller hiding; old UP/return cannot revive running and physical R stays intact");
+    puts("PASS: rim AutoR clears in game menus, overlays, editor, Off, hidden stick, typing, reset, scene/template changes; it is a native R bit, so no stale separate request survives");
 }
+
 static void preview(const char *path) {
     SDL_Surface *surface=SDL_CreateSurface(screen_w,screen_h,SDL_PIXELFORMAT_RGBA32);assert(surface);
     SDL_Renderer *renderer=SDL_CreateSoftwareRenderer(surface);assert(renderer);
@@ -3439,8 +3443,8 @@ int main(int argc,char **argv) {
         const Geo g=place(g_s.layout,C_STICK,(float)screen_w,(float)screen_h);
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y);
-        event(SDL_EVENT_FINGER_MOTION,1,origin.x+g.r,origin.y); const Input v=update();
-        assert(v.run==(enabled!=0) && g_s.run==v.run && !v.touch_b && !v.b);
+        event(SDL_EVENT_FINGER_MOTION,1,origin.x+1.7f*g.r,origin.y); const Input v=update();
+        assert(v.run==(enabled!=0) && g_s.run==v.run && !v.touch_b && v.b==(enabled?B(BTN_R):0));
         char path[100]; snprintf(path,sizeof path,"touch-auto-r-%s-%s-1280x720.png",floating?"floating":"fixed",enabled?"on":"off");
         preview(path); event(SDL_EVENT_FINGER_CANCELED,1,origin.x+g.r,origin.y); update();
     }
