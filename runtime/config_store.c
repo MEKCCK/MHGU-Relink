@@ -31,7 +31,8 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch_cam, live_touch_opacity, live_lock_on = {1}, live_persistent_lock_on,
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
                      live_shadows = {1}, live_bloom = {1}, live_reverb = {1},
-                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_ldn_direct, live_bonus;
+                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_ldn_direct, live_bonus,
+                     audio_output, live_hold_send = {1};
 static SDL_AtomicInt live_kerning, live_bold;
 // [HDR]
 static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
@@ -142,6 +143,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
     if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
     if (all || c->village_in_hub != saved.village_in_hub) SDL_SetAtomicInt(&live_village, c->village_in_hub);
+    if (all || c->quest_hold_send != saved.quest_hold_send) SDL_SetAtomicInt(&live_hold_send, c->quest_hold_send);
     if (all || memcmp(&c->hp, &saved.hp, sizeof c->hp)) {
         SDL_LockSpinlock(&live_hp_lock);
         live_hp = c->hp;
@@ -181,6 +183,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&language, c->language);
     SDL_SetAtomicInt(&volume, c->volume);
     SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
+    SDL_SetAtomicInt(&audio_output, c->audio_output);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
     SDL_SetAtomicInt(&show_fps, c->show_fps);
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
@@ -239,6 +242,7 @@ float config_live_hdr_bloom(void) { return get_float(&live_hdr_bloom); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
+int config_live_quest_hold_send(void) { return SDL_GetAtomicInt(&live_hold_send); }
 int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
 int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
 int config_live_lag_compensation(void) { return SDL_GetAtomicInt(&live_lagcomp); }
@@ -380,6 +384,7 @@ Config config_editable(void) {
     c.touch_show[TB_DPAD] = config_live_touch_show(TB_DPAD);
     return c;
 }
+int config_audio_output(void) { return SDL_GetAtomicInt(&audio_output); }
 float config_audio_gain(void) {
     if (SDL_GetAtomicInt(&mute_in_background) && !SDL_GetAtomicInt(&window_focused)) return 0.0f;
     return SDL_GetAtomicInt(&volume) / 100.0f;

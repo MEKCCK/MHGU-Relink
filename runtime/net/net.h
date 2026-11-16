@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+void ldn_log_state(void);  // state and last state-changing call (window close)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

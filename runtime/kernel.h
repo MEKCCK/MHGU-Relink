@@ -63,4 +63,6 @@ void dispatch_thread_init(Cpu *c);  // dispatch.c: the thread's own cache of gue
 void dispatch_thread_done(Cpu *c);  // (and freed when the thread ends)
 int kernel_stack_callers(uint32_t sp, char *line, size_t size);  // " addr addr ...": the game's calls, from the stack
 void kernel_log_guest_stack(const char *tag, const Cpu *c);       // logs tag, lr and those callers
+void kernel_dump_threads(const char *why, bool all_callers);      // every guest thread's state to the log (see kernel.c)
+void kernel_dump_threads(const char *why, bool all_callers);      // every guest thread's state to the log (see kernel.c)
 uint32_t kernel_heap_size(void);

@@ -93,6 +93,22 @@ static const MenuGeom builtin[] = {
      .offmask = 0x7, .offy = {0, 36, 145}, .cols = 1},
     // the World Map: 2 rows of 4 destinations, picture and name (a linked pair of cursors: cursor_update_as, linked[])
     {.lr = 0x993d04u, .x = 322, .y = 213, .w = 159, .h = 148, .dy = 148, .builtin = true, .cdx = 159, .cols = 4},
+    // the Reward Box after a quest (Take Items and Send to the Item Box both): 8 x 6 cells whose chosen one is
+    // recoloured in place - nothing moves, nothing to learn - measured from the HUD pieces (the cell's piece at 888 +
+    // 44 a column, 138 + 40 a row, about 33 wide; 2026-11-14, quest 101)
+    {.lr = 0x5890a8u, .x = 883, .y = 135, .w = 44, .h = 40, .dy = 40, .builtin = true, .cdx = 44, .cols = 8},
+    // the Meownster Hunters' reward box (0x3b607c: its menu is the list at 0x3b6110, its grid 8 x 6, set up at
+    // 0x3b6678): the same cells in the same place as the quest's, recoloured in place too (2026-11-15, a screenshot)
+    {.lr = 0x3b6278u, .x = 883, .y = 135, .w = 44, .h = 40, .dy = 40, .builtin = true, .cdx = 44, .cols = 8},
+    // the Meownster Hunters' setup (0x3b3fcc): the Palicos to send (left, as learned; Expedition Info's bars move as
+    // they are picked, which the learner took for a second place of this menu's - built in, so it isn't kept)
+    {.lr = 0x3b4420u, .x = 28, .y = 135, .w = 372, .h = 34, .dy = 36, .z = 97, .kw = 186, .kh = 17, .builtin = true,
+     .cols = 1},
+    // ... then Expedition Info: Locale and the four members 38 apart (as learned), then Start Expedition, a button below
+    // the Cost line that is recoloured in place (240 wide: not the 210 x 34 button the learner knows), measured from a
+    // screenshot (2026-11-15)
+    {.lr = 0x3b8514u, .x = 896, .y = 100, .w = 356, .h = 36, .dy = 38, .z = 97, .kw = 178, .kh = 18, .builtin = true,
+     .offmask = 0x3f, .offy = {0, 38, 76, 114, 152, 254}, .cols = 1},  // (every row: one not given goes by the nearest)
     {CALL_PAUSE_MENU, 970, 101, 282, 34, 0, 36, 97, 141, 17, 0, 0, true},
     {CALL_TITLE_MENU, 170, 153, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
     {CALL_TITLE_OPTIONS, 170, 195, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
@@ -343,11 +359,13 @@ static int pages_of(uint32_t cur, const Layout *L) { return L->fixed ? 1 : LD16(
 // learning for LEARN_NS after it ran; a cursor that ran within FRESH_NS of its last run is the same opening of its menu.
 #define LEARN_NS  3000000000ull
 #define FRESH_NS  3000000000ull
+#define REOPEN_NS 100000000ull   // (a pause this long, with another menu stepping meanwhile, is a new opening too)
 #define RECENT_NS 30000000000ull  // (the renderer looks for the highlights of menus seen this lately)
 typedef struct {
     uint32_t lr;
     uint64_t seen_ns, appeared_ns, moved_ns, since;  // since: presented frame its cell / page last changed (or it appeared)
     uint64_t bar_ns;                                 // when the renderer last saw its highlight where it should be
+    uint64_t shown_ns;                               // ... when that highlight came (back) on screen after a while away
     int row, col, cells, cols, page, pages;          // cells: on its page now
     bool known;                                      // its cells' places are known
 } Cursor;
@@ -494,8 +512,16 @@ void menuptr_bar_at(const MenuGeom *g, int row, int col) {
     // update gives up one beyond the page's last)
     if (quiet) e->cells = e->cols * 16;
     if (!e->cols) e->cols = g->cols;
+    if (now - e->bar_ns >= OPEN_NS) e->shown_ns = now;
     e->bar_ns = now, e->known = true;
+    int cell = e->row * e->cols + e->col;
     pthread_mutex_unlock(&g_cur_lock);
+    // (a cursor that doesn't run - a prompt whose own code moves its choice: the host steps it, menuptr_nudge_key - is
+    // where a jump wanted it once its highlight is shown there)
+    if (quiet && atomic_load(&g_target_lr) == g->lr && atomic_load(&g_target) == cell) {
+        atomic_store(&g_target, -1);
+        if (atomic_exchange(&g_click, false)) atomic_store(&g_confirm, true);
+    }
 }
 
 int menuptr_small_geoms(MenuGeom *out, int max) {
@@ -678,6 +704,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
         if (target >= 0) c->r[1] &= ~(BIT_UP | BIT_DOWN | BIT_LEFT | BIT_RIGHT | back | on);
         if (target != last_target) steps = 0, last_target = target;
         if (target >= cells || (target >= 0 && ++steps > 4)) {
+            LOG("[menuptr] %08x: cell %d given up (cells %d, steps %d, at %d,%d)\n", lr, target, cells, steps, row0, col0);
             atomic_store(&g_target, -1), atomic_store(&g_click, false);
             target = last_target = -1;
         }
@@ -711,6 +738,14 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
         else if (g_cursors[i].seen_ns < oldest->seen_ns) oldest = &g_cursors[i];
     }
     bool fresh = !e || now - e->seen_ns >= FRESH_NS;
+    // (back after a pause in which another menu that ran stepped or appeared: opened anew, in front of it - a prompt
+    // asked again soon after its last answer, over the list a row was just picked in, stayed behind that list for the
+    // pointer, and its Yes / No took no clicks)
+    if (!fresh && now - e->seen_ns >= REOPEN_NS)
+        for (int i = 0; i < MAX_CURSORS && !fresh; i++) {
+            const Cursor *o = &g_cursors[i];
+            fresh = o != e && o->lr && o->seen_ns && (o->moved_ns > e->seen_ns || o->appeared_ns > e->seen_ns);
+        }
     if (!e) e = oldest, e->lr = lr;
     if (fresh) e->appeared_ns = now, e->moved_ns = 0, e->since = g_present_count;
     else if (e->row != row || e->col != col || e->page != page) e->moved_ns = now, e->since = g_present_count;
@@ -985,6 +1020,7 @@ bool menuptr_take_confirm(void) {
     return confirm || result;
 }
 
+
 // ---- character creation's Skin Tone slider: a gradient of 184 tones (1..184, 0xb8) with a marker. Its update
 // 0x8babe4(slider, ..., pad bits r2), every frame from 0x8ba920: Left (0x80) / Right (0x20) step the tone by 1 (10 with
 // L / R held); the tone is read from its GUI object's parameter 0x10 (+0x24 the GUI: 0x745a78 gets, 0x745a40 sets it, the
@@ -1044,12 +1080,46 @@ void menuptr_slider_step(int d) {
     atomic_store(&g_slider_target, t < 1 ? 1 : t > SLIDER_MAX ? SLIDER_MAX : t);
 }
 
-// A jump or a page waits for a cursor whose update has not run lately: one that only runs on a press (character
-// creation's grids). The host then presses Down briefly, so that the menu runs it (the hook gives it its own bits instead).
-bool menuptr_needs_nudge(void) {
+// A jump or a page waits for a cursor whose update has not run lately. One that only runs on a press (character
+// creation's grids): the host presses Down briefly, so that the menu runs it (the hook gives it its own bits instead).
+// One that never ran, known only from its frame - a prompt whose own code moves its choice (Equipment Sets' "Change
+// equipment?"): the host presses the way to the cell, a step at a time, and the frame shown there ends the jump
+// (menuptr_bar_at); a step that brought it no nearer (the end of the list, or round it) gives the jump up.
+static bool needs_nudge(void);
+const char *menuptr_nudge_key(bool *nudge) {
+    *nudge = false;
+    if (!needs_nudge()) return NULL;
+    uint32_t lr = atomic_load(&g_page_dir) ? atomic_load(&g_page_lr) : atomic_load(&g_target_lr);
+    int target = atomic_load(&g_target), row = 0, col = 0, cols = 1;
+    bool ran = true;
+    pthread_mutex_lock(&g_cur_lock);
+    for (int i = 0; i < MAX_CURSORS; i++)
+        if (g_cursors[i].lr == lr) ran = g_cursors[i].seen_ns != 0, row = g_cursors[i].row, col = g_cursors[i].col, cols = g_cursors[i].cols;
+    pthread_mutex_unlock(&g_cur_lock);
+    if (ran || atomic_load(&g_page_dir) || target < 0) return *nudge = true, "DOWN";
+    if (cols < 1) cols = 1;
+    int tr = target / cols, tc = target % cols, dist = abs(tr - row) + abs(tc - col);
+    static uint64_t mine;  // (the jump these steps are for: the time it was asked at, as this last set it)
+    static int last_dist;
+    uint64_t asked = atomic_load(&g_asked_ns);
+    if (asked == mine && dist >= last_dist) {
+        LOG("[menuptr] %08x: cell %d not reached by steps (at %d,%d), given up\n", lr, target, row, col);
+        atomic_store(&g_target, -1), atomic_store(&g_click, false);
+        return NULL;
+    }
+    mine = plat_now_ns(), last_dist = dist;
+    atomic_store(&g_asked_ns, mine);
+    MenuGeom g;
+    if (menuptr_variants(lr, &g, 1) < 1) return NULL;
+    if (tr != row) return g.dy == 0 && g.dx != 0 ? (tr > row ? "RIGHT" : "LEFT") : (tr > row ? "DOWN" : "UP");
+    return g.cdy != 0 && g.cdx == 0 ? (tc > col ? "DOWN" : "UP") : (tc > col ? "RIGHT" : "LEFT");
+}
+
+static bool needs_nudge(void) {
     // (a jump or page not done in ASK_NS is given up: its menu stopped - a message over it - and nudging on would hold
     // Down there for good, which kept the message's own Confirm from getting through)
     if ((atomic_load(&g_target) >= 0 || atomic_load(&g_page_dir)) && plat_now_ns() - atomic_load(&g_asked_ns) > ASK_NS) {
+        LOG("[menuptr] %08x: cell %d not reached in time, given up\n", atomic_load(&g_target_lr), atomic_load(&g_target));
         atomic_store(&g_target, -1), atomic_store(&g_click, false), atomic_store(&g_page_dir, 0);
         return false;
     }

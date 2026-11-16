@@ -413,6 +413,12 @@ static inline const char *settings_text(int language, const char *english) {
         {"Edges", "Bordes", "边缘"},
         {"Volume (%)", "Volumen (%)", "音量（%）"},
         {"Mute in background", "Silenciar en segundo plano", "后台静音"},
+        {"Output", "Salida", "输出"},
+        {"Stereo", "Estéreo", "立体声"},
+        {"5.1 surround", "Envolvente 5.1", "5.1 环绕"},
+        {"5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.",
+         "Envolvente 5.1 envía la mezcla 5.1 del propio juego (frontales, central, subwoofer, traseros) a un equipo envolvente; Estéreo la reduce a dos altavoces o auriculares. Con 5.1 en un dispositivo estéreo, la reduce el sistema.",
+         "5.1 环绕会把游戏自身的 5.1 混音（前左/右、中置、低音、后左/右）发送到环绕系统；立体声会折叠为两只音箱或耳机。在立体声设备上选择 5.1 时，由系统负责折叠。"},
         {"Voice chat", "Chat de voz", "语音聊天"},
         {"Voice chat mode", "Modo del chat de voz", "语音聊天模式"},
         {"Always", "Siempre", "始终"},
@@ -833,6 +839,13 @@ static inline const char *settings_text(int language, const char *english) {
         {"Mouse capture", "Captura del ratón", "鼠标捕获"},
         {"Click", "Clic", "点击"},
         {"Mouse sensitivity must be 0.1-10 and smoothing 0-0.9.", "La sensibilidad del ratón debe estar entre 0,1 y 10 y el suavizado entre 0 y 0,9.", "鼠标灵敏度须在 0.1-10 之间，平滑须在 0-0.9 之间。"},
+        {"Hold A to send items to box", "Mantener A para enviar objetos a la caja", "按住 A 发送物品到道具箱"},
+        {"At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.",
+         "Al final de una misión, mantén apretado A en la caja de recompensas (opción Enviar a la caja de objetos) para enviar los objetos rápidamente, de uno en uno, como en World/Rise/Wilds.",
+         "任务结束时，在奖励箱的“发送到道具箱”选项上按住 A，可像 World/Rise/Wilds 一样快速逐件发送物品。"},
+        {"Every action of both devices and all weapons back to Default, and the Advanced layout.",
+         "Todas las acciones de ambos dispositivos y de todas las armas vuelven a Predeterminado, con la disposición Avanzada.",
+         "两种设备及所有武器的每个操作都恢复为“默认”，并切换到高级布局。"},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) {

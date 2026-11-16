@@ -314,6 +314,8 @@ $(O)/version.id: FORCE
 	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(VERSION)' ] || echo '$(VERSION)' > $@
 $(O)/rt/main.o: $(O)/version.id
 $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
+$(O)/rt/settings_panel.o: $(O)/version.id
+$(O)/rt/settings_panel.o: IMGUIFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
 $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)

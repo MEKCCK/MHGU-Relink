@@ -1076,7 +1076,7 @@ int main(int argc, char **argv) {
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
     selected("volume");  // (Audio first)
-    down(3);  // (mutebg, show.fps, fps)
+    down(4);  // (mutebg, audio.output, show.fps, fps)
     selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
@@ -1093,7 +1093,7 @@ int main(int argc, char **argv) {
     confirm();
     assert(config_editable().fps == 91);
     press(ImGuiKey_Home);
-    down(3);
+    down(4);
     selected("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
@@ -1104,7 +1104,7 @@ int main(int argc, char **argv) {
     confirm();
     assert(config_editable().fps == 60);
     press(ImGuiKey_Home);
-    down(3);
+    down(4);
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -1538,7 +1538,7 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(13);  // (mutebg, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
+    down(14);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());

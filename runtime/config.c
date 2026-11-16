@@ -159,6 +159,8 @@
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 2},                                                                        \
     .village_in_hub = 1,                                                                            \
+    /* [Quest Rewards] */                                                                           \
+    .quest_hold_send = 1,                                                                           \
     /* [Discord] */                                                                                 \
     .discord = 1,                                                                                   \
     .discord_hunter = 1,                                                                            \
@@ -167,6 +169,7 @@
     /* [Audio] */                                                                                   \
     .volume = 100,                                                                                  \
     .mute_in_background = 0,                                                                        \
+    .audio_output = AUDIO_OUT_STEREO,                                                               \
     .reverb = 1,                                                                                    \
     /* [Voice] */                                                                                   \
     .voice_mode = VOICE_OFF,                                                                        \
@@ -756,6 +759,11 @@ static const char DEFAULT_INI[] =
     "; Default: 2.0\n"
     "HubHP = 2.0\n"
     "\n"
+    "[Quest Rewards]\n"
+    "; At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.\n"
+    "; Default: On\n"
+    "HoldASend = On\n"
+    "\n"
     "[Discord]\n"
     "; Show what you're doing in the game on your Discord profile (Discord must be running on this computer):\n"
     "; where you are, the quest's monsters and how many hunters are with you\n"
@@ -782,6 +790,11 @@ static const char DEFAULT_INI[] =
     "; Mute the game while its window is in the background (not focused)\n"
     "; Default: Off\n"
     "MuteInBackground = Off\n"
+    "\n"
+    "; Speakers: Stereo, or 5.1 (front left / right, center, subwoofer, rear left / right) for a surround system.\n"
+    "; The game mixes its sound in 5.1 either way; Stereo folds it down to two channels.\n"
+    "; Default: Stereo\n"
+    "Output = Stereo\n"
     "\n"
     "; The echo of caves and rooms (the game's reverb). Off: the sound is dry, and a weak phone's processor does less\n"
     "; Default: On\n"
@@ -1152,12 +1165,14 @@ const ConfigSetting g_settings[] = {
     {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
+    ON_OFF("Quest Rewards", "HoldASend", quest_hold_send, false),
     {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
+    {"Audio", "Output", SET_CHOICE, F(audio_output), 0, 0, 0, "Stereo|2.0,5.1|surround|5.1surround", NULL, false, ERR_MISC},
     ON_OFF("Audio", "Reverb", reverb, false),
     {"Voice", "VoiceChat", SET_CHOICE, F(voice_mode), 0, 0, 0, "Off,Always,PushToTalk|ptt|push",
      NULL, false, ERR_MISC},

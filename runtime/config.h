@@ -12,6 +12,7 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };
 enum { TOUCH_AUTO, TOUCH_ON, TOUCH_OFF };  // [Touch] Controls (runtime/touch.cpp)
+enum { AUDIO_OUT_STEREO, AUDIO_OUT_51 };  // [Audio] Output (runtime/services/audio.c)
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };  // [Performance] ShowBattery
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 enum { FXAA_ORIGINAL, FXAA_311 };  // [Anti-aliasing] FXAAMode (runtime/nvn/vulkan/exec.c)
@@ -70,6 +71,7 @@ typedef struct {
     int lag_compensation;     // multiplayer: melee and bow/bowgun hits count as the hunter saw them (runtime/net/hitsync.c)
     int bonus_content;        // free downloads copied from a donor save into saves without any (runtime/services/bonus.c)
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
+    int quest_hold_send;      // [Quest Rewards] HoldASend: A held on the Reward Box sends the items one after another (runtime/hle/rewardbox.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)
     HpScale hp;               // large monster HP in Hub-type quests (runtime/hle/hpscale.c)
     float mouse_sensitivity;  // mouse look: times the hunt camera's angle per count (runtime/hle/mousecam.c), and
@@ -100,6 +102,7 @@ typedef struct {
     int loading_indicator;    // [Performance] LoadingIndicator: the start-up's "Loading" corner (overlay.cpp); ini only
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
     int mute_in_background;   // [Audio] MuteInBackground: no sound while the window is not focused (config_audio_gain)
+    int audio_output;         // [Audio] Output: AUDIO_OUT_*, the game's 5.1 mix folded to stereo or played as it is
     int voice_mode;           // [Voice] VoiceChat: VOICE_*, talking to the other hunters (runtime/voice.c)
     int mic_volume;           // [Voice] MicVolume: your microphone's gain, 0..100 (config_voice_mic_gain)
     int voice_volume;         // [Voice] VoiceVolume: the other hunters' voices, 0..100 (config_voice_play_gain: twice this)
@@ -321,6 +324,7 @@ float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR
 void config_live_hp(HpScale *out);      // [Monster HP] and [Village Quests] HubHP as saved now (hle/hpscale.c)
 float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
 int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
+int config_live_quest_hold_send(void);  // [Quest Rewards] HoldASend (hle/rewardbox.c)
 int config_live_ldn_port(void);         // [Multiplayer] Port as saved now: counts from the next hub hosted or search
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
@@ -358,6 +362,7 @@ void config_live_ldn(char *server, size_t server_size, char *key, size_t key_siz
 void config_live_crossplay(Config *out);  // coherent snapshot of saved Crossplay/Ryu*/Room* settings
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
+int config_audio_output(void);  // [Audio] Output as saved (AUDIO_OUT_*), atomic: the audio thread reopens the device
 // [Voice]: atomic, safe on the voice chat's audio threads (runtime/voice.c). Mic gain is MicVolume / 100; the other
 // hunters' voices are VoiceVolume / 100 x 2 (MHXX's boost), so 50 in the file is unity against the game's own sound.
 int config_voice_mode(void);        // VOICE_OFF, VOICE_ALWAYS or VOICE_PTT

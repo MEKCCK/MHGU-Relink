@@ -145,7 +145,7 @@ struct TouchIconTab {
 struct ActionTab {
     ActProfile draft, saved;
     int tab = 0;  // what the list and the drawing show: an index into tab_defs()
-    int dev = 0, weapon = 0, capture = -1, capture_row = -1, layout = ACT_LAYOUT_SIMPLE;  // layout: the one shown (a profile without a Layout key is Advanced once it has bindings: not while it is edited)
+    int dev = 0, weapon = 0, capture = -1, capture_row = -1, layout = ACT_LAYOUT_ADVANCED;  // layout: the one shown (a profile without a Layout key is Advanced)
      // (capture_row: a merged row of the Simple layout)
     bool capture_add = false;
     Uint64 capture_start = 0;
@@ -356,9 +356,11 @@ int mod_index(const std::string &name) {
     return -1;
 }
 bool dirty();
-bool save();
+// The tab that shows the build's version (MHGU_VERSION, the Makefile's VERSION) in the bottom right corner
+constexpr int VERSION_PAGE = APP_PAGE;
 struct GuideLayout {
     ImVec2 offset[4];
+    ImVec2 version;  // where the build's version goes (VERSION_PAGE only)
     float height = 0;
 };
 GuideLayout guide_layout(float width) {
@@ -373,6 +375,12 @@ GuideLayout guide_layout(float width) {
         }
         layout.offset[i] = ImVec2(x, y);
         x += item_width + f;
+    }
+    if (s.page == VERSION_PAGE) {  // (at the right; on a line of its own when it doesn't fit after the guides)
+        float version_width = ImGui::CalcTextSize(MHGU_VERSION).x;
+        if (x + version_width > width)
+            y += f + ImGui::GetStyle().ItemSpacing.y;
+        layout.version = ImVec2(width - version_width, y);
     }
     layout.height = y + f;
     return layout;
@@ -433,6 +441,8 @@ void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
         draw->AddText(ImVec2(pos.x + f * 1.4f, pos.y),
                       i == 3 && !dirty() ? theme().text_off : ImGui::GetColorU32(ImGuiCol_Text), tr(labels[i]));
     }
+    if (s.page == VERSION_PAGE)
+        draw->AddText(ImVec2(start.x + layout.version.x, start.y + layout.version.y), theme().text_dim, MHGU_VERSION);
 }
 bool confirmation() {
     return s.view == View::CloseChanges || s.view == View::Exit || s.view == View::Restart ||
@@ -501,6 +511,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
+    SAME(quest_hold_send);
     SAME(mouse_sensitivity);
     SAME(touch_controls);
     SAME(touch_hud);
@@ -520,6 +531,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(combo_window);
     SAME(volume);
     SAME(mute_in_background);
+    SAME(audio_output);
     SAME(voice_mode);
     SAME(mic_volume);
     SAME(voice_volume);
@@ -1451,8 +1463,10 @@ void action_rows(std::vector<Row> &r) {
     action(r, "act.reset", tr("Reset game actions"), []() {
         ActProfile &p = acts().draft;
         memset(p.dev, 0, sizeof p.dev);
+        p.layout = ACT_LAYOUT_AUTO;  // (the default layout too: Advanced)
+        acts().layout = act_layout(&p);
     });
-    r.back().help = tr("Every action of both devices and all weapons back to Default.");
+    r.back().help = tr("Every action of both devices and all weapons back to Default, and the Advanced layout.");
     action(r, "act.back", tr("Back"), []() { pop(); });
 }
 // ---- the drawing of the controller, or of the keyboard and the mouse, beside the list (runtime/binding_view.h)
@@ -1862,6 +1876,7 @@ void reset_section() {
         c.fxaa_mode = f.fxaa_mode;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
+        c.audio_output = f.audio_output;
         c.voice_mode = f.voice_mode;
         c.mic_volume = f.mic_volume;
         c.voice_volume = f.voice_volume;
@@ -1918,6 +1933,8 @@ void reset_section() {
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
+        c.quest_hold_send = f.quest_hold_send;
+        c.quest_hold_send = f.quest_hold_send;
         c.share_urgent = f.share_urgent;
         c.hp = f.hp;
         quest_keys();
@@ -2330,6 +2347,9 @@ std::vector<Row> main_rows() {
         add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
+                   [](int v) { c.audio_output = v; }, ini("Output"));
+        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
 #endif
         header(r, "voice.header", tr("Voice chat"));
         add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
@@ -2525,6 +2545,7 @@ std::vector<Row> main_rows() {
         add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
+        add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],

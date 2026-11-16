@@ -19,10 +19,13 @@
 #include "overlay.h"
 #include "mods.h"
 #include "perfstats.h"
+#include "kernel.h"
 #include "rt.h"
 #include "touch.h"
 #include "voice.h"
 #include "hle/input.h"
+
+void ldn_log_state(void);  // (net/net.h)
 
 static int launch_argc;
 static char **launch_argv;
@@ -373,6 +376,9 @@ static void set_window_icon(void) {}
 
 void ui_init(void) {
 #ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_POLL_SENTINEL, "0");
+#endif
+#ifdef __ANDROID__
     // Touches are not mouse clicks here (a click is X / A and the mouse turns the camera: host_input.c), and the
     // window is the screen, in landscape.
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -460,6 +466,9 @@ int ui_run(void) {
 #endif
             do {
                 if (e.type == SDL_EVENT_QUIT) {
+                    // A game that hung is closed this way: what its threads wait on, into the log for the report
+                    ldn_log_state();
+                    kernel_dump_threads("window closed", true);
                     if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); exit(0); }
                     overlay_request_close();
                     continue;

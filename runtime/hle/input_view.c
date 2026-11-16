@@ -87,6 +87,7 @@ static bool g_menus, g_pointer;
 static bool g_split;           // Dash and the weapon R-action are two inputs: the getter answers the virtual bit to weapon callers
 static bool g_kclog;           // MHGU_ACTION_KCLOG=1: log each return address the R-role getter is called from (once)
 static uint32_t g_kc_seen[256];
+static uint32_t g_kc_real = 0x40;  // the R-role getter's own answer (R 0x40, or ZR 0x800)
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
 static volatile uint64_t g_hunt_menu_ns;  // when that handler last ran (0: not in this hunt yet)
@@ -274,6 +275,12 @@ bool input_view_hunt_menu_open(void) {
     return seen && plat_now_ns() - seen > HUNT_MENU_STALE_NS;
 }
 void input_view_hunt_menu_reset(void) { g_hunt_menu_ns = 0; }
+// The menus' Cancel as they see it (game thread): while the layer has the menus it is MenuCancel, whatever that is bound
+// to; else the pad's own B
+bool input_view_menu_cancel(bool pad_b) {
+    if (!g_on || !g_menus) return pad_b;
+    return ((g_snap.hold[g_var] | g_snap.pulse[g_var]) >> ACT_MENU_CANCEL) & 1;
+}
 static void tr_mb2(Cpu *c) {
     if (g_on) {  // (once a frame: the menu word the town's actions give, for town_pad)
         g_town_mw_prev = g_town_mw;
@@ -302,7 +309,19 @@ static void kc_r(Cpu *c) {
             LOG("[actions] kcr caller %08x: %s (mask %x)\n", lr, kcr_weapon_caller(lr) ? "weapon R-action" : "dash / other", c->r[0]);
         }
     }
+    g_kc_real = c->r[0];
     if (g_on && g_split && kcr_weapon_caller(lr)) c->r[0] = ACT_VBIT_WEAPON_R;
+}
+
+// The two-button input window keeps the press as the real R-role bit; the virtual bit is truncated there.
+uint32_t input_view_window_press(uint32_t press) {
+    if (press & ACT_VBIT_WEAPON_R) press = (press & ~ACT_VBIT_WEAPON_R) | g_kc_real;
+    return press;
+}
+// The held word the R-role hold timer reads: with the weapon out, WeaponR is the real bit for the local hunter.
+uint32_t input_view_weapon_held(uint32_t pl, uint32_t held) {
+    if (!g_on || !g_split || !(LD8(pl + 0x13ccu) & 1) || !LD8(pl + 0x114cu)) return held;
+    return (held & ~(g_kc_real | ACT_VBIT_WEAPON_R)) | (held & ACT_VBIT_WEAPON_R ? g_kc_real : 0);
 }
 
 static void log_line(const char *line) { LOG("%s\n", line); }

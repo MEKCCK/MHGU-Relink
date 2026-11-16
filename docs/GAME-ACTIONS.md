@@ -82,7 +82,7 @@ translator hook ORs the **virtual bit 0x8000** into the gameplay word while `Wea
 `Dash` still delivers the real R / ZR), and a hook on `f_85f93c` answers 0x8000 to the weapon's callers and the real role
 bit to every other. The callers are told apart by return address (found with the PadRemap mod's getter log and confirmed
 here with `MHGU_ACTION_KCLOG=1`, which logs each one once): the 15 classes' code `0x1360000..0x13f0000` and the sites
-`0x47e7b0 0x4a7bb0 0x47d480 0x47d508 0x47d530 0x47d564 0x47cc58 0x47d2fc 0x47d3f8` of the input update; the dash tests
+`0x4a7bb0 0x47d480 0x47d508 0x47d530 0x47d564 0x47cc58 0x47d2fc 0x47d3f8` of the input update; the dash tests
 `0x47caa8 0x47cad0 0x47cb48 0x47cc24 0x47cd3c 0x47e7fc` and the two at `0x48d358 / 0x48d3f0` keep the real bit. A mod
 that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input (log line).
 
@@ -236,9 +236,8 @@ The screen shows the bindings of **one control scheme** at a time, named in its 
 (ManageMenus), **Layout** (Simple / Advanced), **Control scheme** (Controller / Keyboard). Both are kept in the ini:
 `[Actions] Scheme=Controller|Keyboard`, `Layout=Simple|Advanced`, written only once the player picked them. Without a
 `Scheme` the screen opens on the device a button was last pressed on (`host_input_last_device`: the controller if the menu
-was opened with Plus + Minus, the keyboard after F1). Without a `Layout` a fresh profile is Simple and one that already has
-bindings is Advanced (`act_layout`); the layout shown is fixed when the screen opens, and Save writes it, so binding
-something in Simple does not turn it into Advanced next time.
+was opened with Plus + Minus, the keyboard after F1). Without a `Layout` the screen is Advanced (`act_layout`), and Reset game
+actions puts it back to Advanced along with the bindings; picking Simple writes `Layout=Simple`, so it stays Simple.
 
 **Advanced** is the screen as it was: Attack A also interacts, Split Dash from weapon R-action, For (All weapons / one
 class: then only the hunt's actions), then every action by context (Hunt / Town and Hub / Menus) with what it reads now:
