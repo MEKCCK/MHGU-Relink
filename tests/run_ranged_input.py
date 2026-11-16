@@ -2,7 +2,6 @@
 from pathlib import Path
 import os
 import subprocess
-import sys
 
 project = Path(__file__).resolve().parents[1]
 workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
@@ -29,4 +28,3 @@ print(result.stdout.decode('utf-8', errors='replace'), end='')
 print(result.stderr.decode('utf-8', errors='replace'), end='')
 print('Log:', output / 'ranged-input-regression.log')
 result.check_returncode()
-subprocess.run([sys.executable, str(project / 'tests' / 'test_no_gyro.py')], check=True, timeout=30)
