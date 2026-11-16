@@ -26,7 +26,8 @@ elif [ -x "$CMAKE.exe" ] && [ -x "$NINJA.exe" ]; then
 else
   CMAKE=cmake; NINJA=ninja
 fi
-OUT="$HERE/build/$ABI"
+# Keep the CMake compiler cache paired with the NDK whose libc++ is packaged.
+OUT="$HERE/build/$ABI-$(basename "$NDK")"
 mkdir -p "$OUT"
 m() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf %s "$1"; fi; }
 

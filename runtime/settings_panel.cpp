@@ -501,10 +501,6 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
-    SAME(motion_mode);
-    SAME(motion_gain);
-    SAME(motion_flip_x);
-    SAME(motion_flip_y);
     SAME(mouse_sensitivity);
     SAME(touch_controls);
     SAME(touch_hud);
@@ -1879,10 +1875,6 @@ void reset_section() {
         c.kbm_prompts = f.kbm_prompts;
         c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
-        c.motion_mode = f.motion_mode;
-        c.motion_gain = f.motion_gain;
-        c.motion_flip_x = f.motion_flip_x;
-        c.motion_flip_y = f.motion_flip_y;
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.mouse_sensitivity_y = f.mouse_sensitivity_y;
         c.mouse_invert_y = f.mouse_invert_y;
@@ -2455,11 +2447,6 @@ std::vector<Row> main_rows() {
         add_bool(r, "lock.persistent", "Persistent lock-on", &c.persistent_lock_on, ini("PersistentLockOn"));
         r.back().enabled = c.lock_on != 0;
         r.back().help = tr("Keeps an enabled lock until you turn it off. While aiming a bow or bowgun, the reticle continuously follows the selected monster's body. Tap the target icon to switch monsters; hold it for half a second or click the right stick to unlock. Opening the scope remains manual. Requires Lock-on. Default: Off.");
-        add_choice(r, "motion.mode", "Motion controls", c.motion_mode != MOTION_OFF, {tr("Off"), tr("While aiming")},
-                   [](int v) { c.motion_mode = v; }, ini("Motion"));
-        number(r, "motion.gain", tr("Motion sensitivity"), &c.motion_gain, lo("MotionGain"), hi("MotionGain"), .05f, ini("MotionGain"));
-        add_bool(r, "motion.x", "Invert motion horizontal", &c.motion_flip_x, ini("MotionInvertX"));
-        add_bool(r, "motion.y", "Invert motion vertical", &c.motion_flip_y, ini("MotionInvertY"));
         action(r, "touch.buttons", tr("Buttons on the screen"), []() { push(View::TouchButtons, "tb.0"); });
         r.back().help = tr("Choose visible buttons and six combinations. Item and ammo arrows never turn the camera when dragged. Independent ammo arrows are available only during quests with a bow or bowgun; move and resize them in the layout editor.");
         number(r, "touch.camera", tr("Touch camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));

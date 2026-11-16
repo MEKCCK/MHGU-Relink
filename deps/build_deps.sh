@@ -16,6 +16,9 @@ m() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf %
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC="$HERE/src"
 OUT="$HERE/out/$ABI"
+NDK_TAG=$(basename "$NDK")
+SHADERC_BUILD="$OUT/shaderc/build-$NDK_TAG"
+SHADERC_SRC="$SRC/shaderc-2026.4"
 mkdir -p "$OUT"
 TC="$(m "$NDK/build/cmake/android.toolchain.cmake")"
 COMMON=(-G Ninja -DCMAKE_MAKE_PROGRAM="$(m "$NINJA")" -DCMAKE_TOOLCHAIN_FILE="$TC" -DANDROID_ABI=$ABI
@@ -32,17 +35,20 @@ if [[ $what == all || $what == sdl ]] && [ ! -f "$OUT/sdl3/.built" ]; then
   touch "$OUT/sdl3/.built"
 fi
 
-if [[ $what == all || $what == shaderc ]] && [ ! -f "$OUT/shaderc/.built" ]; then
+if [[ $what == all || $what == shaderc ]] && [ ! -f "$OUT/shaderc/.built-$NDK_TAG" ]; then
   echo "== shaderc"
-  "$CMAKE" -S "$(m "$SRC/shaderc")" -B "$(m "$OUT/shaderc/build")" "${COMMON[@]}" \
+  "$CMAKE" -S "$(m "$SHADERC_SRC")" -B "$(m "$SHADERC_BUILD")" "${COMMON[@]}" \
     -DANDROID_STL=c++_static -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
+    -DSHADERC_SPIRV_TOOLS_DIR="$(m "$SRC/SPIRV-Tools-vulkan-sdk-1.4.363.0")" \
+    -DSHADERC_SPIRV_HEADERS_DIR="$(m "$SRC/SPIRV-Headers-vulkan-sdk-1.4.363.0")" \
+    -DSHADERC_GLSLANG_DIR="$(m "$SRC/glslang-16.6.0")" \
     -DSPIRV_SKIP_EXECUTABLES=ON -DSPIRV_SKIP_TESTS=ON -DSPIRV_WERROR=OFF -DSPIRV_TOOLS_BUILD_STATIC=ON \
     -DENABLE_GLSLANG_BINARIES=OFF -DGLSLANG_TESTS=OFF > "$OUT/shaderc.configure.log" 2>&1 || { tail -30 "$OUT/shaderc.configure.log"; exit 1; }
-  "$CMAKE" --build "$(m "$OUT/shaderc/build")" --target shaderc_combined --parallel 12 > "$OUT/shaderc.build.log" 2>&1 || { tail -30 "$OUT/shaderc.build.log"; exit 1; }
+  "$CMAKE" --build "$(m "$SHADERC_BUILD")" --target shaderc_combined --parallel 12 > "$OUT/shaderc.build.log" 2>&1 || { tail -30 "$OUT/shaderc.build.log"; exit 1; }
   mkdir -p "$OUT/shaderc/lib" "$OUT/shaderc/include"
-  cp "$OUT/shaderc/build/libshaderc/libshaderc_combined.a" "$OUT/shaderc/lib/"
-  cp -r "$SRC/shaderc/libshaderc/include/shaderc" "$OUT/shaderc/include/"
-  touch "$OUT/shaderc/.built"
+  cp "$SHADERC_BUILD/libshaderc/libshaderc_combined.a" "$OUT/shaderc/lib/"
+  cp -r "$SHADERC_SRC/libshaderc/include/shaderc" "$OUT/shaderc/include/"
+  touch "$OUT/shaderc/.built-$NDK_TAG"
 fi
 
 # Opus (voz del chat): estático y PIC, sin tests/programas/documentación (el CMake de Opus no tiene target de docs).

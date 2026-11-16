@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 // SDL and the C++ library keep their host ABI; only overlay.cpp uses its phone UI.
@@ -17,6 +18,10 @@ static int settings_cancel_events;
 static ImRect close_rect;
 static ImRect plugin_header_rect;
 static bool close_seen;
+static ImRect checkbox_rect, plus_rect, minus_rect, slider_rect;
+static bool monster_hp = true;
+static float pos_x = 1620, aim_scale = .5f;
+static int test_language;
 
 void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID, const ImRect &, const ImGuiLastItemData *) {}
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext *ctx, ImGuiID, const char *label, ImGuiItemStatusFlags) {
@@ -25,6 +30,10 @@ void ImGuiTestEngineHook_ItemInfo(ImGuiContext *ctx, ImGuiID, const char *label,
         close_seen = true;
     }
     if (!strcmp(label, "Plugin UI")) plugin_header_rect = ctx->LastItemData.Rect;
+    if (!strcmp(label, "Show monster HP")) checkbox_rect = ctx->LastItemData.Rect;
+    if (!strcmp(label, "+")) plus_rect = ctx->LastItemData.Rect;
+    if (!strcmp(label, "-")) minus_rect = ctx->LastItemData.Rect;
+    if (!strcmp(label, "Scale")) slider_rect = ctx->LastItemData.Rect;
 }
 void ImGuiTestEngineHook_Log(ImGuiContext *, const char *, ...) {}
 const char *ImGuiTestEngine_FindItemDebugLabel(ImGuiContext *, ImGuiID) { return nullptr; }
@@ -44,8 +53,18 @@ bool forge_plugins_have(int) { return false; }
 int forge_plugin_titles(const char **, int) { return 0; }
 void forge_imgui_init(void *) {}
 void forge_imgui_run(void *, int which) {
-    if (which == FORGE_IMGUI_RENDER)
+    if (which == FORGE_IMGUI_RENDER) {
+        assert(ImGui::GetFontSize() + 1 >= 22 * g_scale);
+        ImGui::Checkbox("Show monster HP", &monster_hp);
+        ImGui::InputFloat("Pos X", &pos_x, 1, 10);
+        ImGui::SliderFloat("Scale", &aim_scale, 0, 1);
         for (int row = 0; row < 80; ++row) ImGui::Text("Plugin option %d", row);
+    } else if (which == FORGE_IMGUI_FREE_RENDER) {
+        ImGuiStyle expected = g_base_style; expected.ScaleAllSizes(g_scale);
+        assert(fabsf(ImGui::GetFontSize() - 12 * g_scale) <= 1);
+        assert(ImGui::GetStyle().FramePadding.y == expected.FramePadding.y);
+        assert(ImGui::GetStyle().ScrollbarSize == expected.ScrollbarSize);
+    }
 }
 bool chat_composing(char *, size_t) { return false; }
 void chat_position(float *, float *) {}
@@ -59,7 +78,7 @@ bool perfstats_visible(void) { return false; }
 void perfstats_draw(float, float) {}
 bool touch_drawn(void) { return false; }
 void touch_draw(float, float) {}
-int config_language(void) { return 0; }
+int config_language(void) { return test_language; }
 int config_live_menu_confirm(void) { return MENU_CONFIRM_ORIGINAL; }
 int act_menu_confirm_policy(void) { return -1; }
 int config_show_battery(void) { return BATTERY_OFF; }
@@ -121,6 +140,101 @@ static void tap(const ImVec2 &p) {
     e.type = SDL_EVENT_MOUSE_BUTTON_UP;
     assert(overlay_event(&e)); frame();
 }
+static void finger(Uint32 type, const ImVec2 &p, bool touch = true) {
+    SDL_Event e = {}; e.type = type;
+    if (type == SDL_EVENT_MOUSE_MOTION) {
+        e.motion.which = touch ? SDL_TOUCH_MOUSEID : 1; e.motion.timestamp = test_ticks;
+        e.motion.x = p.x; e.motion.y = p.y;
+    } else {
+        e.button.which = touch ? SDL_TOUCH_MOUSEID : 1; e.button.timestamp = test_ticks;
+        e.button.button = SDL_BUTTON_LEFT; e.button.x = p.x; e.button.y = p.y;
+    }
+    assert(overlay_event(&e)); frame();
+}
+static ImGuiWindow *contents() {
+    ImGuiWindow *root = ImGui::FindWindowByName("forge"); assert(root);
+    for (ImGuiWindow *child : root->DC.ChildWindows)
+        if (child->ChildId == root->GetID("##forge_contents")) return child;
+    assert(false); return nullptr;
+}
+static void preview(const char *filename) {
+    SDL_Surface *surface = SDL_CreateSurface(g_disp_w, g_disp_h, SDL_PIXELFORMAT_RGBA32); assert(surface);
+    SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(surface); assert(renderer);
+    ImDrawData *data = ImGui::GetDrawData(); assert(data && data->TotalVtxCount > 0);
+    std::vector<ImTextureData *> textures;
+    if (data->Textures) for (ImTextureData *tex : *data->Textures) {
+        if (tex->Status == ImTextureStatus_WantCreate) {
+            assert(tex->Format == ImTextureFormat_RGBA32);
+            SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tex->Width, tex->Height); assert(texture);
+            assert(SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND)); assert(SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR));
+            assert(SDL_UpdateTexture(texture, nullptr, tex->GetPixels(), tex->GetPitch()));
+            tex->SetTexID((ImTextureID)(uintptr_t)texture); tex->SetStatus(ImTextureStatus_OK); textures.push_back(tex);
+        }
+    }
+    assert(SDL_SetRenderDrawColor(renderer, 29, 43, 56, 255)); assert(SDL_RenderClear(renderer));
+    for (const ImDrawList *list : data->CmdLists) {
+        std::vector<SDL_Vertex> vertices;
+        for (const ImDrawVert &v : list->VtxBuffer) vertices.push_back({{v.pos.x, v.pos.y},
+            {((v.col >> IM_COL32_R_SHIFT) & 255) / 255.f, ((v.col >> IM_COL32_G_SHIFT) & 255) / 255.f,
+             ((v.col >> IM_COL32_B_SHIFT) & 255) / 255.f, ((v.col >> IM_COL32_A_SHIFT) & 255) / 255.f}, {v.uv.x, v.uv.y}});
+        for (const ImDrawCmd &cmd : list->CmdBuffer) {
+            assert(!cmd.UserCallback); SDL_Rect clip{(int)cmd.ClipRect.x, (int)cmd.ClipRect.y,
+                (int)(cmd.ClipRect.z - cmd.ClipRect.x), (int)(cmd.ClipRect.w - cmd.ClipRect.y)};
+            assert(SDL_SetRenderClipRect(renderer, &clip)); std::vector<int> indices(cmd.ElemCount);
+            for (unsigned i = 0; i < cmd.ElemCount; ++i) indices[i] = list->IdxBuffer[cmd.IdxOffset + i] + cmd.VtxOffset;
+            assert(SDL_RenderGeometry(renderer, (SDL_Texture *)(uintptr_t)cmd.GetTexID(), vertices.data(), (int)vertices.size(), indices.data(), (int)indices.size()));
+        }
+    }
+    assert(SDL_FlushRenderer(renderer)); assert(SDL_SavePNG(surface, filename));
+    for (ImTextureData *tex : textures) { SDL_DestroyTexture((SDL_Texture *)(uintptr_t)tex->TexID); tex->SetTexID(ImTextureID_Invalid); tex->SetStatus(ImTextureStatus_Destroyed); }
+    SDL_DestroyRenderer(renderer); SDL_DestroySurface(surface);
+    printf("HOST PREVIEW: %s (real ImGui / SDL software rendering, no game or Android device)\n", filename);
+}
+static void phone_layout() {
+    for (const ImVec2 size : {ImVec2(640, 360), ImVec2(1280, 720), ImVec2(2520, 1080), ImVec2(3168, 1440), ImVec2(720, 1280)}) {
+        g_disp_w = (uint32_t)size.x; g_disp_h = (uint32_t)size.y; frame(); frame();
+        ImGuiWindow *root = ImGui::FindWindowByName("forge");
+        assert(root->Pos.x >= 0 && root->Pos.y >= 0);
+        assert(root->Pos.x + root->Size.x <= size.x && root->Pos.y + root->Size.y <= size.y);
+        assert(root->Size.y >= .9f * size.y && root->Size.x >= std::min(.9f * size.x, 1280 * g_scale));
+        assert(!root->Collapsed && (root->Flags & ImGuiWindowFlags_NoSavedSettings));
+        assert(close_rect.GetHeight() + 1 >= 48 * g_scale && plugin_header_rect.GetHeight() + 1 >= 48 * g_scale);
+        assert(close_rect.Min.y >= 0 && close_rect.Max.y <= size.y);
+        ImGuiWindow *content = contents();
+        ImGui::SetScrollY(content, std::max(0.f, checkbox_rect.Min.y - content->InnerRect.Min.y + content->Scroll.y)); frame(); frame();
+        assert(checkbox_rect.GetHeight() + 1 >= 48 * g_scale);
+        bool previous = monster_hp; tap(checkbox_rect.GetCenter()); assert(monster_hp != previous);
+        ImGui::SetScrollY(content, std::max(0.f, plus_rect.Min.y - content->InnerRect.Min.y + content->Scroll.y)); frame(); frame();
+        assert(plus_rect.GetHeight() + 1 >= 48 * g_scale && minus_rect.GetWidth() + 1 >= 48 * g_scale);
+        float value = pos_x; tap(plus_rect.GetCenter()); assert(pos_x == value + 1);
+        tap(minus_rect.GetCenter()); assert(pos_x == value);
+        ImGui::SetScrollY(content, 0); frame(); frame();
+        char filename[120]; snprintf(filename, sizeof filename, "forge-phone-%dx%d.png", (int)size.x, (int)size.y); preview(filename);
+    }
+    puts("PASS: Forge fits five viewport sizes including 3168x1440; fonts, headers, checkbox and numeric +/- are finger sized and interactive; free-render font/style is restored");
+    g_disp_w = 1280; g_disp_h = 720; frame(); frame();
+    ImGuiWindow *content = contents();
+    ImGui::SetScrollY(content, std::max(0.f, checkbox_rect.Min.y - content->InnerRect.Min.y + content->Scroll.y)); frame(); frame();
+    ImVec2 from = checkbox_rect.GetCenter(), to(from.x, from.y - 120);
+    bool previous = monster_hp; float before = content->Scroll.y; ImVec2 pinned = close_rect.Min;
+    finger(SDL_EVENT_MOUSE_MOTION, from); finger(SDL_EVENT_MOUSE_BUTTON_DOWN, from);
+    finger(SDL_EVENT_MOUSE_MOTION, to); frame();
+    assert(content->Scroll.y > before && monster_hp == previous);
+    finger(SDL_EVENT_MOUSE_BUTTON_UP, to); assert(monster_hp == previous);
+    assert(close_rect.Min.x == pinned.x && close_rect.Min.y == pinned.y);
+    ImGui::SetScrollY(content, std::max(0.f, slider_rect.Min.y - content->InnerRect.Min.y + content->Scroll.y)); frame(); frame();
+    from = ImVec2(slider_rect.Min.x + slider_rect.GetWidth() * .2f, slider_rect.GetCenter().y); to = ImVec2(from.x + 100, from.y);
+    before = content->Scroll.y;
+    finger(SDL_EVENT_MOUSE_MOTION, from); finger(SDL_EVENT_MOUSE_BUTTON_DOWN, from); float old_scale = aim_scale;
+    finger(SDL_EVENT_MOUSE_MOTION, to); finger(SDL_EVENT_MOUSE_BUTTON_UP, to);
+    assert(aim_scale != old_scale && content->Scroll.y == before); assert(!g_forge_drag.pressed);
+    puts("PASS: vertical finger swipe scrolls without toggling the starting checkbox; close stays pinned and horizontal native slider input remains usable");
+    ImGui::LoadIniSettingsFromMemory("[Window][forge]\nPos=-300,-400\nSize=200,100\nCollapsed=1\n"); frame(); frame();
+    ImGuiWindow *root = ImGui::FindWindowByName("forge");
+    assert(root->Pos.x >= 0 && root->Pos.y >= 0 && root->Size.y >= 648 && !root->Collapsed);
+    test_language = 2; frame(); frame(); preview("forge-phone-zh-1280x720.png"); test_language = 0;
+    puts("PASS: legacy small/offscreen/collapsed ini cannot undo phone adaptation; viewport changes and Chinese close control remain usable");
+}
 static void open_from_settings() {
     if (!g_settings_open) overlay_toggle_settings();
     want_forge = true; frame(); frame();
@@ -134,12 +248,17 @@ static void expect_settings_restored() {
 }
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    assert(SDL_Init(SDL_INIT_VIDEO));
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-    io.Fonts->AddFontDefaultVector(); io.Fonts->Build(); io.Fonts->SetTexID(1);
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+    const char *font_path = getenv("MHGU_FORGE_TEST_FONT");
+    if (font_path) { io.FontDefault = io.Fonts->AddFontFromFileTTF(font_path, 12); assert(io.FontDefault); }
+    else io.Fonts->AddFontDefaultVector();
     forge_style(g_base_style); g_base_style.FontSizeBase = 12; g_scale = 0;
     ImGui::GetCurrentContext()->TestEngineHookItems = true;
     g_enabled = g_ready = true; g_menu_key = SDL_SCANCODE_INSERT;
@@ -165,6 +284,7 @@ int main() {
     ImGui::SetScrollY(content, 100); frame();
     assert(content->Scroll.y >= 100);
     assert(close_seen && close_rect.Min.x == button_position.x && close_rect.Min.y == button_position.y);
+    phone_layout();
     tap(close_rect.GetCenter()); expect_settings_restored();
     // The host content child must not prevent Escape from cancelling Forge.
     open_from_settings();

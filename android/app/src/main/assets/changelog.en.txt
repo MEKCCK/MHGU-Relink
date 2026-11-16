@@ -1,4 +1,16 @@
-MHGU Relink 0.2.2 · 2026-11-13
+MHGU Relink 0.2.3 · 2026-11-15
+
+2026-11-15: Restore the fixed map
+Restore map rendering from before map dragging was added. Remove the map edit box, manual displacement, special clipping and subsequent display changes. Old map offsets remain in layout files for compatibility but no longer affect the picture. Keep other HUD editing, the toolbar and all 40 templates.
+
+2026-11-15: Layout editor toolbar
+Show draggable item, Hunter Arts and lock-on edit boxes both inside and outside quests. Enlarge the size, Defaults, Cancel and Save buttons; drag the toolbar header to move it. Each template saves its own toolbar position, with support for older layouts and all 40 existing template slots.
+
+2026-11-15: Restore v0.1.6 Hunter Art taps
+Restore gu-native v0.1.6 group-relative placement, visible-row hit testing and 120 ms direction pulses on release. Missing, expired or conflicting icon metadata no longer disables taps; slot corrections apply only when every visible row has a reliable, distinct identity. No later upstream code is used. Keep the first-entry and independent HUD cache fixes.
+
+2026-11-15: Remove gyroscope controls
+Remove phone and controller gyro aiming, sensor sampling and related settings. Legacy motion settings no longer apply. Touch swipes, virtual buttons, sticks and direct menu taps remain available.
 
 r14: Drag the bow charge button to set direction
 While charging the bow, hold Fire and drag left, right, up or down to change the native yellow direction guide's horizontal and vertical angles and the actual direction of this arrow. This does not open the scope automatically. Without a drag, existing lock-on behavior is retained; after a drag, your manual direction takes priority for this charge and arrow so lock-on does not immediately pull it back.

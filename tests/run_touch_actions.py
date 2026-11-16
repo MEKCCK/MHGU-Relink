@@ -31,12 +31,13 @@ call_end = host.index('\n    input_set(', call_start)
     '    int lx = 0, ly = 0, rx = 0, ry = 0;\n' + host[touch_start:touch_end] +
     '    b &= allowed;\n' + host[call_start:call_end] + '\n    host_buttons = b;\n}\n', encoding='utf-8')
 
-compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
 sdl = deps / 'SDL3-3.4.18'
 common = [str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=gnu11',
           '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE', '-DW_OK=2',
           '-Dstrtok_r=strtok_s', '-Wno-deprecated-declarations',
-          '-I' + str(deps), '-I' + str(output), '-I' + str(project / 'runtime'), '-I' + str(sdl / 'include')]
+          '-I' + str(project / 'tests/host_compat'), '-I' + str(deps), '-I' + str(output),
+          '-I' + str(project / 'runtime'), '-I' + str(sdl / 'include')]
 sources = [str(project / 'runtime' / name) for name in ('actions.c', 'config.c', 'config_store.c')]
 shutil.copy2(sdl / 'lib/x64/SDL3.dll', output / 'SDL3.dll')
 for name in ('test_touch_actions', 'test_actions'):

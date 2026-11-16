@@ -58,7 +58,7 @@ report = dict(passed=False, exit_code=1, source_root=str(project), source_sha256
             'The C pthread calls are adapted to real SDL mutexes on Windows; this is a host synchronization test.'])
 try:
     sdk = required_path('ANDROID_HOME', 'ANDROID_SDK_ROOT')
-    ndk = required_path('ANDROID_NDK_HOME')
+    ndk = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973')))
     java = required_path('JAVA_HOME') / 'bin'
     android_jar = sdk / 'platforms/android-35/android.jar'
     source = (project / 'runtime/ui.c').read_text(encoding='utf-8')

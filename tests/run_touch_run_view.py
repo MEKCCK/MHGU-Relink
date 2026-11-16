@@ -140,7 +140,7 @@ try:
         key, sep, value = line.partition('=')
         if sep and key:
             env[key] = value
-    ndk = required_path('ANDROID_NDK_HOME')
+    ndk = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973')))
     compiler = ndk / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
     sdl = deps / 'SDL3-3.4.18'
     shutil.copy2(sdl / 'lib/x64/SDL3.dll', output / 'SDL3.dll')
@@ -148,7 +148,8 @@ try:
     command = [str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=gnu11',
                '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE', '-DW_OK=2',
                '-Dstrtok_r=strtok_s', '-Wno-deprecated-declarations', '-Wall', '-Wextra',
-               '-I' + str(deps), '-I' + str(output), '-I' + str(project / 'runtime'), '-I' + str(sdl / 'include'),
+               '-I' + str(project / 'tests/host_compat'), '-I' + str(deps), '-I' + str(output),
+               '-I' + str(project / 'runtime'), '-I' + str(sdl / 'include'),
                str(project / 'tests/test_touch_run_view.c')]
     command += [str(project / 'runtime' / name) for name in ('actions.c', 'config.c', 'config_store.c')]
     command += [str(sdl / 'lib/x64/SDL3.lib'), '-o', str(exe)]

@@ -25,16 +25,12 @@
 #include <time.h>
 
 #include <SDL3/SDL.h>
-#ifdef __ANDROID__
-#include <jni.h>
-#endif
 
 #include "actions.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "forge.h"
 #include "haptics.h"
-#include "gyro.h"
 #include "hle/chat.h"
 #include "hle/input.h"
 #include "hle/input_view.h"
@@ -857,6 +853,26 @@ static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx,
     *sy = m[2] * ph / 720.0f, *top = ((float)wh - ph) / 2 + m[3] * ph / 720.0f;
     return true;
 }
+bool host_input_menu_point(float u, float v, float *x, float *y) {
+    if (!x || !y || !isfinite(u) || !isfinite(v) || u < 0 || u >= 1 || v < 0 || v >= 1) return false;
+    SDL_Window *w = ui_window();
+    int ww = 0, wh = 0;
+    if (!w || !SDL_GetWindowSize(w, &ww, &wh) || ww <= 0 || wh <= 0) return false;
+    float asp = g_render_aspect > 0 ? g_render_aspect : 16.0f / 9.0f;
+    if (!isfinite(asp)) return false;
+    float pw = (float)ww, ph = (float)wh;
+    if (pw / ph > asp) pw = ph * asp;
+    else ph = pw / asp;
+    float mx = u * ww, my = v * wh;
+    if (mx < (ww-pw)*.5f || mx >= (ww+pw)*.5f || my < (wh-ph)*.5f || my >= (wh+ph)*.5f) return false;
+    float left, top, sx, sy;
+    if (!menu_ptr_geometry(w, &left, &top, &sx, &sy) || !isfinite(left) || !isfinite(top) ||
+        !isfinite(sx) || !isfinite(sy) || sx <= 0 || sy <= 0) return false;
+    float gx = (mx-left)/sx, gy = (my-top)/sy;
+    if (!isfinite(gx) || !isfinite(gy)) return false;
+    *x = gx, *y = gy;
+    return true;
+}
 static float menu_ptr_gx = -1, menu_ptr_gy = -1;  // (the last point looked at, in the layout)
 static int menu_ptr_hit(float mx, float my) {
     float left, top, sx, sy;
@@ -916,7 +932,6 @@ static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the 
 }
 
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
-static void motion_sample(SDL_JoystickID source, SDL_SensorType sensor, uint64_t sample_ns, float horizontal, float vertical);
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
     else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
@@ -1028,14 +1043,6 @@ void host_input_event(const SDL_Event *e) {
         if (i >= 0) pads[i].real |= padmap_custom(e->gdevice.which);
         break;
     }
-    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
-        // SDL reports controller gyro rates in controller axes: Y is yaw and X is pitch.
-        if (e->gsensor.sensor == SDL_SENSOR_GYRO || e->gsensor.sensor == SDL_SENSOR_GYRO_L ||
-            e->gsensor.sensor == SDL_SENSOR_GYRO_R)
-            motion_sample(e->gsensor.which, (SDL_SensorType)e->gsensor.sensor,
-                          e->gsensor.sensor_timestamp ? e->gsensor.sensor_timestamp : e->gsensor.timestamp,
-                          -e->gsensor.data[1], e->gsensor.data[0]);
-        break;
     }
 }
 
@@ -1138,76 +1145,6 @@ static void mouse_update(int *rx, int *ry) {
     if (m < 0.02f) return;
     float t = (MOUSE_DEADZONE + (1.0f - MOUSE_DEADZONE) * (m > 1.0f ? 1.0f : m)) / m;
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
-}
-
-// Only the selected controller's gyro is read; without one, the phone is used. Samples carry their own time,
-// so a fast host loop cannot replay the last angular rate and a source switch cannot inherit another sensor's turn.
-static SDL_SpinLock motion_lock;
-static GyroTurn motion_turn;
-static SDL_JoystickID motion_source;  // 0: phone; otherwise the selected controller's instance id
-static SDL_SensorType motion_sensor = SDL_SENSOR_INVALID;
-static bool motion_active;
-static SDL_AtomicInt motion_phone_requested;
-
-bool host_input_motion_phone_requested(void) { return SDL_GetAtomicInt(&motion_phone_requested) != 0; }
-
-static void motion_sample(SDL_JoystickID source, SDL_SensorType sensor, uint64_t sample_ns, float horizontal, float vertical) {
-    SDL_LockSpinlock(&motion_lock);
-    if (motion_active && source == motion_source && sensor == motion_sensor)
-        gyro_sample(&motion_turn, sample_ns, horizontal, vertical);
-    SDL_UnlockSpinlock(&motion_lock);
-}
-
-#ifdef __ANDROID__
-// MotionSensor.java sends sensor timestamps, independent of the host event loop's update rate.
-JNIEXPORT void JNICALL Java_com_mhgu_relink_MotionSensor_sample(JNIEnv *env, jclass cls, jfloat horizontal, jfloat vertical, jlong sample_ns) {
-    (void)env, (void)cls;
-    motion_sample(0, SDL_SENSOR_GYRO, (uint64_t)sample_ns, horizontal, vertical);
-}
-#endif
-
-// Sensors are enabled only during ranged aim. Old Motion=Always files use the same aiming gate.
-static bool motion_update(void) {
-    SDL_Window *window = ui_window();
-    bool active = config_motion_mode() != MOTION_OFF && weapon_aiming(weapon_hunter()) &&
-                  !overlay_menu_open() && !chat_active() && !textinput_active() && window &&
-                  (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS);
-    const SDL_SensorType sensors[] = {SDL_SENSOR_GYRO, SDL_SENSOR_GYRO_R, SDL_SENSOR_GYRO_L};
-    SDL_SensorType selected = SDL_SENSOR_INVALID;
-    if (active && pad)
-        for (unsigned k = 0; k < sizeof sensors / sizeof *sensors; k++)
-            if (SDL_GamepadHasSensor(pad, sensors[k])) { selected = sensors[k]; break; }
-    for (int i = 0; i < npads; i++)
-        for (unsigned k = 0; k < sizeof sensors / sizeof *sensors; k++) {
-            SDL_Gamepad *p = pads[i].pad;
-            bool want = active && p == pad && sensors[k] == selected;
-            if (SDL_GamepadHasSensor(p, sensors[k]) && SDL_GamepadSensorEnabled(p, sensors[k]) != want)
-                SDL_SetGamepadSensorEnabled(p, sensors[k], want);
-        }
-    if (selected != SDL_SENSOR_INVALID && !SDL_GamepadSensorEnabled(pad, selected)) selected = SDL_SENSOR_INVALID;
-    SDL_JoystickID source = selected == SDL_SENSOR_INVALID ? 0 : SDL_GetGamepadID(pad);
-    SDL_SensorType sensor = selected == SDL_SENSOR_INVALID ? SDL_SENSOR_GYRO : selected;
-    SDL_SetAtomicInt(&motion_phone_requested, active && !source);
-    float yaw, pitch;
-    SDL_LockSpinlock(&motion_lock);
-    bool changed = active != motion_active || source != motion_source || sensor != motion_sensor;
-    if (changed) {
-        motion_turn = (GyroTurn){0};
-        motion_active = active, motion_source = source, motion_sensor = sensor;
-    }
-    yaw = motion_turn.yaw, pitch = motion_turn.pitch;
-    motion_turn.yaw = motion_turn.pitch = 0;
-    SDL_UnlockSpinlock(&motion_lock);
-    if (changed) mousecam_motion_reset();
-    if (!active) {
-        mousecam_motion_reset();
-        return false;
-    }
-    if (config_motion_flip_x()) yaw = -yaw;
-    if (config_motion_flip_y()) pitch = -pitch;
-    if (yaw == 0.0f && pitch == 0.0f) return false;
-    mousecam_motion_add(yaw, pitch);
-    return true;
 }
 
 // The game's rumble (input_rumble) to the controller. It starts and stops at once; in between a new strength goes out
@@ -1415,8 +1352,7 @@ void host_input_update(void) {
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
     uint64_t touch_b = touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
     if (tdx != 0 || tdy != 0) mouse_dx += tdx, mouse_dy += tdy, touch_cam_ns = plat_now_ns();
-    bool motion_moved = motion_update();  // (the phone's turn, added to the hunt camera: hle/mousecam.c)
-    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0 || motion_moved;  // (the mouse, a finger or the phone turning the camera: the lock-on waits)
+    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0;  // (the mouse or a finger turning the camera: the lock-on waits)
     mouse_update(&rx, &ry);
 
     if (pad) {

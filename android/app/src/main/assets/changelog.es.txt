@@ -1,4 +1,16 @@
-MHGU Relink 0.2.2 · 2026-11-13
+MHGU Relink 0.2.3 · 2026-11-15
+
+2026-11-15: Restaurar el mapa fijo
+Se restaura el dibujado anterior a la función de arrastrar el mapa. Se retiran su recuadro de edición, desplazamiento manual, recorte especial y ajustes posteriores de visualización. Los desplazamientos antiguos se conservan en los archivos por compatibilidad, pero ya no afectan a la imagen. Se mantienen la edición de otros elementos del HUD, la barra y las 40 plantillas.
+
+2026-11-15: Barra del editor de diseño
+El editor muestra recuadros móviles de objetos, Artes de caza y fijación de objetivo dentro y fuera de las misiones. Se amplían los botones de tamaño, valores predeterminados, cancelar y guardar; la barra se mueve arrastrando su cabecera. Cada plantilla guarda su propia posición de la barra, conservando los diseños antiguos y las 40 ranuras existentes.
+
+2026-11-15: Restaurar los toques de Artes de caza de v0.1.6
+Se recuperan la posición relativa del grupo, la detección por fila visible y los pulsos direccionales de 120 ms al soltar de gu-native v0.1.6. Los iconos ausentes, caducados o contradictorios ya no desactivan los toques; solo se corrigen las ranuras si todas las filas tienen identidades fiables y distintas. No se usa código posterior de ese repositorio. Se conservan las correcciones de entrada a la misión y de caché independiente del HUD.
+
+2026-11-15: Retirar el control por giroscopio
+Se eliminan la puntería por giroscopio del teléfono y del mando, la lectura del sensor y sus ajustes. Los ajustes antiguos de movimiento dejan de aplicarse. Se conservan los deslizamientos táctiles, los botones virtuales, los sticks y los toques directos en los menús.
 
 r14: Arrastrar el botón de carga del arco para orientar el disparo
 Mientras cargas el arco, mantén Disparo y arrastra a izquierda, derecha, arriba o abajo para cambiar los ángulos horizontal y vertical de la guía amarilla nativa y la dirección real de esta flecha. No abre la mira automáticamente. Sin arrastrar se conserva la fijación existente; después de arrastrar, la dirección manual tiene prioridad durante esta carga y para esta flecha, evitando que la fijación la desvíe de inmediato.

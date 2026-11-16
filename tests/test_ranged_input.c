@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "../runtime/hle.h"
-#include "../runtime/gyro.h"
 
 static unsigned char image[0x2400000], heap[0x40000];
 static void *test_guest(uint32_t address) {
@@ -27,6 +26,8 @@ static int pthread_mutex_unlock(pthread_mutex_t *lock) { (void)lock; return 0; }
 
 static uint64_t clock_ns = 1000000000ull, buttons;
 static int32_t stick_state[4];
+static bool virtual_right_stick;
+static int camera_original_calls;
 static bool locked = true, persistent, native_aim = true;
 static float aim_up = 45, aim_down = 30;
 static bool clobber_query;
@@ -37,12 +38,12 @@ bool touch_lock_on(void) { return locked; }
 bool touch_lock_active(void) { return locked; }
 int config_live_persistent_lock_on(void) { return persistent; }
 void input_get(uint64_t *b, int32_t sticks[4]) { *b = buttons; memcpy(sticks, stick_state, sizeof stick_state); }
+bool touch_virtual_right_stick_active(void) { return virtual_right_stick; }
 float config_live_mouse_smoothing(void) { return 0; }
 float config_live_mouse_sensitivity(void) { return 1; }
 float config_live_mouse_sensitivity_y(void) { return 1; }
 int config_live_mouse_invert_y(void) { return 0; }
-float config_motion_gain(void) { return 1; }
-void fnhook_call_original(Cpu *c, uint32_t fn) { (void)c; (void)fn; }
+void fnhook_call_original(Cpu *c, uint32_t fn) { (void)c; if (fn == FN_CAMERA_STICK) camera_original_calls++; }
 // Independent fixture of the original 0x13b93dc action switch (same local main as the guide regression).
 static bool charging_fixture(uint32_t h) {
     unsigned st = LD16(h + PL_ACT_ST), no = LD16(h + PL_ACT_NO);
@@ -323,9 +324,9 @@ static void scope_left_stick(uint32_t weapon) {
         scope_frame(mode); assert_scope_target(1100, 680, 1050, mode);
         uint32_t target_yaw = LD32(hunter + PL_AIM_YAW);
         memset(stick_state, 0, sizeof stick_state);
-        stick_state[0] = 20000; ST32(hunter + PL_AIM_YAW, 777); mousecam_add(8, -6); mousecam_motion_add(.02f, .01f);
+        stick_state[0] = 20000; ST32(hunter + PL_AIM_YAW, 777); mousecam_add(8, -6);
         scope_frame(mode);
-        assert(LD32(hunter + PL_AIM_YAW) != 777 && LD32(hunter + PL_AIM_YAW) != target_yaw);  // movement preserves manual drag/gyro
+        assert(LD32(hunter + PL_AIM_YAW) != 777 && LD32(hunter + PL_AIM_YAW) != target_yaw);  // movement preserves manual drag
         stick_state[0] = 0; scope_frame(mode); assert_scope_target(1100, 680, 1050, mode);
         uint64_t fire = 1ull << (weapon == VT_BOW ? BTN_X : BTN_A);
         const uint64_t cancel[] = {1ull << BTN_B, 1ull << BTN_Y, 1ull << (weapon == VT_BOW ? BTN_A : BTN_X)};
@@ -402,9 +403,9 @@ static void persistent_scope(void) {
             assert_scope_target(-1400, 680, 1050, mode);
             mousecam_target_cycle(); scope_frame(mode);
             assert_scope_target(-700, 280, 1450, mode);
-            mousecam_add(25, -30); mousecam_motion_add(.1f, .15f);
+            mousecam_add(25, -30);
             scope_frame(mode); assert_scope_target(-700, 280, 1450, mode);
-            assert(!g_dx && !g_dy && !g_mot_yaw && !g_mot_pitch && !g_rest_yaw && !g_rest_pitch);
+            assert(!g_dx && !g_dy && !g_rest_yaw && !g_rest_pitch);
             // Some Bow control types run the camera stick hook first: it must not skip absolute aim tracking.
             Cpu cam_cpu = {0}; cam_cpu.r[0] = camera;
             mousecam_add(15, 20); camera_stick(&cam_cpu);
@@ -413,15 +414,15 @@ static void persistent_scope(void) {
             scope_frame(mode); assert_scope_target(100, 6180, 1450, mode);
             move_body(0, 0, -6000, 1400);
             scope_frame(mode); assert_scope_target(100, -5820, 1450, mode);
-            // Manual close must stop tracking and must not replay the drag or gyro from the locked frame.
+            // Manual close must stop tracking and must not replay the drag from the locked frame.
             locked = false; ST32(hunter + PL_AIM_YAW, 777); STF(hunter + PL_AIM_PITCH, 12);
             uint32_t eye_yaw = LD32(camera + QC_EYE_YAW);
             scope_frame(mode); assert(LD32(hunter + PL_AIM_YAW) == 777 && LDF(hunter + PL_AIM_PITCH) == 12);
             assert(LD32(camera + QC_EYE_YAW) == eye_yaw);
-            // Ordinary lock-on keeps the original manual scope, including fresh drag and gyro input.
+            // Ordinary lock-on keeps the original manual scope, including fresh drag input.
             persistent = false; locked = true; move_body(0, 900, 500, 900);
             scope_frame(mode); assert(LD32(hunter + PL_AIM_YAW) == 777);
-            mousecam_add(8, -6); mousecam_motion_add(.02f, .01f); scope_frame(mode);
+            mousecam_add(8, -6); scope_frame(mode);
             uint32_t manual_yaw = LD32(hunter + PL_AIM_YAW); assert(manual_yaw != 777);
             scope_frame(mode); assert(LD32(hunter + PL_AIM_YAW) == manual_yaw);
             persistent = true;
@@ -429,25 +430,24 @@ static void persistent_scope(void) {
             scope_frame(mode); assert(LD32(hunter + PL_AIM_YAW) == manual_yaw);  // no valid target: keep manual aim
         }
     persistent = false; aim_up = 45; aim_down = 30;
-    puts("PASS: persistent HBG/LBG/Bow scope tracks moving body, target cycles and native pitch limits; manual close, gyro/drag consumption and ordinary aim preserved.");
+    puts("PASS: persistent HBG/LBG/Bow scope tracks moving body, target cycles and native pitch limits; manual close, drag consumption and ordinary aim preserved.");
 }
 
-static void relative_gyro(void) {
-    GyroTurn turn = {0};
-    gyro_sample(&turn, 1000000000, 1, 2); assert(turn.yaw == 0 && turn.pitch == 0);
-    gyro_sample(&turn, 1010000000, 1, 2);
-    assert(fabsf(turn.yaw - .01f) < 1e-6f && fabsf(turn.pitch - .02f) < 1e-6f);
-    gyro_sample(&turn, 1010000000, 1, 2); assert(fabsf(turn.yaw - .01f) < 1e-6f); // duplicate not replayed
-    gyro_sample(&turn, 1020000000, .01f, -.01f); assert(fabsf(turn.yaw - .01f) < 1e-6f); // dead band
-    gyro_sample(&turn, 1030000000, NAN, 1); assert(turn.sample_ns == 1020000000);
-    gyro_sample(&turn, 2000000000, 10, 10); assert(turn.yaw == 0 && turn.pitch == 0); // pause makes a baseline
-    turn = (GyroTurn){0}; gyro_sample(&turn, 3000000000, 5, 5);
-    assert(turn.yaw == 0 && turn.pitch == 0); // source/aim restart cannot jump
-    // A phone turn and a finger drag add at the current camera angle, with the same signs.
-    clock_ns += 16000000; g_seen_ns = clock_ns; mousecam_motion_add(.02f, .01f); mousecam_add(5, -4);
+static void relative_drag(void) {
+    g_rest_yaw = g_rest_pitch = g_trail_dx = g_trail_dy = 0;
+    g_dx = g_dy = 0;
+    clock_ns += 16000000; g_seen_ns = clock_ns; mousecam_add(5, -4);
     int yaw, pitch; assert(take_turn(0, &yaw, &pitch));
-    assert(yaw < -200 && pitch > 150);
+    const float units = MOUSECAM_DEG_PER_COUNT * UNITS_PER_DEG;
+    assert(yaw == (int)(-5 * units) && pitch == (int)(4 * units));
     assert(!take_turn(0, &yaw, &pitch));  // consumed once
+    mousecam_add(5, -4); assert(take_turn(3, &yaw, &pitch));
+    assert(yaw > 0 && pitch < 0);  // native camera inversion is retained
+    clock_ns += ACTIVE_NS;
+    mousecam_add(500, -400); assert(!take_turn(0, &yaw, &pitch));  // no replay after a pause
+    mousecam_add(5, -4); assert(take_turn(0, &yaw, &pitch));
+    assert(yaw == (int)(-5 * units) && pitch == (int)(4 * units));
+    assert(!take_turn(0, &yaw, &pitch));
 }
 
 static void drag_world(int type) {
@@ -461,7 +461,7 @@ static void drag_world(int type) {
     buttons = 1ull << (type ? BTN_R : BTN_X);
     ST32(hunter + PL_AIM_YAW, 10000); ST32(hunter + PL_BOW_YAW, 10000);
     STF(hunter + PL_AIM_PITCH, 0); STF(hunter + PL_AIM_PITCH2, 0); ST16(hunter + PL_AIM_LEAN, 0);
-    g_dx = g_dy = g_mot_yaw = g_mot_pitch = 0;
+    g_dx = g_dy = 0;
     bow_up = 60; bow_down = 40; clobber_query = false; query_race = 0;
 }
 
@@ -485,14 +485,14 @@ static void bow_charge_drag_angles(void) {
             uint64_t keys = buttons;
             uint32_t input_word = LD32(hunter + 0x1414); uint8_t aim_toggle = LD8(hunter + 0x3334);
             mousecam_bow_drag_begin(hunter, type); mousecam_bow_drag_add(20, -30);
-            mousecam_add(7, -9); mousecam_motion_add(.02f, -.01f);
+            mousecam_add(7, -9);
             drag_tick();
             assert(LD32(hunter + PL_AIM_YAW) < 10000 && LD32(hunter + PL_BOW_YAW) == LD32(hunter + PL_AIM_YAW));
             assert(fabsf(LDF(hunter + PL_AIM_PITCH) - 4.0f) < .001f);
             assert(LDF(hunter + PL_AIM_PITCH2) == LDF(hunter + PL_AIM_PITCH));
             assert((int16_t)LD16(hunter + PL_AIM_LEAN) > 0 && bow_drag_manual(hunter));
             assert(!g_aim_seen_ns && !memcmp(cam_before, G2H(camera), sizeof cam_before));
-            assert(g_dx == 7 && g_dy == -9 && g_mot_yaw == .02f && g_mot_pitch == -.01f);
+            assert(g_dx == 7 && g_dy == -9);
             assert(buttons == keys && LD32(hunter + 0x1414) == input_word && LD8(hunter + 0x3334) == aim_toggle);
             mousecam_lock_shot(); uint32_t yaw = LD32(hunter + PL_AIM_YAW);
             assert(yaw != 8192);  // selected target cannot replace a dragged shot
@@ -508,7 +508,7 @@ static void bow_charge_drag_angles(void) {
     drag_world(0); ST8(LD32(G_OPTIONS) + OPT_AIM_INVERT, 3);
     mousecam_bow_drag_begin(hunter, 0); mousecam_bow_drag_add(20, -30); drag_tick();
     assert(LD32(hunter + PL_AIM_YAW) > 10000 && LDF(hunter + PL_AIM_PITCH) < 0);
-    puts("PASS: Bow Type 1/2 charge dragging turns guide and saved shot yaw in all 19 native charge states; native pitch limits, zero crossing, lean refresh, inversion, CPU/camera/gyro isolation.");
+    puts("PASS: Bow Type 1/2 charge dragging turns guide and saved shot yaw in all 19 native charge states; native pitch limits, zero crossing, lean refresh, inversion, CPU/camera isolation.");
 }
 
 static void bow_charge_drag_lifecycle(void) {
@@ -572,13 +572,34 @@ static void bow_charge_drag_races(void) {
     puts("PASS: a cancel/new finger during a native query invalidates the old charge write and leaves only the new gesture pending.");
 }
 
+static void virtual_right_stick_camera_routing(void) {
+    world(); locked = false; virtual_right_stick = false; camera_original_calls = 0;
+    g_dx = g_dy = g_trail_dx = g_trail_dy = g_rest_yaw = g_rest_pitch = 0;
+    g_seen_ns = clock_ns;
+    stick_state[2] = 12000; stick_state[3] = -7000;
+    const int32_t original_axes[4] = {stick_state[0], stick_state[1], stick_state[2], stick_state[3]};
+    Cpu c = {0}; c.r[0] = camera;
+    camera_stick(&c); assert(camera_original_calls == 1);
+    virtual_right_stick = true;
+    uint32_t yaw = LD32(camera + QC_YAW_TO);
+    clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) == yaw);
+    mousecam_add(12, 0); clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) != yaw);
+    assert(stick_state[0] == original_axes[0] && stick_state[1] == original_axes[1] &&
+           stick_state[2] == original_axes[2] && stick_state[3] == original_axes[3]);
+    virtual_right_stick = false; clock_ns += 16000000; camera_stick(&c);
+    assert(camera_original_calls == 2);
+    puts("PASS: virtual right-stick axes stay available to game logic but do not turn the camera; independent mouse/touch deltas still turn it");
+}
+
 int main(void) {
     world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
     shot_left_stick(VT_HEAVY, 0); shot_left_stick(VT_LIGHT, 0); shot_left_stick(VT_BOW, 0); shot_left_stick(VT_BOW, 1);
     shot_identity_reset();
     actual_aim(); persistent_scope(); scope_left_stick(VT_HEAVY); scope_left_stick(VT_LIGHT); scope_left_stick(VT_BOW);
-    no_unscoped_steering(); relative_gyro();
-    bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races();
-    puts("PASS: sticky target/cycle, standing bowgun fire, manual aim/crouch, bow charge gates, actual aim states, relative gyro.");
+    no_unscoped_steering(); relative_drag();
+    bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races(); virtual_right_stick_camera_routing();
+    puts("PASS: sticky target/cycle, standing bowgun fire, manual aim/crouch, bow charge gates, actual aim states, relative drag.");
     return 0;
 }

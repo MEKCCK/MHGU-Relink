@@ -14,7 +14,7 @@ project = Path(__file__).resolve().parents[1]
 workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 output = args.output or workspace / 'analysis/startup-0.2.1-20261113/host-shaders'
 output.mkdir(parents=True, exist_ok=True)
-llvm = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/30.0.16248370')))
+llvm = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973')))
 glslc = llvm / 'shader-tools/windows-x86_64/glslc.exe'
 vcvars = Path(os.environ.get('VCVARS64', 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat'))
 setup = subprocess.run('call "' + str(vcvars) + '" >nul && set', shell=True, capture_output=True, text=True, check=True)

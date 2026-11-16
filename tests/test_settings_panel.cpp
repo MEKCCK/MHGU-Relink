@@ -103,12 +103,13 @@ extern "C" const char *touch_icon_button_name(int button) {
         "Camera  L", "Target  ZL", "Special  ZR", "Menu  +", "Minus  -", "Left stick click", "Right stick click",
         "D-pad", "D-pad visibility", "Movement", "Settings"};
     assert(button >= 0 && button < TOUCH_ICON_BUTTON_COUNT);
-    return button < 16 ? names[button] : button == 22 ? "Next ammo" : button == 23 ? "Previous ammo" : "Combined button";
+    return button < 16 ? names[button] : button == 22 ? "Next ammo" : button == 23 ? "Previous ammo" :
+           button == 24 ? "Lock large monster" : "Combined button";
 }
-extern "C" int touch_icon_builtin_count(void) { return 14; }
+extern "C" int touch_icon_builtin_count(void) { return 15; }
 extern "C" const char *touch_icon_builtin_name(int choice) {
     static const char *const names[] = {"Sword", "Dodge", "Shield", "Burst", "Target", "Camera", "Menu", "Map",
-        "Settings", "Sheathe", "Run", "Crosshair", "Shot", "Bow"};
+        "Settings", "Sheathe", "Run", "Crosshair", "Shot", "Bow", "Lock"};
     return names[choice - 1];
 }
 extern "C" uint64_t touch_layout_generation(void) { return icon_generation; }
@@ -526,7 +527,7 @@ static void empty_template_detail_regression() {
     puts("PASS: empty template opens its own detail page focused on Save; slots 5, 6 and 40 save directly with independent default Chinese names and slot 20 stays unchanged");
 }
 static void touch_icon_regression() {
-    static_assert(TOUCH_ICON_BUTTON_COUNT == 24, "Append two ammo icons without renumbering the first 22");
+    static_assert(TOUCH_ICON_BUTTON_COUNT == 25, "Append ammo and the dedicated lock icon without renumbering existing buttons");
     opened = true;
     idle();
     seek_row("touch.icons");
@@ -543,6 +544,12 @@ static void touch_icon_regression() {
     }
     for (int button = 0; button < TOUCH_ICON_BUTTON_COUNT; ++button)
         assert(icon_choices[button].choice == button % touch_icon_builtin_count() + 1);
+    seek_row("ti.24");
+    confirm();
+    seek_row("ti.builtin.15");
+    confirm();
+    assert(icon_choices[24].choice == 15 && icon_choices[23].choice == 9);
+    back();
     seek_row("ti.21"); // The sixth combo has its own icon.
     confirm();
     const int saved = icon_choices[21].choice;
@@ -610,7 +617,7 @@ static void touch_icon_regression() {
     back();
     opened = false;
     frame();
-    puts("PASS: all 24 common button icon rows including six combos and two independent ammo arrows, default/built-in/custom choices, immediate save, failure/cancel retention, layout generation and closed/switched picker rejection (real UI, stub importer)");
+    puts("PASS: all 25 common button icon rows including six combos, two ammo arrows and the dedicated lock key, default/built-in/custom choices, immediate save, failure/cancel retention, layout generation and closed/switched picker rejection (real UI, stub importer)");
 }
 static void combo_layout_regression() {
     static_assert(TOUCH_UNIVERSAL_PROFILE == 19 && TOUCH_LAYOUT_PROFILES == 20,
@@ -746,6 +753,18 @@ static void touch_button_rows_regression() {
         frame();
     }
     puts("PASS: common touch-button rows retain Aim (R), native item arrows and independent ammo arrows; ShowAmmo defaults On and saves both On/Off independently, while retired ranged controls stay hidden and their settings unchanged");
+}
+static void removed_motion_rows_regression() {
+    opened = true;
+    idle();
+    seek_row("lock.persistent");
+    down();
+    assert(focused_row("touch.buttons"));
+    down();
+    assert(focused_row("touch.camera") && !settings_panel_dirty());
+    opened = false;
+    frame();
+    puts("PASS: Controls moves directly from persistent lock-on to screen buttons and touch-camera speed, with no motion controls or sensitivity/inversion rows");
 }
 static void auto_r_regression() {
     char error[256];
@@ -1016,6 +1035,7 @@ int main(int argc, char **argv) {
         combo_layout_regression();
         touch_button_rows_regression();
         auto_r_regression();
+        removed_motion_rows_regression();
         touch_icon_regression();
         template_previews();
         ImGui::DestroyContext();

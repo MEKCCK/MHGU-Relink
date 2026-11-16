@@ -397,6 +397,19 @@ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 // was last written for that version (cur), else its memory went to something else (a quest's, after the quest) and it
 // is forgotten, not written.
 void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
+    // A recycled texture address must lose its identity before a HUD draw can consult it.
+    for (int i = 0; i < NSHEETS; i++) {
+        Sheet *s = &sheets[i];
+        for (int k = 0; k < s->ncopies; k++) {
+            if (s->copies[k].addr != addr) continue;
+            int v = s->copies[k].v;
+            uint64_t bytes = (uint64_t)s->w * s->h;
+            if (size == bytes && (!memcmp(mem, s->var[v], bytes) ||
+                (s->cur[v] && !memcmp(mem, s->cur[v], bytes)))) continue;
+            memmove(s->copies + k, s->copies + k + 1, sizeof s->copies[0] * (size_t)(s->ncopies - k - 1));
+            s->ncopies--, k--;
+        }
+    }
     bool any = false;
     for (int i = 0; i < NSHEETS && !any; i++) any = (uint64_t)sheets[i].w * sheets[i].h == size;
     if (!any) return;
@@ -425,6 +438,27 @@ void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
             return;
         }
     }
+}
+
+// cGUIObjTexture and cGUIObjText supply texel UVs; match the direction glyph, never the visible row number.
+int prompts_hunter_art_slot(uint32_t addr, float u0, float v0, float u1, float v1) {
+    for (int sheet = 0; sheet < 2; sheet++) {  // button_festa and HD_custom_pnl2, identified by complete contents
+        Sheet *s = &sheets[sheet];
+        bool known = false;
+        for (int k = 0; k < s->ncopies; k++) known |= s->copies[k].addr == addr;
+        float lo = sheet == 0 ? 23.0f : 24.0f, hi = sheet == 0 ? 24.0f : 40.0f;
+        if (!known || !(u1 - u0 >= lo && u1 - u0 <= hi && v1 - v0 >= lo && v1 - v0 <= hi)) continue;
+        float u = (u0 + u1) * 0.5f, v = (v0 + v1) * 0.5f;
+        for (int i = 0; i < s->ncells; i++) {
+            const Cell *c = &s->cells[i];
+            int slot = c->btn == BTN_UP ? 0 : c->btn == BTN_RIGHT ? 1 : c->btn == BTN_DOWN ? 2 : -1;
+            if (slot < 0 || c->btn2 >= 0 || u < c->x || u > c->x + c->w || v < c->y || v > c->y + c->h) continue;
+            // The panel ink box has one texel of padding; either draw path can inset UVs by half a texel.
+            if (u0 <= c->x + 1 && v0 <= c->y + 1 && u1 >= c->x + c->w - 1 && v1 >= c->y + c->h - 1)
+                return slot;
+        }
+    }
+    return -1;
 }
 // Data for version v into its copies
 static void write_copies(Sheet *s, int v, const uint8_t *data) {

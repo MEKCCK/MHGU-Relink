@@ -270,6 +270,25 @@ class SettingsLocaleTest(unittest.TestCase):
             self.assertIn("滑动不转视角", text)
             self.assertIn("道具栏上滑动仍可切换道具", text)
 
+    def test_removed_motion_settings_and_labels(self):
+        source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
+        config = (ROOT / "runtime/config.c").read_text(encoding="utf-8")
+        header = (ROOT / "runtime/config.h").read_text(encoding="utf-8")
+        store = (ROOT / "runtime/config_store.c").read_text(encoding="utf-8")
+        catalog = (ROOT / "runtime/settings_locale.h").read_text(encoding="utf-8")
+        chinese = (ROOT / "runtime/settings_locale_zh.h").read_text(encoding="utf-8")
+        default_keys, _ = default_ini_keys(config)
+        help_rows = dict(rows(chinese.split("static inline const char *settings_help_zh(", 1)[1], 2))
+        for key in ("Motion", "MotionGain", "MotionInvertX", "MotionInvertY"):
+            self.assertNotIn(key, default_keys)
+            self.assertNotIn(key, help_rows)
+        self.assertNotRegex(source + config + header + store, r"\b(?:motion_(?:mode|gain|flip_x|flip_y)|config_motion_\w+|MOTION_(?:OFF|AIM|ALWAYS))\b")
+        for label in ("Motion controls", "While aiming", "Motion sensitivity", "Invert motion horizontal", "Invert motion vertical"):
+            self.assertNotIn(label, {row[0] for row in rows(catalog, 3)})
+        self.assertNotIn("陀螺仪", chinese)
+        self.assertIn("ObjectMotion", default_keys)
+        self.assertIn("ObjectMotion", help_rows)
+
     def test_chinese_help_coverage(self):
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
         config = (ROOT / "runtime/config.c").read_text(encoding="utf-8")
@@ -328,10 +347,6 @@ class SettingsLocaleTest(unittest.TestCase):
                 missing.add(key)
         self.assertFalse(missing, f"Missing Chinese setting help: {sorted(missing)}")
         self.assertGreater(len(help_keys), 300)
-        self.assertIn("0.1 到 5", translations["MotionGain"])
-        self.assertIn("默认：1.0", translations["MotionGain"])
-        self.assertIn("左右", translations["MotionInvertX"])
-        self.assertIn("上下", translations["MotionInvertY"])
         self.assertIn("通用", translations["Combo1"])
         self.assertRegex(translations["Combo1"], r"(?:6 个|六个)(?:独立)?组合键")
         self.assertIn("名称", translations["Combo1Name"])

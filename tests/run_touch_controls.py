@@ -17,7 +17,7 @@ for line in setup.stdout.splitlines():
     key, sep, value = line.partition('=')
     if sep and key:
         env[key] = value
-compiler = Path(os.environ.get('ANDROID_NDK_HOME', r'C:\Users\Public\Android\Sdk\ndk\30.0.16248370')) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe'
+compiler = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/ndk/27.0.12077973'))) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe'
 sdl = deps / 'SDL3-3.4.18'
 imgui = project / 'third_party' / 'cimgui' / 'imgui'
 exe = output / 'test-touch-controls.exe'
@@ -26,7 +26,8 @@ subprocess.run([str(compiler.with_name('clang.exe')), '--target=x86_64-pc-window
                 '-D_CRT_SECURE_NO_WARNINGS', '-c', str(project / 'updater/sha256.c'), '-o', str(sha)],
                env=env, cwd=output, check=True, timeout=120)
 args = [str(compiler), '--target=x86_64-pc-windows-msvc', '-fuse-ld=link', '-std=c++17',
-        '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE', '-Wno-deprecated-declarations',
+        '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE', '-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH',
+        '-Wno-deprecated-declarations',
         '-I' + str(deps), '-I' + str(project / 'runtime'), '-I' + str(imgui), '-I' + str(sdl / 'include'),
         str(project / 'tests' / 'test_touch_controls.cpp')]
 args += [str(imgui / f) for f in ['imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp']]

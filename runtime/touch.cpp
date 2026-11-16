@@ -10,6 +10,7 @@
 //     screen drag outside the controls moves the cursor with d-pad taps; the stick does not select menu entries
 //     The visible buttons keep their layout and positions when menus open or close. A screen drag elsewhere also
 //     moves the cursor, a step every so far, as a list on a phone
+//     A tap on a recognized menu cell outside visible controls selects and confirms it; game buttons keep their presses.
 //   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): a tap on the item bar (bottom middle)
 //     uses the item, a swipe on it turns the bar; a tap on a Hunter Art's panel (top right) performs it; a tap on the
 //     target camera's icon enables the lock-on, then cycles the target (the camera keeps turning to the selected monster;
@@ -48,8 +49,10 @@ extern volatile uint64_t g_town_ns;  // (hle/quickhunt.c: a town's walking-aroun
 int weapon_drawn(void);  // (hle/weapon.c: 1 the weapon out, 0 sheathed, -1 not known)
 #include "hle/input.h"
 #include "hle/itembar.h"
+#include "hle/menuptr.h"
 #include "hle/mousecam.h"
 SDL_Window *ui_window(void);
+bool host_input_press(const char *button, unsigned frames);
 }
 #include "haptics.h"  // (a short tick on the phone when a control is pressed)
 #include "overlay.h"
@@ -71,14 +74,14 @@ enum Ctl {
     C_ATTACK, C_DODGE, C_R, C_ZR, C_ZL, C_L, C_MENU, C_MAP, C_SETTINGS, C_SHEATHE, C_RUN, C_HEAVY, C_LIGHT, C_CORNER,
     C_HMINUS, C_R3, C_HDPAD, C_COMBO, C_COMBO_END = C_COMBO + TOUCH_COMBOS - 1,
     C_RFIRE, C_RSECOND, C_RAIM, C_RSPECIAL, C_RDODGE, C_RSHEATHE, C_AMMO_UP, C_AMMO_DOWN,  // (a bow's or a bowgun's)
-    C_LAYOUT, C_DPAD_TOGGLE, C_STICK, C_RSTICK,  // append saved controls so existing keys keep their identities
+    C_LAYOUT, C_DPAD_TOGGLE, C_STICK, C_RSTICK, C_RSTICK_TOGGLE, C_LOCK,  // append saved controls so existing keys keep their identities
     C_DPAD, C_MPILL, C_FX, C_FY, C_MINUS, C_ML, C_MR,  // (the menu layout's: saved d-pad and fixed face buttons)
     C_MZL, C_MZR,                                       // (and ZL / ZR beside L / R, when [Touch] ShowMenuZL / ZR say so)
     C_COUNT
 };
-const int C_LAID = C_RSTICK + 1;
+const int C_LAID = C_LOCK + 1;
 enum Icon { I_ATTACK, I_DODGE, I_SHIELD, I_BURST, I_TARGET_SELECT, I_CAMERA, I_MENU, I_MAP, I_GEAR, I_SHEATHE, I_RUN, I_STICK, I_DPAD,
-            I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN };
+            I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN, I_LOCK };
 
 struct Def {
     const char *key, *name;  // in touch_layout.txt; in the layout editor
@@ -136,6 +139,8 @@ const Def DEFS[C_COUNT] = {
     {"dpad_toggle", "D-pad visibility", I_DPAD, "", 0, false, .18f, .79f, .043f},
     {"stick", "Movement", I_STICK, "", 0, false, .29f, .27f, .115f},
     {"right_stick", "Right stick", I_STICK, "", 0, true, .29f, .22f, .115f},
+    {"right_stick_toggle", "Right stick visibility", I_STICK, "", 0, false, .52f, .90f, .043f},
+    {"lock", "Lock large monster", I_LOCK, "", 0, true, .20f, .50f, .048f},
     // the menu layout's (the d-pad uses dpad_hunt's saved position)
     {"dpad", "D-pad", I_DPAD, "", 0, false, 0, 0, .145f},
     {"menu_pill", "Confirm and back", I_ATTACK, "", 0, true, 0, 0, .085f},
@@ -152,6 +157,8 @@ const Def DEFS[C_COUNT] = {
 enum { STYLE_PILL, STYLE_SEPARATE, STYLE_CORNER, STYLE_COUNT };  // how the attacks and the guard are laid out
 const int STYLE_CLASSIC = STYLE_COUNT;  // separate from the four legacy layouts' three attack styles
 std::atomic<int> g_style{STYLE_PILL};                            // (Layout.style, for every thread)
+std::atomic<int> g_right_stick_visible{0};
+std::atomic<bool> g_virtual_right_stick_active{false};
 std::atomic<int> g_ranged{0};     // the active profile's ranged controls: weapon profile in a quest, preset outside it
 std::atomic<int> g_bow_type{0};   // the game's Bow Controls: 0 X draws, 1 R draws
 const int PROFILE_WEAPON[TOUCH_WEAPON_LAYOUTS] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
@@ -209,16 +216,18 @@ bool is_dpad(int i) { return i == C_DPAD || i == C_HDPAD; }
 bool classic_control(int i) {
     return i == C_HEAVY || i == C_LIGHT || i == C_DODGE || i == C_SHEATHE || i == C_R || i == C_L ||
            i == C_ZL || i == C_ZR || i == C_MENU || i == C_HMINUS || i == C_MAP || i == C_R3 ||
-           i == C_HDPAD || i == C_DPAD_TOGGLE || i == C_STICK || i == C_SETTINGS || is_combo(i);
+           i == C_HDPAD || i == C_DPAD_TOGGLE || i == C_STICK || i == C_RSTICK_TOGGLE || i == C_LOCK || i == C_SETTINGS || is_combo(i);
 }
 bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
     if (is_ammo(i)) return in_quest && !menu && config_live_touch_show(TB_AMMO) && weapon_ranged(weapon_hunter());
     if (i == C_LAYOUT || is_ranged(i)) return false;
+    if (i == C_LOCK) return in_quest;
+    if (i == C_RSTICK_TOGGLE) return true;
+    if (i == C_RSTICK) return g_right_stick_visible.load();
     int show = show_setting(i);
     if (show >= 0 && !config_live_touch_show(show)) return false;
     if (is_combo(i)) return config_live_touch_combo(config_live_touch_profile(), i - C_COMBO) != 0;
     if (g_style.load() == STYLE_CLASSIC) return classic_control(i);
-    if (i == C_RSTICK) return false;
     if (ranged < 0) ranged = g_ranged.load();
     // Menu detection still controls cursor gestures and lock-on, never the visible buttons or their positions.
     menu = false;
@@ -246,6 +255,8 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
 }
 bool in_editor(int i, bool in_quest, int profile) {
     if (profile < 0) return false;
+    if (i == C_LOCK) return true;
+    if (i == C_RSTICK || i == C_RSTICK_TOGGLE) return true;
     if (i == C_HDPAD) return config_live_touch_controls() != TOUCH_OFF && config_live_touch_show(TB_DPAD);
     if (is_combo(i)) return config_live_touch_combo(profile, i - C_COMBO) != 0;
     if (g_style.load() == STYLE_CLASSIC) return in_mode(i, false, in_quest, 0);
@@ -267,9 +278,8 @@ const float BAND_GUARD = .30f, BAND_SEAM0 = .63f, BAND_SEAM1 = .69f;
 const float KNOB = .45f;             // the stick's knob, in its base's radius
 const float CAMERA_COUNTS = 1150.0f; // mouse counts for a drag the screen's height (hle/mousecam.c: 0.08 degrees each)
 const uint64_t MS = 1000000ull;
-// a Hunter Art's row: its button
-// (the game's default controls: the d-pad - its icon beside each art is a d-pad with that arm marked: up, right, down)
-const uint64_t ART_FACE[3] = {B(BTN_UP), B(BTN_RIGHT), B(BTN_DOWN)};
+// The row's D-pad glyph identifies its art; ZL is the activation modifier.
+const uint64_t ART_BUTTONS[3] = {B(BTN_ZL) | B(BTN_UP), B(BTN_ZL) | B(BTN_RIGHT), B(BTN_ZL) | B(BTN_DOWN)};
 
 // What a control of the ranged layout presses. Out, a bowgun: A fires, X reloads, R aims (a tap the scope, held the quick
 // aim), X + A crouching fire; a bow: the game's Bow Controls say which of X and R draws (held, let go it shoots).
@@ -289,13 +299,13 @@ uint64_t ranged_buttons(int c, int drawn, int ranged) {
 const int ICON_CONTROLS[TOUCH_ICON_BUTTON_COUNT] = {
     C_HEAVY, C_LIGHT, C_DODGE, C_SHEATHE, C_R, C_L, C_ZL, C_ZR, C_MENU, C_HMINUS, C_MAP, C_R3,
     C_HDPAD, C_DPAD_TOGGLE, C_STICK, C_SETTINGS, C_COMBO, C_COMBO+1, C_COMBO+2, C_COMBO+3, C_COMBO+4, C_COMBO+5,
-    C_AMMO_UP, C_AMMO_DOWN
+    C_AMMO_UP, C_AMMO_DOWN, C_LOCK
 };
 const struct { Icon icon; const char *name; } BUILTIN_ICONS[] = {
     {I_ATTACK, "Sword"}, {I_DODGE, "Dodge"}, {I_SHIELD, "Shield"}, {I_BURST, "Burst"},
     {I_TARGET_SELECT, "Target"}, {I_CAMERA, "Camera"}, {I_MENU, "Menu"}, {I_MAP, "Map"},
     {I_GEAR, "Settings"}, {I_SHEATHE, "Sheathe"}, {I_RUN, "Run"}, {I_SCOPE, "Crosshair"},
-    {I_SHOT, "Shot"}, {I_BOW, "Bow"}
+    {I_SHOT, "Shot"}, {I_BOW, "Bow"}, {I_LOCK, "Lock"}
 };
 const int BUILTIN_ICON_COUNT = sizeof BUILTIN_ICONS / sizeof BUILTIN_ICONS[0];
 struct IconChoice { int choice; char hash[TOUCH_ICON_HASH_SIZE]; };
@@ -338,6 +348,7 @@ bool load_icon_pixels(const char *hash, std::vector<unsigned char> &pixels, int 
 struct Layout {
     float x[C_COUNT], y[C_COUNT], scale[C_COUNT];
     float zx[TZ_COUNT], zy[TZ_COUNT];  // the moved HUD parts' offsets (canvas units: g_touch_zone_dx / dy)
+    float editor_x, editor_y;         // toolbar position within the available screen travel (0..1)
     int style;                         // STYLE_*
     int weapon_profile;                // reserved slots bind to one of the original 15 weapons
     IconChoice icons[C_LAID];           // zero-initialized legacy layouts keep their original faces
@@ -351,7 +362,7 @@ void migrate_ranged_guard(Layout &l, int profile) {
     if (l.x[C_R] == DEFS[C_R].x && l.y[C_R] == DEFS[C_R].y && l.scale[C_R] == 1.0f)
         l.x[C_R] = .58f, l.y[C_R] = .78f;
 }
-const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target"};
+const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target", "hud_map"};
 void migrate_common_ammo(Layout &l) {
     // Previously hidden common arrows used positions occupied by the combo grid and R.
     // Move only the untouched old defaults; saved custom placements remain independent.
@@ -361,6 +372,7 @@ void migrate_common_ammo(Layout &l) {
 }
 Layout defaults(int profile) {
     Layout l = {};
+    l.editor_x = .5f;
     l.weapon_profile = profile < TOUCH_WEAPON_LAYOUTS ? profile : -1;
     for (int i = 0; i < C_COUNT; i++) l.x[i] = DEFS[i].x, l.y[i] = DEFS[i].y, l.scale[i] = 1.0f;  // (the menu layout's: unused)
     if (fixed_quest_attack_style(profile)) l.style = STYLE_SEPARATE;
@@ -436,7 +448,7 @@ bool save_layout_file(const Layout &l, const char *path, const char *name = null
     snprintf(temp, sizeof temp, "%s.tmp", path);
     FILE *f = fopen(temp, "w");
     if (!f) { fprintf(stderr, "[touch] could not save %s\n", path); return false; }
-    fprintf(f, "layout_version 3\n");
+    fprintf(f, "layout_version 5\n");
     if (name) fprintf(f, "template_name %s\n", name);
     fprintf(f, "# touch controls: name, centre (screen heights from its edge and the bottom), size\n");
     for (int i = 0; i < C_LAID; i++) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
@@ -445,6 +457,7 @@ bool save_layout_file(const Layout &l, const char *path, const char *name = null
                 l.icons[i].choice == -1 ? l.icons[i].hash : "-");
     fprintf(f, "# the game's HUD parts moved for touch: name, offset from their place (the game's 1280x720 units), 1\n");
     for (int k = 0; k < TZ_COUNT; k++) fprintf(f, "%s %.1f %.1f 1\n", ZONE_KEY[k], l.zx[k], l.zy[k]);
+    fprintf(f, "editor_panel %.4f %.4f 1\n", l.editor_x, l.editor_y);
     fprintf(f, "attack_style %d 0 1\n", l.style);
     if (combos) for (int i = 0; i < TOUCH_COMBOS; ++i) {
         fprintf(f, "combo_mask %d %u\n", i + 1, config_combo_mask(combos->touch_weapon_combo[UNIVERSAL_LAYOUT][i]));
@@ -477,6 +490,7 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
     if (!f) return false;
     Layout layout = defaults(COMMON_BASE);
     bool controls[C_LAID] = {}, zones[TZ_COUNT] = {}, icons[C_LAID] = {}, named = false, invalid_icon = false;
+    bool editor_present = false, invalid_editor = false;
     int version = 0;
     bool masks[TOUCH_COMBOS] = {}, pads[TOUCH_COMBOS] = {}, names[TOUCH_COMBOS] = {};
     char line[160], key[32], stored_name[TOUCH_TEMPLATE_NAME_MAX] = {};
@@ -485,6 +499,8 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
         if (!strcmp(line, "layout_version 1")) { version = 1; continue; }
         if (!strcmp(line, "layout_version 2")) { version = 2; continue; }
         if (!strcmp(line, "layout_version 3")) { version = 3; continue; }
+        if (!strcmp(line, "layout_version 4")) { version = 4; continue; }
+        if (!strcmp(line, "layout_version 5")) { version = 5; continue; }
         if (!strncmp(line, "icon ", 5)) {
             int choice;
             char hash[65], extra;
@@ -533,6 +549,21 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
             continue;
         }
         float x, y, scale;
+        if (sscanf(line, "%31s", key) != 1) continue;
+        if (!strcmp(key, "hud_map") || !strcmp(key, "editor_panel")) {
+            bool panel = !strcmp(key, "editor_panel");
+            bool valid = sscanf(line, "%31s %f %f %f %c", key, &x, &y, &scale, &extra) == 4 &&
+                         std::isfinite(x) && std::isfinite(y) && scale == 1.0f;
+            if (panel) {
+                valid = valid && !editor_present && x >= 0 && x <= 1 && y >= 0 && y <= 1;
+                if (valid) layout.editor_x = x, layout.editor_y = y, editor_present = true;
+            } else {
+                valid = valid && !zones[TZ_MAP] && fabsf(x) <= 1400 && fabsf(y) <= 800;
+                if (valid) layout.zx[TZ_MAP] = x, layout.zy[TZ_MAP] = y, zones[TZ_MAP] = true;
+            }
+            invalid_editor |= !valid;
+            continue;
+        }
         if (sscanf(line, "%31s %f %f %f", key, &x, &y, &scale) != 4) continue;
         for (int i = 0; i < C_LAID; ++i)
             if (!strcmp(key, DEFS[i].key) && x > 0 && x < 4 && y > 0 && y < 1 && scale >= .4f && scale <= 2.5f) {
@@ -545,12 +576,16 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
                 zones[i] = true;
             }
     }
-    bool ok = !ferror(f) && version && !invalid_icon && (!name || named);
+    bool ok = !ferror(f) && version && !invalid_icon && !invalid_editor && (!name || named);
     fclose(f);
-    for (bool present : controls) ok = ok && present;
-    for (bool present : zones) ok = ok && present;
-    if (version >= 2) for (int i : ICON_CONTROLS)
+    for (int i = 0; i < C_LAID; ++i)
+        if (version >= 5 || i < C_RSTICK_TOGGLE) ok = ok && controls[i];
+    for (int k = 0; k < TZ_MAP; ++k) ok = ok && zones[k];
+    if (version >= 4) ok = ok && zones[TZ_MAP] && editor_present;
+    if (version >= 2) for (int i : ICON_CONTROLS) {
+        if (i == C_LOCK && version < 5) continue;
         if (version >= 3 || !is_ammo(i)) ok = ok && icons[i];
+    }
     if (combos) {
         for (int i = 0; i < TOUCH_COMBOS; ++i) ok = ok && masks[i] && pads[i] && names[i];
         char error[192];
@@ -683,7 +718,7 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
     int ranged = profile >= 0 ? ranged_layout_profile(profile) : -1;
     for (int i = 0; i < C_COUNT; i++) {
         if (!(editing ? in_editor(i, in_quest, profile) : in_mode(i, menu, in_quest, ranged)) ||
-            ((i == C_STICK || i == C_RSTICK) && !stick)) continue;
+            (i == C_STICK && !stick)) continue;
         Geo g = place(l, i, w, h);
         float d = i == C_ATTACK || i == C_MPILL ? pill_distance(g, x, y) / (g.r * (slop - .07f))
                 : i == C_CORNER ? band_distance(g, x, y, nullptr) / (g.r * BAND_T * (slop - .07f))
@@ -711,21 +746,24 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
 struct Zones {
     int n[TZ_COUNT];
     float gy[TZ_COUNT][32], cx[TZ_COUNT][32], cy[TZ_COUNT][32];  // the game's y; where on the canvas
-    uint64_t ns;
+    uint64_t ns[TZ_COUNT];
+    unsigned art_slot_mask;
+    float art_slot_y[3];  // the native Up / Right / Down icons identify slots even when empty rows are absent
+    uint64_t art_slot_ns;
 };
 std::mutex g_zone_lock;
 Zones g_zones, g_build;  // (g_build: the render thread's alone)
 bool g_build_menu;       // (render thread) a menu window of the game's in this frame
 std::atomic<uint64_t> g_menu_ns;  // when one was last drawn
 // how far each part's art reaches past its pieces' positions, in the game's units (left, top, right, bottom)
-const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}};
+const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}, {0, 0, 0, 0}};
 const float ZONE_SLOP = 10.0f;
 
 // The parts are gone (a menu over the hunt, a cutscene) once no frame has drawn them for three frames' time (at
 // least 250 ms, at most 1.5 s: a slow frame now and then must not take them away under a finger)
 std::atomic<uint64_t> g_frame_ns{16 * 1000000ull};  // the time between presented frames, smoothed
 uint64_t stale_limit(void) { return std::clamp<uint64_t>(3 * g_frame_ns.load(), 250 * 1000000ull, 1500 * 1000000ull); }
-bool stale(const Zones &z) { return SDL_GetTicksNS() - z.ns > stale_limit(); }
+bool stale(const Zones &z, int k) { return SDL_GetTicksNS() - z.ns[k] > stale_limit(); }
 // The menu layout: while a menu window of the game's is open (drawn just now), and while the hunter is not being
 // played (the title, the main menu, the character creation, a cutscene: no hunt camera and no town walked for a few
 // seconds - a few, so carving or a short animation in a hunt, when the camera handler does not run, keeps the layout)
@@ -735,9 +773,14 @@ bool stale(const Zones &z) { return SDL_GetTicksNS() - z.ns > stale_limit(); }
 std::atomic<uint64_t> g_play_ns;  // (plat_now_ns) when the hunter was last played
 std::atomic<uint64_t> g_press_ns;  // (SDL_GetTicksNS) when a button that can open a menu was last pressed
 bool g_window_open, g_window_asked;
+std::atomic<bool> g_resume_menu;
 const uint64_t PLAY_HOLD = 4000 * 1000000ull, WINDOW_PRESS = 1500 * 1000000ull, PLAY_NOW = 400 * 1000000ull;
 bool game_menu(void) {
     uint64_t m = g_menu_ns.load(), p = g_play_ns.load(), now = plat_now_ns(), ticks = SDL_GetTicksNS();
+    if (m && ticks - m < stale_limit() && g_resume_menu.exchange(false)) {
+        g_window_open = g_window_asked = true;
+        return true;  // the native menu survived app suspension; its old timing cannot classify the first resumed frame
+    }
     if (m && ticks - m < stale_limit()) {
         if (!g_window_open) g_window_asked = !p || now - p > PLAY_NOW || ticks - g_press_ns.load() < WINDOW_PRESS;
         g_window_open = true;
@@ -750,7 +793,15 @@ bool game_menu(void) {
 // (a bow drawn or a gun aimed has a camera of its own: the hunt camera's handler doesn't run then)
 void play_seen(uint32_t hunter) {  // (the SDL main thread, each input update)
     uint64_t now = plat_now_ns(), town = g_town_ns;
-    if (mousecam_active() || (town && now - town < 400 * 1000000ull) || weapon_moving(hunter) || weapon_aiming(hunter)) g_play_ns = now;
+    // The arts can be ready before the hunt camera has run. A fresh native HUD is also gameplay evidence,
+    // but a cached art panel underneath a menu must not make that menu disappear from the touch controls.
+    uint64_t ticks = SDL_GetTicksNS(), menu = g_menu_ns.load();
+    bool arts = false;
+    if (hunter && presence_in_quest() && (!menu || ticks - menu >= stale_limit())) {
+        std::lock_guard<std::mutex> l(g_zone_lock);
+        arts = g_zones.n[TZ_ARTS] && !stale(g_zones, TZ_ARTS);
+    }
+    if (mousecam_active() || (town && now - town < 400 * 1000000ull) || weapon_moving(hunter) || weapon_aiming(hunter) || arts) g_play_ns = now;
 }
 
 // The game's picture in the window: as wide as it fits in its own shape (g_render_aspect), centred (device.c
@@ -785,7 +836,7 @@ struct EditorZone {
 EditorZone g_editor_zones[TZ_COUNT], g_build_editor[TZ_COUNT];
 
 Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_quest) {
-    if (!in_quest) return {};
+    if (k < 0 || k >= TZ_COUNT || (k == TZ_MAP && !in_quest)) return {};
     EditorZone z;
     {
         std::lock_guard<std::mutex> l(g_zone_lock);
@@ -795,7 +846,7 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
     const bool moved = config_live_touch_hud() != 0;
     Rect r = z.bounds;
     if (!r.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != moved) {
-        // In quests, keep an editable handle even before this HUD part has appeared in the current scene.
+        // Keep an editable handle even before this HUD part has appeared in the current scene.
         const float aspect = g_render_aspect > 0 ? g_render_aspect : w / h;
         const float right = 640.0f * (1.0f + std::min(g_ui_anchor_aspect, aspect) / aspect);
         if (k == TZ_ITEM) {
@@ -804,10 +855,19 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
         } else if (k == TZ_ARTS) {
             r = moved ? Rect{1280.0f - 243.0f * sx, 41.0f * sy, 1280.0f - 127.0f * sx, 107.0f * sy, true}
                       : Rect{right - 554.0f * sx, 720.0f - 89.0f * sy, right - 438.0f * sx, 720.0f - 23.0f * sy, true};
-        } else {
+        } else if (k == TZ_TARGET) {
             float x = moved ? 1280.0f - 330.0f * sx : right - 80.0f * sx;
             r = {x, 55.0f * sy, x, 82.0f * sy, true};
+        } else {
+            r = {right - 520.0f * sx, 0.0f, right + 25.0f * sx, 400.0f * sy, true};
         }
+    }
+    if (k == TZ_MAP && r.ok) {
+        const float min_w = 545.0f * sx, min_h = 400.0f * sy;
+        float cx = (r.x0 + r.x1) * 0.5f, cy = (r.y0 + r.y1) * 0.5f;
+        float rw = std::max(r.x1 - r.x0, min_w), rh = std::max(r.y1 - r.y0, min_h);
+        r.x0 = cx - rw * 0.5f, r.x1 = cx + rw * 0.5f;
+        r.y0 = cy - rh * 0.5f, r.y1 = cy + rh * 0.5f;
     }
     Pic p = picture(w, h);
     r.x0 = p.x0 + (r.x0 + (layout.zx[k] - MARGIN[k][0] - ZONE_SLOP) * sx) * p.w / 1280.0f;
@@ -819,7 +879,7 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
 
 Rect zone_rect(const Zones &z, int k, float w, float h) {
     Rect r = {1e30f, 1e30f, -1e30f, -1e30f, false};
-    if (!z.n[k] || stale(z)) return r;
+    if (!z.n[k] || stale(z, k)) return r;
     for (int i = 0; i < z.n[k]; i++) {
         r.x0 = std::min(r.x0, z.cx[k][i]), r.x1 = std::max(r.x1, z.cx[k][i]);
         r.y0 = std::min(r.y0, z.cy[k][i]), r.y1 = std::max(r.y1, z.cy[k][i]);
@@ -832,21 +892,48 @@ Rect zone_rect(const Zones &z, int k, float w, float h) {
     return r;
 }
 // the Hunter Arts' rows (their pieces grouped by the game's y), top to bottom: screen y ranges
-int arts_rows(const Zones &z, float w, float h, float rows[3][2]) {
+int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] = nullptr) {
     int k = TZ_ARTS, n = z.n[k], idx[32];
-    if (!n || stale(z)) return 0;
+    if (!n || stale(z, k)) return 0;
     for (int i = 0; i < n; i++) idx[i] = i;
     std::sort(idx, idx + n, [&](int a, int b) { return z.gy[k][a] < z.gy[k][b]; });
     int nr = 0;
+    float game_y0[3], game_y1[3];
     float last = -1e9f;
     for (int j = 0; j < n; j++) {
         int i = idx[j];
         if (z.gy[k][i] - last > 22.0f) {
             if (nr == 3) break;
+            game_y0[nr] = game_y1[nr] = z.gy[k][i];
             rows[nr][0] = rows[nr][1] = z.cy[k][i], nr++;
         }
+        game_y1[nr - 1] = z.gy[k][i];
         rows[nr - 1][0] = std::min(rows[nr - 1][0], z.cy[k][i]), rows[nr - 1][1] = std::max(rows[nr - 1][1], z.cy[k][i]);
         last = z.gy[k][i];
+    }
+    if (slots) {
+        std::fill(slots, slots + 3, -1);
+        if (SDL_GetTicksNS() - z.art_slot_ns <= stale_limit()) {
+            for (int slot = 0; slot < 3; slot++) {
+                if (!(z.art_slot_mask & (1u << slot))) continue;
+                int row = -1;
+                float best = 1e30f;
+                for (int i = 0; i < nr; i++) {
+                    float y = z.art_slot_y[slot];
+                    float d = y < game_y0[i] ? game_y0[i] - y : y > game_y1[i] ? y - game_y1[i] : 0;
+                    if (d <= 22.0f && d < best) best = d, row = i;
+                }
+                if (row >= 0) slots[row] = slots[row] == -1 ? slot : -2;
+            }
+        }
+        unsigned identified = 0;
+        bool complete = true;
+        for (int i = 0; i < nr; i++) {
+            if (slots[i] < 0 || (identified & (1u << slots[i]))) complete = false;
+            else identified |= 1u << slots[i];
+        }
+        // v0.1.6 taps the visible row directly; partial icon metadata must not disable or alias those inputs.
+        if (!complete) for (int i = 0; i < nr; i++) slots[i] = i;
     }
     Pic p = picture(w, h);
     for (int i = 0; i < nr; i++)
@@ -859,7 +946,7 @@ Zones zones(void) {
 }
 
 // ------------------------------------------------------------------ fingers (host main thread)
-enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT };
+enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT, F_GAME_MENU, F_EDIT_PANEL };
 struct Finger {
     SDL_FingerID id;
     Kind kind;
@@ -868,11 +955,11 @@ struct Finger {
     uint64_t t0, step_at;
     float swipe, swipe_y;  // the item bar, a menu's cursor: pixels swiped since the last step
     bool moved, done, bar_open, bow_drag_blocked, camera_drag_blocked, item_arrow;
-    uint64_t btn;          // a control of the ranged layout: what it pressed when it landed (the weapon may go out under it)
+    uint64_t btn;          // ranged buttons at landing; F_GAME_MENU: the menu's identity at landing
 };
 struct Pulse {
     uint64_t buttons, from, until;  // (held from .. until: a sequence starts some later)
-    bool dpad;
+    bool dpad, art;  // native HUD taps remain available when virtual controls are hidden
 };
 enum { E_SMALLER, E_BIGGER, E_RESET, E_CANCEL, E_SAVE, E_COUNT };
 struct State {
@@ -909,7 +996,7 @@ struct State {
     int layout_profile;
     int detected_weapon;
     bool save_failed;
-    bool loaded, touched, auto_wait;
+    bool loaded, touched, auto_wait, typing;
     bool menu;  // the menu layout is shown (game_menu, at the last touch_input)  // (auto_wait: a desktop's Auto, waiting for the first finger)
     bool in_quest;
     bool edit, edit_request;  // the layout editor
@@ -922,6 +1009,27 @@ int display_ranged(const State &) { return 0; }
 std::mutex g_lock;
 State g_s;
 uint64_t g_layout_generation;
+bool art_touch_enabled(const State &s, const Zones &z) {
+    return s.in_quest && presence_in_quest() && !s.menu && !s.typing && !s.edit && !overlay_menu_open() &&
+           z.n[TZ_ARTS] && !stale(z, TZ_ARTS);
+}
+void cancel_art_input(State &s) {
+    for (Finger &f : s.f) if (f.kind == F_ARTS) f.kind = F_MENU, f.part = 0;
+    for (Pulse &p : s.pulse) if (p.art) p = {};
+    s.art_flash = 0;
+}
+bool art_touch_begin(State &s, Finger &f, const Zones &z, float x, float y) {
+    if (!art_touch_enabled(s, z) || !zone_rect(z, TZ_ARTS, s.w, s.h).in(x, y)) return false;
+    float rows[3][2], best = 1e30f;
+    int slots[3], nr = arts_rows(z, s.w, s.h, rows, slots), row = -1;
+    for (int i = 0; i < nr; i++) {
+        float d = y < rows[i][0] ? rows[i][0] - y : y > rows[i][1] ? y - rows[i][1] : 0;
+        if (d < best) best = d, row = i;
+    }
+    if (row < 0) return false;
+    f.kind = F_ARTS, f.ctl = row, f.part = slots[row];
+    return true;
+}
 std::atomic<bool> g_lock_follow;  // (touch_lock_buttons -> the hunt camera: follow the monster now)
 std::atomic<bool> g_lock_shots;   // (the lock-on is on, in a hunt: hle/mousecam.c turns a bow's or a gun's shots)
 // a click on the phone's vibrator, asked for under g_lock and made once it is released (a JNI / binder call: the
@@ -997,10 +1105,10 @@ void ensure_loaded(State &s) {
     fprintf(stderr, "[touch] common layout loaded\n");
 }
 
-void pulse(State &s, uint64_t buttons, uint64_t ns, uint64_t after = 0, bool dpad = false) {
+void pulse(State &s, uint64_t buttons, uint64_t ns, uint64_t after = 0, bool dpad = false, bool art = false) {
     uint64_t now = SDL_GetTicksNS();
     for (Pulse &p : s.pulse)
-        if (p.until <= now) { p.buttons = buttons, p.from = now + after, p.until = now + after + ns, p.dpad = dpad; return; }
+        if (p.until <= now) { p = {buttons, now + after, now + after + ns, dpad, art}; return; }
 }
 // A step of the ammo or the coating: L held, X the next one, B the one before, and L let go confirms it (the game's own).
 // The game takes L only after a while: X 220 ms after it reloaded or did nothing, 310 ms after it changed the ammo (a
@@ -1016,7 +1124,7 @@ bool ammo_step(State &s, int dir, bool from_arrow = false) {
     }
     if (now < s.ammo_ready) return false;
     uint64_t at = std::max(now + 20 * MS, s.bar_since + 380 * MS);
-    s.ammo_pulse = {buttons, at, at + 80 * MS, false};
+    s.ammo_pulse = {buttons, at, at + 80 * MS, false, false};
     s.ammo_arrow_source = from_arrow;
     s.ammo_ready = at + 170 * MS;
     s.ammo_hold = at + 320 * MS;
@@ -1149,7 +1257,7 @@ void recompute_held(State &s) {
     s.held = 0;
     for (Finger &f : s.f)
         if (!f.done) {
-            if (f.kind == F_BUTTON && !(is_dpad(f.ctl) && s.in_quest && !s.menu)) s.held |= finger_buttons(f);
+            if (f.kind == F_BUTTON) s.held |= finger_buttons(f);
             if (item_gesture(f) && f.bar_open) s.held |= B(BTN_L);
         }
 }
@@ -1198,6 +1306,52 @@ void item_motion(State &s, Finger &f, float dx, float dy, uint64_t now) {
     item_swipe(s, f, now);
 }
 
+enum { MENU_TOUCH_SLIDER = -4, MENU_TOUCH_PANEL = -5 };
+int menu_touch_hit(const SDL_Event *e, float *x, float *y) {
+    if (!host_input_menu_point(e->tfinger.x, e->tfinger.y, x, y)) return MENUPTR_NONE;
+    if (menuptr_slider_open())
+        return menuptr_slider_hit(*x, *y) ? MENU_TOUCH_SLIDER : menuptr_slider_panel(*x, *y) ? MENU_TOUCH_PANEL : MENUPTR_NONE;
+    return menuptr_hit(*x, *y);
+}
+bool menu_touch_begin(State &s, Finger &f, const SDL_Event *e) {
+    if (s.typing || !menuptr_open()) return false;
+    float x, y;
+    int target = menu_touch_hit(e, &x, &y);
+    if (target == MENUPTR_NONE) return false;
+    f.kind = F_GAME_MENU, f.ctl = target, f.btn = menuptr_menu_id();
+    // One menu gesture at a time; a second finger must not confirm or inherit the first one's press.
+    for (const Finger &other : s.f)
+        if (&other != &f && other.kind == F_GAME_MENU) f.done = true;
+    if (!f.done) {
+        if (target >= 0) menuptr_select_at(target, false, x, y);
+        else if (target == MENU_TOUCH_SLIDER) menuptr_slider_set(x, false);
+        tap_due();
+    }
+    return true;
+}
+void menu_touch_event(State &s, Finger &f, const SDL_Event *e, float x, float y) {
+    if (overlay_menu_open() || s.edit || s.typing || !menuptr_open() || f.btn != menuptr_menu_id() ||
+        ((f.ctl == MENU_TOUCH_SLIDER || f.ctl == MENU_TOUCH_PANEL) != menuptr_slider_open()))
+        f.done = true;
+    if (hypotf(x-f.x0, y-f.y0) > .025f*s.h) f.moved = true;
+    if (!f.done && e->type != SDL_EVENT_FINGER_CANCELED) {
+        float gx, gy;
+        int target = menu_touch_hit(e, &gx, &gy);
+        if (f.ctl == MENU_TOUCH_SLIDER) {
+            if (host_input_menu_point(e->tfinger.x, e->tfinger.y, &gx, &gy)) menuptr_slider_set(gx, false);
+        } else if (e->type == SDL_EVENT_FINGER_UP && !f.moved && target == f.ctl) {
+            if (target >= 0) menuptr_select_at(target, true, gx, gy);
+            else if (target == MENUPTR_PAGE_LEFT || target == MENUPTR_PAGE_RIGHT)
+                menuptr_page_turn(target == MENUPTR_PAGE_LEFT ? -1 : 1);
+            else if (target == MENU_TOUCH_PANEL) host_input_press("A", 12);
+        } else if (e->type == SDL_EVENT_FINGER_MOTION && target >= 0) {
+            menuptr_select_at(target, false, gx, gy);
+        }
+    }
+    f.x = x, f.y = y;
+    if (e->type != SDL_EVENT_FINGER_MOTION) f.kind = F_NONE;
+}
+
 // the port's settings menu takes the fingers as its mouse (overlay.cpp)
 void to_menu(const SDL_Event *e) {
     SDL_Window *win = ui_window();
@@ -1223,13 +1377,16 @@ void to_menu(const SDL_Event *e) {
     }
 }
 
-// ---- the layout editor: a panel at the top (smaller, bigger, defaults, cancel, save); drag a control to move it,
+// ---- the layout editor: a movable panel (smaller, bigger, defaults, cancel, save); drag a control to move it,
 // pinch (a second finger anywhere) or the panel's - / + to size it
-void editor_panel(float w, float h, Rect *panel, Rect btn[E_COUNT]) {
-    float pw = std::min(w * .9f, 1.8f * h), x0 = (w - pw) * .5f;
-    *panel = {x0, 0, x0 + pw, .06f * h, true};
-    float gap = .015f * h, bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = .005f * h, by1 = .055f * h;
-    for (int i = 0; i < E_COUNT; i++) btn[i] = {x0 + gap + i * (bw + gap), by0, x0 + gap + i * (bw + gap) + bw, by1, true};
+void editor_panel(const Layout &layout, float w, float h, Rect *panel, Rect btn[E_COUNT]) {
+    float pw = std::min(w * .94f, 1.5f * h), gap = .01f * h;
+    float header = std::max(.06f * h, 28.0f), bh = std::max(.10f * h, 48.0f), ph = header + bh + gap * 2;
+    float x0 = std::max(0.0f, w - pw) * layout.editor_x, y0 = std::max(0.0f, h - ph) * layout.editor_y;
+    *panel = {x0, y0, x0 + pw, y0 + ph, true};
+    float bw = (pw - gap * (E_COUNT + 1)) / E_COUNT, by0 = y0 + header + gap;
+    for (int i = 0; i < E_COUNT; i++)
+        btn[i] = {x0 + gap + i * (bw + gap), by0, x0 + gap + i * (bw + gap) + bw, by0 + bh, true};
 }
 
 void edit_begin(State &s) {
@@ -1270,8 +1427,10 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         if (!f) return;
         *f = {};
         f->id = e->tfinger.fingerID, f->x = f->x0 = x, f->y = f->y0 = y, f->ctl = -1;
+        for (const Finger &g : s.f)
+            if (&g != f && g.kind == F_EDIT_PANEL) { f->kind = F_MENU; return; }
         Rect panel, btn[E_COUNT];
-        editor_panel(s.w, s.h, &panel, btn);
+        editor_panel(s.layout, s.w, s.h, &panel, btn);
         for (int i = 0; i < E_COUNT; i++)
             if (btn[i].in(x, y)) {
                 f->kind = F_MENU;  // (held until it lifts: nothing under it moves)
@@ -1287,7 +1446,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
                 }
                 return;
             }
-        if (panel.in(x, y)) { f->kind = F_MENU; return; }
+        if (panel.in(x, y)) { f->kind = F_EDIT_PANEL; return; }
         Finger *drag = nullptr;
         for (Finger &g : s.f)
             if (&g != f && g.kind == F_EDIT && g.ctl >= 0) drag = &g;
@@ -1312,6 +1471,14 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
     if (e->type == SDL_EVENT_FINGER_MOTION) {
         float dx = x - f->x, dy = y - f->y;
         f->x = x, f->y = y;
+        if (f->kind == F_EDIT_PANEL) {
+            Rect panel, btn[E_COUNT];
+            editor_panel(s.layout, s.w, s.h, &panel, btn);
+            float tx = s.w - (panel.x1 - panel.x0), ty = s.h - (panel.y1 - panel.y0);
+            s.layout.editor_x = tx > 0 ? std::clamp(s.layout.editor_x + dx / tx, 0.0f, 1.0f) : 0;
+            s.layout.editor_y = ty > 0 ? std::clamp(s.layout.editor_y + dy / ty, 0.0f, 1.0f) : 0;
+            return;
+        }
         if (f->kind != F_EDIT) return;
         if (s.pinch) {
             Finger *a = nullptr, *b = nullptr;
@@ -1321,6 +1488,7 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             if (a && b && c >= 0 && c < C_COUNT) s.layout.scale[c] = s.pinch_s0 * hypotf(a->x - b->x, a->y - b->y) / s.pinch_d0, clamp_place(s, c);
         } else if (f->ctl >= ZONE_SEL) {  // a HUD part: in the canvas' units (the HUD keeps its 16:9 shape: squeeze)
             int k = f->ctl - ZONE_SEL;
+            if (k < 0 || k >= TZ_COUNT || (k == TZ_MAP && !s.in_quest)) return;
             Pic pic = picture(s.w, s.h);
             s.layout.zx[k] = std::clamp(s.layout.zx[k] + dx * 1280.0f / pic.w / squeeze(), -1400.0f, 1400.0f);
             s.layout.zy[k] = std::clamp(s.layout.zy[k] + dy * 720.0f / pic.h / squeeze_y(), -800.0f, 800.0f);
@@ -1356,6 +1524,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
     s.w = (float)pw, s.h = (float)ph;
     float x = e->tfinger.x * s.w, y = e->tfinger.y * s.h;
     validate_bow_drag(s);
+    Zones z = zones();
+    if (!art_touch_enabled(s, z)) cancel_art_input(s);
     if (s.edit && !overlay_menu_open()) { edit_event(s, e, x, y); return true; }
     if (overlay_menu_open()) release_dpad(s), cancel_button_camera(s);
     if (overlay_menu_open() || s.menu || (!g_visible && !s.auto_wait)) cancel_item_gestures(s);
@@ -1382,10 +1552,11 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 tap_due();
                 return true;
             }
+            if (menu_touch_begin(s, *f, e)) return true;
+            if (art_touch_begin(s, *f, z, x, y)) return true;
             f->kind = F_CAMERA;  // (hidden: a drag still turns the camera)
             return true;
         }
-        Zones z = zones();
         Rect item = zone_rect(z, TZ_ITEM, s.w, s.h), arts = zone_rect(z, TZ_ARTS, s.w, s.h),
              target = zone_rect(z, TZ_TARGET, s.w, s.h);
         int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, classic && !floating_stick_enabled(s), s.menu, s.in_quest, false, control_profile(s));
@@ -1404,6 +1575,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
             Geo g = place(s.layout, ammo, s.w, s.h);
             if (hypotf(x - g.c.x, y - g.c.y) < g.r * 1.2f) { c = ammo; part = 0; break; }
         }
+        Geo stick = place(s.layout, C_STICK, s.w, s.h);
+        // Only the visible stick owns a menu overlap, not the floating stick's whole activation area.
+        bool on_stick = in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) &&
+                        ((!floating_stick_enabled(s) && hypotf(x-stick.c.x, y-stick.c.y) < stick.r*1.22f) ||
+                         (s.stick_on && (hypotf(x-s.bx, y-s.by) < stick.r*1.22f ||
+                                        hypotf(x-s.kx, y-s.ky) < stick.r*KNOB*1.25f)));
         if (classic && c == C_STICK) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = c;
@@ -1412,7 +1589,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 s.stick_on = true, s.bx = g.c.x, s.by = g.c.y;
                 stick_to(s, x, y);
             }
-        } else if (classic && c == C_RSTICK) {
+        } else if (c == C_RSTICK) {
             bool held = false;
             for (const Finger &g : s.f) if (g.kind == F_RSTICK) held = true;
             f->kind = held ? F_MENU : F_RSTICK, f->ctl = c;
@@ -1421,6 +1598,11 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (c == C_DPAD_TOGGLE) {
                 config_toggle_touch_dpad();
                 if (!config_live_touch_show(TB_DPAD)) release_dpad(s);
+                f->done = true;
+            }
+            if (c == C_RSTICK_TOGGLE) {
+                if (g_right_stick_visible.fetch_xor(1))
+                    for (Finger &g : s.f) if (&g != f && g.kind == F_RSTICK) g.kind = F_NONE;
                 f->done = true;
             }
             f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, ranged_layout_profile(control_profile(s))) : 0;
@@ -1446,15 +1628,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
             f->kind = F_ITEM;
         } else if (!s.menu && target.in(x, y)) {
             f->kind = F_TARGET;
-        } else if (!s.menu && arts.in(x, y)) {
-            float rows[3][2];
-            int nr = arts_rows(z, s.w, s.h, rows), row = -1;
-            float best = 1e30f;  // (the row under the finger, or the nearest one)
-            for (int i = 0; i < nr; i++) {
-                float d = y < rows[i][0] ? rows[i][0] - y : y > rows[i][1] ? y - rows[i][1] : 0;
-                if (d < best) best = d, row = i;
-            }
-            f->kind = F_ARTS, f->part = row;  // (performed on the tap, when it lifts: a drag turns the camera)
+        } else if (art_touch_begin(s, *f, z, x, y)) {
+            return true;
+        } else if (!on_stick && menu_touch_begin(s, *f, e)) {
+            return true;
         } else if (in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s))) && in_stick_zone(s, x, y, item)) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = C_STICK;
@@ -1479,6 +1656,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
     }
     Finger *f = finger(s, e->tfinger.fingerID);
     if (!f) return true;
+    if (f->kind == F_GAME_MENU) {
+        menu_touch_event(s, *f, e, x, y);
+        return true;
+    }
     if (f->kind == F_MENU) {
         if (overlay_menu_open() && f->part) to_menu(e);
         if (e->type != SDL_EVENT_FINGER_MOTION) f->kind = F_NONE;
@@ -1551,9 +1732,17 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && !f->part && now - f->t0 < 220 * MS &&
         fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
         pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
-    if (f->kind == F_ARTS && tap && f->part >= 0)  // a tap on a Hunter Art's panel: its d-pad direction
-        pulse(s, ART_FACE[f->part], 120 * MS),  // (its d-pad direction)
-            s.art_row = f->part, s.art_flash = now + 250 * MS, tap_due();
+    if (f->kind == F_ARTS && tap && !f->done && f->part >= 0 && f->part < 3) {
+        pulse(s, ART_BUTTONS[f->part], 120 * MS, 0, false, true),
+            s.art_row = f->ctl, s.art_flash = now + 250 * MS, tap_due();
+        fprintf(stderr, "[touch] Hunter Art tap: row %d slot %d buttons %llx\n", f->ctl + 1, f->part + 1,
+                (unsigned long long)ART_BUTTONS[f->part]);
+    }
+    if (f->kind == F_BUTTON && f->ctl == C_LOCK && tap && !cancel && s.in_quest && !s.menu && !overlay_menu_open() &&
+        config_live_lock_on()) {
+        s.lock = !s.lock, s.hunt_ns = now;
+        fprintf(stderr, "[touch] lock-on %s (virtual button)\n", s.lock ? "on" : "off");
+    }
     bool target_hold = f->kind == F_TARGET && !f->moved && !cancel && now - f->t0 >= 500 * MS;
     if (f->kind == F_TARGET && (tap || target_hold)) {
         tap_due();
@@ -1585,9 +1774,11 @@ extern "C" bool touch_event(const SDL_Event *e) {
 extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
                                 float *cam_dx, float *cam_dy) {
     TapAfterUnlock tap_after;  // (declared first: it runs after the lock is released)
+    g_virtual_right_stick_active.store(false, std::memory_order_release);
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     ensure_loaded(s);
+    s.typing = typing;
     uint64_t now = SDL_GetTicksNS();
     bool menu = overlay_menu_open();
     uint32_t hunter = weapon_hunter();
@@ -1613,6 +1804,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     if (game != s.menu) {  // Menu input changes, but the quest's controls remain in place under held fingers.
         s.menu = game;
+        if (!game) for (Finger &f : s.f) if (f.kind == F_GAME_MENU) f.done = true;
         cancel_button_camera(s);
         release_dpad(s);  // Do not turn a camera press into menu navigation, or the reverse.
         if (game) cancel_item_gestures(s);
@@ -1651,13 +1843,17 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     if (!visible || menu || s.menu || s.edit) cancel_item_gestures(s);
     if (!visible || menu || s.menu || s.edit) reset_bow_drag(s);
     if (menu || s.menu || s.edit) cancel_button_camera(s);
+    if (!art_touch_enabled(s, zones())) cancel_art_input(s);
+    for (Finger &f : s.f)
+        if (f.kind == F_GAME_MENU && (menu || typing || s.edit || !menuptr_open() || f.btn != menuptr_menu_id()))
+            f.done = true;
     if (was_visible && !visible) {
         cancel_button_camera(s);
         for (Finger &f : s.f)
             if (f.kind == F_BUTTON || f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
         s.stick_on = false;
         s.held = 0;
-        for (Pulse &p : s.pulse) p.until = 0;
+        for (Pulse &p : s.pulse) if (!p.art) p.until = 0;
     }
     // (hidden, by a controller or by Off: the settings button alone stays, or a phone without a controller had no way
     // back to the menu but clearing the app's data)
@@ -1709,7 +1905,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     if (!visible || !in_mode(C_STICK, s.menu, s.in_quest, ranged_layout_profile(control_profile(s)))) s.stick_on = false;
     recompute_held(s);
     if (!visible) {
-        for (Pulse &p : s.pulse) p = {};
+        for (Pulse &p : s.pulse) if (!p.art) p = {};
         for (Finger &f : s.f) if (f.kind == F_STICK || f.kind == F_RSTICK) f.kind = F_NONE;
         s.ammo_hold = s.ammo_ready = s.bar_since = 0;
         s.ammo_pulse = {};
@@ -1722,12 +1918,10 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         s.cam_dx = s.cam_dy = 0;
         return 0;
     }
-    uint64_t touch_b = 0, camera_b = 0;
-    bool dpad_camera = s.in_quest && !s.menu;
+    uint64_t touch_b = 0;
     for (Pulse &p : s.pulse)
         if (p.until > now && now >= p.from) {
-            if (p.dpad && dpad_camera) camera_b |= p.buttons;
-            else touch_b |= p.buttons, *buttons |= p.buttons;
+            touch_b |= p.buttons, *buttons |= p.buttons;
         }
     if (s.ammo_pulse.until > now && now >= s.ammo_pulse.from)
         touch_b |= s.ammo_pulse.buttons, *buttons |= s.ammo_pulse.buttons;
@@ -1740,13 +1934,17 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     if (!visible || s.edit) return touch_b;
     touch_b |= s.held;
     *buttons |= s.held;
-    if (dpad_camera) {
-        // Only the virtual D-pad steers the camera; arts and combos keep their direction buttons.
-        for (const Finger &f : s.f)
-            if (f.kind == F_BUTTON && !f.done && is_dpad(f.ctl)) camera_b |= finger_buttons(f);
-        *rx += ((camera_b & DPAD_RIGHT ? 1 : 0) - (camera_b & DPAD_LEFT ? 1 : 0)) * 32767;
-        *ry += ((camera_b & DPAD_UP ? 1 : 0) - (camera_b & DPAD_DOWN ? 1 : 0)) * 32767;
+    bool virtual_right_stick = false;
+    if (s.h > 0) {
+        Geo g = place(s.layout, C_RSTICK, s.w, s.h);
+        for (const Finger &f : s.f) if (f.kind == F_RSTICK && !f.done && g.r > 0) {
+            float dx = (f.x - g.c.x) / g.r, dy = (g.c.y - f.y) / g.r;
+            float scale = 32767 / std::max(1.0f, hypotf(dx, dy));
+            *rx += (int)(dx * scale), *ry += (int)(dy * scale);
+            virtual_right_stick = true;
+        }
     }
+    g_virtual_right_stick_active.store(virtual_right_stick, std::memory_order_release);
     {
         static uint64_t was;
         // (with a gun out A fires, and the scope's window comes back after each shot)
@@ -1768,14 +1966,6 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
             if (r > 0) {
                 *lx += (int)((s.kx - s.bx) / r * 32767);
                 *ly += (int)((s.by - s.ky) / r * 32767);
-            }
-        }
-        if (s.h > 0) {
-            Geo g = place(s.layout, C_RSTICK, s.w, s.h);
-            for (const Finger &f : s.f) if (f.kind == F_RSTICK && !f.done && g.r > 0) {
-                float dx = (f.x - g.c.x) / g.r, dy = (g.c.y - f.y) / g.r;
-                float scale = 32767 / std::max(1.0f, hypotf(dx, dy));
-                *rx += (int)(dx * scale), *ry += (int)(dy * scale);
             }
         }
         return touch_b;
@@ -1822,6 +2012,10 @@ extern "C" void touch_edit_cancel(void) {  // (the settings menu stayed open: "C
 extern "C" bool touch_running(void) {
     std::lock_guard<std::mutex> l(g_lock);
     return g_s.run;
+}
+
+extern "C" bool touch_virtual_right_stick_active(void) {
+    return g_virtual_right_stick_active.load(std::memory_order_acquire);
 }
 
 extern "C" const char *touch_icon_button_name(int button) {
@@ -1950,9 +2144,7 @@ extern "C" bool touch_lock_active(void) { return g_lock_follow.load(); }
 extern "C" bool touch_lock_on(void) { return g_lock_shots.load(); }
 
 // The app goes to the background (Android): every finger is gone (their ups will not come)
-extern "C" void touch_reset(void) {
-    std::lock_guard<std::mutex> l(g_lock);
-    State &s = g_s;
+static void reset_touch_input(State &s) {
     reset_bow_drag(s);
     itembar_touch_cancel();
     for (Finger &f : s.f) f.kind = F_NONE;
@@ -1963,12 +2155,21 @@ extern "C" void touch_reset(void) {
     s.ammo_arrow_source = s.item_arrow_source = false;
 }
 
+extern "C" void touch_reset(void) {
+    std::lock_guard<std::mutex> l(g_lock);
+    reset_touch_input(g_s);
+}
+
+extern "C" void touch_background(void) {
+    std::lock_guard<std::mutex> l(g_lock);
+    g_resume_menu = g_resume_menu.load() || g_s.menu;
+    reset_touch_input(g_s);
+}
+
 extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float canvas_y,
                                  float offset_x, float offset_y) {
     (void)game_x;
-    if (zone < 0 || zone >= TZ_COUNT || g_build.n[zone] >= 32) return;
-    int i = g_build.n[zone]++;
-    g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
+    if (zone < 0 || zone >= TZ_COUNT) return;
     EditorZone &z = g_build_editor[zone];
     float x = canvas_x - offset_x, y = canvas_y - offset_y;
     if (!z.bounds.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != (g_touch_hud != 0)) {
@@ -1977,15 +2178,24 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
         z.bounds.x0 = std::min(z.bounds.x0, x), z.bounds.x1 = std::max(z.bounds.x1, x);
         z.bounds.y0 = std::min(z.bounds.y0, y), z.bounds.y1 = std::max(z.bounds.y1, y);
     }
+    if (g_build.n[zone] >= 32) return;
+    int i = g_build.n[zone]++;
+    g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
 
+extern "C" void touch_hud_art_slot(float game_y, int slot) {
+    if (slot < 0 || slot >= 3 || !std::isfinite(game_y)) return;
+    g_build.art_slot_mask |= 1u << slot;
+    g_build.art_slot_y[slot] = game_y;
+}
+
 extern "C" void touch_hud_frame(void) {
     if (g_build_menu) g_menu_ns = SDL_GetTicksNS();
     g_build_menu = false;
-    // (a frame drawn without those parts keeps the last ones: they age out after 300 ms, zone_rect, when the HUD is
-    // gone; a frame now and then without them must not leave a finger on the camera instead)
+    // Each part keeps its last observed frame until it ages out. An item-only frame must not erase a ready art
+    // or refresh an absent target; a frame now and then without a part must not turn its tap into a camera drag.
     bool any = false;
     for (int k = 0; k < TZ_COUNT; k++) any |= g_build.n[k] != 0;
     static uint64_t last;
@@ -2004,15 +2214,27 @@ extern "C" void touch_hud_frame(void) {
             since = now, frames = with = 0;
         }
     }
-    if (any) {
+    if (any || g_build.art_slot_mask) {
         std::lock_guard<std::mutex> l(g_zone_lock);
-        g_zones = g_build;
-        g_zones.ns = SDL_GetTicksNS();
-        // Editing keeps each part independently; ordinary gameplay still expires its live hit regions.
-        for (int k = 0; k < TZ_COUNT; k++)
+        if (g_build.art_slot_mask) {
+            g_zones.art_slot_mask = g_build.art_slot_mask;
+            memcpy(g_zones.art_slot_y, g_build.art_slot_y, sizeof g_zones.art_slot_y);
+            g_zones.art_slot_ns = t;
+        }
+        for (int k = 0; k < TZ_COUNT; k++) {
+            int n = g_build.n[k];
+            if (!n) continue;
+            g_zones.n[k] = n;
+            memcpy(g_zones.gy[k], g_build.gy[k], n * sizeof(float));
+            memcpy(g_zones.cx[k], g_build.cx[k], n * sizeof(float));
+            memcpy(g_zones.cy[k], g_build.cy[k], n * sizeof(float));
+            g_zones.ns[k] = t;
+            // Editing keeps each part independently; gameplay still expires its live hit regions.
             if (g_build_editor[k].bounds.ok) g_editor_zones[k] = g_build_editor[k];
+        }
     }
     memset(g_build.n, 0, sizeof g_build.n);
+    g_build.art_slot_mask = 0;
     for (EditorZone &z : g_build_editor) z = {};
 }
 
@@ -2154,6 +2376,9 @@ void icon(ImDrawList *dl, Icon ic, ImVec2 c, float r, ImU32 col, ImU32 deep) {
             dl->AddTriangleFilled(P(c, s, .95f * d, 0), P(c, s, .68f * d, -.24f), P(c, s, .68f * d, .24f), col);
         break;
     }
+    case I_LOCK:
+        padlock(dl, c, s, true, col, deep);
+        break;
     case I_CAMERA: {  // centre the camera: a camera
         dl->AddRectFilled(P(c, s, -.66f, -.36f), P(c, s, .66f, .44f), col, .12f * s);
         dl->AddRectFilled(P(c, s, -.24f, -.54f), P(c, s, .24f, -.3f), col, .06f * s);
@@ -2369,7 +2594,7 @@ bool custom_icon(ImDrawList *dl, const IconChoice &choice, ImVec2 c, float r, Im
     if (choice.choice != -1) return false;
     ImTextureData *tex = icon_texture(choice.hash);
     if (!tex) return false; // Missing or corrupt resource: preserve the reference but show the default face.
-    float scale = r * 1.38f / std::max(tex->Width, tex->Height);
+    float scale = r * 2.0f / std::max(tex->Width, tex->Height);
     ImVec2 half(tex->Width * scale * .5f, tex->Height * scale * .5f);
     dl->AddImage(tex->GetTexRef(), ImVec2(c.x-half.x, c.y-half.y), ImVec2(c.x+half.x, c.y+half.y),
                  ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32_WHITE, a));
@@ -2638,8 +2863,10 @@ void dpad(ImDrawList *dl, Geo g, int part, float a) {
     }
 }
 
-void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, const IconChoice *choice = nullptr) {
+bool stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, const IconChoice *choice = nullptr) {
     float kr = r * KNOB;
+    // Imported artwork supplies the complete shape, including its transparent outline.
+    if (choice && choice->choice == -1 && custom_icon(dl, *choice, knob, kr, IM_COL32_WHITE, a)) return true;
     dl->AddCircleFilled(base, r, fade(IM_COL32(10, 7, 5, 255), a * (on ? .42f : .26f)), 48);
     dl->AddCircle(base, r, fade(BRONZE, a), 48, r * .07f);
     dl->AddCircle(base, r * .955f, fade(GOLD, a * .85f), 48, r * .025f);
@@ -2652,10 +2879,11 @@ void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on, 
         dl->AddConvexPolyFilled(q, 4, fade(GOLD, a * .8f));
     }
     disc(dl, knob, kr, on, a);
-    if (choice && custom_icon(dl, *choice, knob, kr, fade(GOLD, a), a)) return;
+    if (choice && custom_icon(dl, *choice, knob, kr, fade(GOLD, a), a)) return false;
     float d = kr * .32f;
     ImVec2 q[4] = {ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y)};
     dl->AddConvexPolyFilled(q, 4, fade(GOLD, a));
+    return false;
 }
 
 void combo_label(int i, int profile, char *out, size_t size) {
@@ -2691,8 +2919,8 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
     }
     if (i == C_STICK) {
         if (s.stick_on && !s.edit) {
-            stick(dl, ImVec2(s.bx, s.by), ImVec2(s.kx, s.ky), g.r, a, true, &l.icons[i]);
-            if (s.run) {  // (running: a gold ring round the rim, and streaks behind the knob)
+            bool image = stick(dl, ImVec2(s.bx, s.by), ImVec2(s.kx, s.ky), g.r, a, true, &l.icons[i]);
+            if (s.run && !image) {  // (running: a gold ring round the rim, and streaks behind the knob)
                 dl->AddCircle(ImVec2(s.bx, s.by), g.r * 1.12f, fade(GLOW, a * .85f), 48, g.r * .07f);
                 float dx = s.kx - s.bx, dy = s.ky - s.by, n = std::max(1.0f, hypotf(dx, dy));
                 dx /= n, dy /= n;
@@ -2719,6 +2947,7 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
         bool available = l.icons[i].choice > 0 || icon_texture(l.icons[i].hash);
         if (available) {
             float r = mask ? g.r * .95f : g.r;
+            if (l.icons[i].choice == -1 && custom_icon(dl, l.icons[i], g.c, r, IM_COL32_WHITE, a)) return;
             disc(dl, g.c, r, mask != 0, a);
             custom_icon(dl, l.icons[i], g.c, r, fade(mask ? GLOW : INK, a), a);
             if (is_combo(i)) {
@@ -2737,6 +2966,14 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
         disc(dl, g.c, g.r, shown, a);
         dpad(dl, {g.c, g.r * .64f}, 0, a);
         if (!shown) dl->AddLine(ImVec2(g.c.x-g.r*.65f,g.c.y+g.r*.65f), ImVec2(g.c.x+g.r*.65f,g.c.y-g.r*.65f), fade(GOLD,a), g.r*.12f);
+        return;
+    }
+    if (i == C_RSTICK_TOGGLE) {
+        bool shown = g_right_stick_visible.load() != 0;
+        disc(dl, g.c, g.r, shown, a);
+        stick(dl, g.c, g.c, g.r * .68f, a, shown);
+        if (!shown) dl->AddLine(ImVec2(g.c.x - g.r * .62f, g.c.y + g.r * .62f),
+                                ImVec2(g.c.x + g.r * .62f, g.c.y - g.r * .62f), fade(GOLD, a), g.r * .1f);
         return;
     }
     if (i == C_ATTACK) { pill(dl, font, g, mask, a); return; }
@@ -2783,7 +3020,8 @@ void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, floa
     char letter[8];
     snprintf(letter, sizeof letter, "%s", DEFS[i].letter);
     if (is_ranged(i)) ranged_face(i, ranged_layout_profile(control_profile(s)), s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
-    icon(dl, ic, g.c, i == C_RFIRE ? r * .94f : r, fade(mask ? GLOW : scope_r ? GOLD : INK, a), fade(DEEP, a));
+    if (i == C_LOCK && ic == I_LOCK) padlock(dl, g.c, r * .62f, s.lock, fade(mask ? GLOW : INK, a), fade(DEEP, a));
+    else icon(dl, ic, g.c, i == C_RFIRE ? r * .94f : r, fade(mask ? GLOW : scope_r ? GOLD : INK, a), fade(DEEP, a));
     float br = std::max(r * (i == C_RFIRE ? .22f : .3f), .021f * h);  // (the large one's as large as the others')
     badge(dl, font, ImVec2(g.c.x + r * .7f, g.c.y + r * .7f), br, letter, a);
 }
@@ -2823,7 +3061,8 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h) {
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 96));
     static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
-                                                    "Hunter Arts - drag to move", "Lock-on - drag to move"};
+                                                   "Hunter Arts - drag to move", "Lock-on - drag to move",
+                                                   "Map - drag to move"};
     for (int k = 0; k < TZ_COUNT; k++) {
         if (control_profile(s) < 0) break;
         Rect r = editor_zone_rect(s.layout, k, w, h, s.in_quest);
@@ -2901,20 +3140,18 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         }
     }
     Rect panel, btn[E_COUNT];
-    editor_panel(w, h, &panel, btn);
+    editor_panel(s.layout, w, h, &panel, btn);
     float line = .004f * h;
     plate(dl, panel, line, 1.0f, false);
-    const char *title = T("Universal layout");
-    // Keep the top buttons clear of Plus/Minus and the shoulder controls without moving saved positions.
-    auto caption = [&](const char *text, float size, float y, ImU32 color) {
-        float room = std::max(.3f * h, w - .9f * h), wide = font->CalcTextSizeA(size, FLT_MAX, 0, text).x;
-        if (wide > room) size *= room / wide;
-        text_center(dl, font, size, ImVec2(w * .5f, y), color, text);
-    };
-    caption(title, .028f * h, .21f * h, GLOW);
-    caption(T(s.save_failed ? "Could not save layout; please try again." : s.sel >= 0 ?
-                  "Drag to move  -  pinch or use - / + for its size" :
-                  "Save your edits, then save a custom template in Settings."), .018f * h, .235f * h, INK);
+    const char *title = T(s.save_failed ? "Could not save layout; please try again." : "Drag toolbar to move");
+    float header = std::max(.06f * h, 28.0f), title_size = std::max(.028f * h, 16.0f);
+    float title_width = font->CalcTextSizeA(title_size, FLT_MAX, 0, title).x, title_room = (panel.x1 - panel.x0) * .82f;
+    if (title_width > title_room) title_size *= title_room / title_width;
+    text_center(dl, font, title_size, ImVec2((panel.x0 + panel.x1) * .5f, panel.y0 + header * .5f), GLOW, title);
+    for (int i = -1; i <= 1; ++i) {
+        float y = panel.y0 + header * (.5f + i * .15f);
+        dl->AddLine(ImVec2(panel.x0 + .015f * h, y), ImVec2(panel.x0 + .045f * h, y), INK, line);
+    }
     const char *const LABEL[E_COUNT] = {"-", "+", "Defaults", "Cancel", "Save"};
     for (int i = 0; i < E_COUNT; i++) {
         bool off = (i == E_SMALLER || i == E_BIGGER) && (s.sel < 0 || s.sel >= C_COUNT);
@@ -2922,7 +3159,8 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         for (const Finger &f : s.f)
             if (f.kind == F_MENU && btn[i].in(f.x, f.y)) lit = true;
         plate(dl, btn[i], line * .8f, off ? .45f : 1.0f, lit);
-        float fs = (i < 2 ? .04f : .028f) * h, room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
+        float fs = std::max((i < 2 ? .05f : .033f) * h, i < 2 ? 24.0f : 16.0f);
+        float room = (btn[i].x1 - btn[i].x0) * .92f, wide = font->CalcTextSizeA(fs, FLT_MAX, 0, T(LABEL[i])).x;
         if (wide > room) fs *= room / wide;  // (a narrow screen, a long word: on one line, smaller)
         text_center(dl, font, fs, ImVec2((btn[i].x0 + btn[i].x1) * .5f, (btn[i].y0 + btn[i].y1) * .5f),
                     fade(i == E_SAVE ? GLOW : INK, off ? .45f : 1.0f), T(LABEL[i]));
@@ -2981,7 +3219,7 @@ extern "C" void touch_draw(float w, float h) {
     if (arts.ok && now < s.art_flash) {
         float rows[3][2];
         int nr = arts_rows(z, w, h, rows);
-        if (s.art_row < nr)
+        if (s.art_row >= 0 && s.art_row < nr)
             dl->AddRect(ImVec2(arts.x0, rows[s.art_row][0]), ImVec2(arts.x1, rows[s.art_row][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
     }
     if (target.ok && config_live_lock_on()) {  // the lock-on: a padlock by the target camera's icon, lit (and its ring) while on
