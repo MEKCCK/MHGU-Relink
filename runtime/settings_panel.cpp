@@ -2197,7 +2197,7 @@ void aspect_rows(std::vector<Row> &r) {
                        s.draft.aspect_ratio = s.draft.width && s.draft.height ?
                            (float)s.draft.width / s.draft.height : g_render_aspect;
                }, ini("AspectRatio"));
-    r.back().help = tr("Auto follows the selected screen resolution. Resolution-labelled presets use the exact pixel ratio. Save applies immediately.");
+    r.back().help = tr("Auto follows the selected screen resolution. Resolution-labelled presets use the exact pixel ratio. Save and restart the game to apply it.");
     if (selected == custom) {
         s.aspect_custom = true;
         number(r, "aspect", tr("Custom aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, ini("AspectRatio"));
@@ -2254,9 +2254,7 @@ std::vector<Row> main_rows() {
                 r.back().value = std::to_string(c.render_scale) + "%";
             r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
         }
-#ifndef __ANDROID__  // (a phone: not worth a row)
-        aspect_rows(r);
-#endif
+        aspect_rows(r);  // (phones with 21:9 / 21:10 screens use the same presets)
         number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},

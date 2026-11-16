@@ -161,7 +161,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"64:27 (2560x1080)", "64:27 (2560x1080)", "64:27 超宽（2560×1080）"},
         {"43:18 (3440x1440)", "43:18 (3440x1440)", "43:18 超宽（3440×1440）"},
         {"24:10 (3840x1600)", "24:10 (3840x1600)", "24:10 超宽（3840×1600）"},
-        {"Auto follows the selected screen resolution. Resolution-labelled presets use the exact pixel ratio. Save applies immediately.", "Automático usa la resolución de pantalla seleccionada. Los ajustes con resolución usan su proporción exacta. Guardar aplica al instante.", "自动跟随所选屏幕分辨率；带分辨率名称的预设使用精确像素比例。保存后立即生效。"},
+        {"Auto follows the selected screen resolution. Resolution-labelled presets use the exact pixel ratio. Save and restart the game to apply it.", "Automático usa la resolución de pantalla seleccionada. Los ajustes con resolución usan su proporción exacta. Guarda y reinicia el juego para aplicarlo.", "自动跟随所选屏幕分辨率；带分辨率名称的预设使用精确像素比例。保存后重启游戏生效。"},
         {"Aspect ratio", "Relación de aspecto", "宽高比"},
         {"FOV multiplier", "Campo de visión (FOV)", "视野倍数"},
         {"HUD placement", "Posición del HUD", "HUD 位置"},

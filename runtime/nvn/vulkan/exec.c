@@ -3963,6 +3963,14 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
                     grouped = sy < 1.0f && !(ui_loading_pass && pos_z >= 94.0f && pos_z < 109.5f) && fabsf(pos_z - 103.0f) >= 0.5f &&
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f && !arts_move && !target_move;
+                    // Wider than 16:9: one anchor per window sideways for menus (97, text over them 98) and the
+                    // windows/prompts of 100. By their own place a piece went left of x 430 and right of it, splitting
+                    // the item box's submenu and the multiplayer dialog.
+                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f ||
+                                    fabsf(pos_z - 100.0f) < 0.5f) &&
+                        !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
+                        !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)
+                        grouped = true;
                     grouped = hud_touch_group_allowed(grouped, offset);
                     vgroup = v;
                     if (g_hudtrace_active)
