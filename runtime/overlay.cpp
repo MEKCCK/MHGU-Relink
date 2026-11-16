@@ -24,6 +24,8 @@
 #include <unistd.h>  // access
 
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "forge_canvas.h"
 #include "imgui_internal.h"  // (the Forge window's Cancel: ImGui's active item, popups and nav window)
 #ifndef MHGU_NULL_BACKEND
 #include "backends/imgui_impl_vulkan.h"
@@ -933,6 +935,72 @@ static bool tex_create_failed(ImTextureData *tex) {
 static bool tex_create_failed(ImTextureData *) { return false; }
 #endif
 
+static std::vector<ImDrawList *> active_draw_lists(ImGuiContext &g) {
+    std::vector<ImDrawList *> lists;
+    for (ImGuiWindow *window : g.Windows)
+        if (window->LastFrameActive == g.FrameCount) lists.push_back(window->DrawList);
+    for (ImGuiViewportP *viewport : g.Viewports)
+        for (int i = 0; i < 2; i++)
+            if (viewport->BgFgDrawLists[i] && viewport->BgFgDrawListsLastTimeActive[i] == (float)g.Time)
+                lists.push_back(viewport->BgFgDrawLists[i]);
+    return lists;
+}
+
+// Forge's world overlays use the game's viewport, which keeps its boot render dimensions when host upscaling or
+// live graphics changes resize the picture. Give FreeRender that same canvas, then map only its new geometry to
+// the presented picture. The host's settings and the plugins' settings windows stay in window pixels.
+static void forge_free_render(void *cpu, uint32_t width, uint32_t height) {
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    ImGuiIO &io = g.IO;
+    auto map = forge_canvas::compute((float)width, (float)height, g_render_aspect,
+                                     (float)g_render_size[0], (float)g_render_size[1]);
+    struct Mark { ImDrawList *list; forge_canvas::Checkpoint before; };
+    std::vector<Mark> marks;
+    for (ImDrawList *list : active_draw_lists(g)) marks.push_back({list, forge_canvas::checkpoint(list)});
+
+    ImGuiViewportP *viewport = g.Viewports[0];
+    ImVec2 old_size = viewport->Size, old_work_size = viewport->WorkSize, old_work_pos = viewport->WorkPos;
+    ImVec2 old_display = io.DisplaySize, old_mouse = io.MousePos, old_delta = io.MouseDelta;
+    ImVec2 old_clicks[IM_ARRAYSIZE(io.MouseClickedPos)];
+    for (int i = 0; i < IM_ARRAYSIZE(old_clicks); i++) {
+        old_clicks[i] = io.MouseClickedPos[i];
+        io.MouseClickedPos[i] = ImVec2((old_clicks[i].x - map.ox) / map.sx, (old_clicks[i].y - map.oy) / map.sy);
+    }
+    io.DisplaySize = viewport->Size = viewport->WorkSize = ImVec2((float)g_render_size[0], (float)g_render_size[1]);
+    viewport->WorkPos = viewport->Pos;
+    io.MousePos = ImVec2((old_mouse.x - map.ox) / map.sx, (old_mouse.y - map.oy) / map.sy);
+    io.MouseDelta = ImVec2(old_delta.x / map.sx, old_delta.y / map.sy);
+    bool clipped[2] = {};
+    for (int i = 0; i < 2; i++)
+        if (viewport->BgFgDrawLists[i] && viewport->BgFgDrawListsLastTimeActive[i] == (float)g.Time) {
+            viewport->BgFgDrawLists[i]->PushClipRect(viewport->Pos,
+                ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y), false);
+            clipped[i] = true;
+        }
+    float old_dpi = g.Style.FontScaleDpi;
+    g.Style.FontScaleDpi /= map.sy;
+    ImGui::PushFont(g.Font, g.FontSizeBase);
+    forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);  // flush the plugin's direct guest vertex edits before mapping
+    g.Style.FontScaleDpi = old_dpi;
+    ImGui::PopFont();
+
+    viewport->Size = old_size; viewport->WorkSize = old_work_size; viewport->WorkPos = old_work_pos;
+    io.DisplaySize = old_display; io.MousePos = old_mouse; io.MouseDelta = old_delta;
+    for (int i = 0; i < IM_ARRAYSIZE(old_clicks); i++) io.MouseClickedPos[i] = old_clicks[i];
+    for (int i = 0; i < 2; i++)
+        if (viewport->BgFgDrawLists[i] && viewport->BgFgDrawListsLastTimeActive[i] == (float)g.Time) {
+            ImDrawList *list = viewport->BgFgDrawLists[i];
+            list->PopClipRect();
+            if (!clipped[i]) list->PushClipRect(viewport->Pos,
+                ImVec2(viewport->Pos.x + old_size.x, viewport->Pos.y + old_size.y), false);
+        }
+    for (ImDrawList *list : active_draw_lists(g)) {
+        auto before = forge_canvas::Checkpoint{};
+        for (const Mark &mark : marks) if (mark.list == list) { before = mark.before; break; }
+        forge_canvas::transform(list, before, map);
+    }
+}
+
 void overlay_frame(void *cpu) {
     // (once a frame on the game's update thread: with [Application] PauseInBackground the game stops here while the app
     // is in the background, its clock held: runtime/hle/vi.c)
@@ -1059,7 +1127,7 @@ void overlay_frame(void *cpu) {
 #endif
         if (!keep) set_open(false);
     }
-    forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (free_render) forge_free_render(cpu, w, h);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);

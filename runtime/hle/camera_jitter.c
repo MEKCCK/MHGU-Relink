@@ -1,6 +1,7 @@
 // The main 3D camera for the FSR upscaler (runtime/nvn/vulkan/fsr.c): its matrices, captured per frame for the
 // camera motion vectors, and the sub-pixel jitter (a Halton sequence) put into its projection, which FSR needs to
-// rebuild detail from several frames. Only with [Upscaler] FSR = On (or the test option below).
+// rebuild detail from several frames. Jitter only with [Upscaler] FSR = On (or the test option below).
+// Screen-camera aspect updates also run without an upscaler, keeping live ratio changes free of stretching.
 //
 // The game's camera (an sCamera / uCamera object: +0x30 far, +0x34 near, +0x38 aspect, +0x3c vertical field of view
 // in degrees, +0x40 eye, +0x50 up, +0x60 target) gets its matrices from two small functions:
@@ -54,8 +55,9 @@
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static CamRecord g_ring[RING];
 static uint64_t g_seq;
-static struct { uint32_t cam; float m[16]; } g_views[8];  // last view per camera
+static struct { uint32_t cam; float aspect, m[16]; } g_views[8];  // last view per camera
 static int g_nviews;
+static float g_boot_ui_aspect;
 static bool g_on;                   // jitter (renderer: FSR active on scene frames)
 static uint32_t g_rw = 1920, g_rh = 1080, g_phases = 8;
 static bool g_test;                 // MHGU_JITTER_TEST
@@ -63,7 +65,8 @@ static float g_test_xy[2];
 static bool g_log;
 
 static bool main_aspect(float a) {
-    return fabsf(a - 16.0f / 9.0f) < 0.01f || fabsf(a - g_render_aspect) < 0.01f;
+    return fabsf(a - 16.0f / 9.0f) < 0.01f || fabsf(a - g_render_aspect) < 0.01f ||
+           fabsf(a - g_boot_ui_aspect) < 0.01f;
 }
 
 static float halton(uint32_t i, uint32_t base) {
@@ -73,6 +76,20 @@ static float halton(uint32_t i, uint32_t base) {
 }
 
 static bool readable(uint32_t a, uint32_t n) { return a >= 0x1000u && a < 0xFFFFFFFFu - n && !(a & 3); }
+
+// The game can initialise a screen camera from the boot HUD canvas, including an Edges ultrawide canvas.
+// Update the camera itself before its view/projection is used, so GPU projection, culling and HUD markers agree.
+static bool sync_screen_aspect(uint32_t cam) {
+    if (!readable(cam, 0x70)) return false;
+    float a = LDF(cam + CAM_ASPECT);
+    bool screen = main_aspect(a);
+    pthread_mutex_lock(&g_lock);
+    for (int i = 0; !screen && i < g_nviews; i++)
+        screen = g_views[i].cam == cam && fabsf(a - g_views[i].aspect) < 0.01f;
+    pthread_mutex_unlock(&g_lock);
+    if (screen) STF(cam + CAM_ASPECT, g_render_aspect);
+    return screen;
+}
 
 // This frame's jitter in render pixels (0, 0: off). g_lock held.
 static void frame_jitter(float *jx, float *jy) {
@@ -132,8 +149,9 @@ void camjit_menu_viewport(int i, float w, float h) {
 
 static void lookat_at(Cpu *c, uint32_t fn) {
     uint32_t out = c->r[0], cam = c->r[1];
+    bool screen = sync_screen_aspect(cam);
     fnhook_call_original(c, fn);
-    if (!readable(out, 64) || !readable(cam, 0x70) || !main_aspect(LDF(cam + CAM_ASPECT))) return;
+    if (!readable(out, 64) || !screen) return;
     pthread_mutex_lock(&g_lock);
     int i = 0;
     while (i < g_nviews && g_views[i].cam != cam) i++;
@@ -142,15 +160,17 @@ static void lookat_at(Cpu *c, uint32_t fn) {
         else i = 7;  // (more cameras than that: the last slot is reused)
     }
     g_views[i].cam = cam;
+    g_views[i].aspect = LDF(cam + CAM_ASPECT);
     memcpy(g_views[i].m, G2H(out), 64);
     pthread_mutex_unlock(&g_lock);
 }
 
 static void projection_at(Cpu *c, uint32_t fn) {
     uint32_t out = c->r[0], cam = c->r[1];
+    bool screen = sync_screen_aspect(cam);
     fnhook_call_original(c, fn);
     if (!readable(out, 64) || !readable(cam, 0x70)) return;
-    if (!main_aspect(LDF(cam + CAM_ASPECT))) { menu_projection(out, cam); return; }
+    if (!screen) { menu_projection(out, cam); return; }
     float m[16];
     memcpy(m, G2H(out), 64);
     pthread_mutex_lock(&g_lock);
@@ -228,6 +248,7 @@ void camjit_init(void) {
     g_log = getenv("MHGU_JITTER_LOG") != NULL;
     if (!g_config.fsr && !g_test) return;
     g_rw = g_render_size[0], g_rh = g_render_size[1];
+    g_boot_ui_aspect = g_ui_size[1] ? (float)g_ui_size[0] / g_ui_size[1] : 16.0f / 9.0f;
     fnhook_set(FN_LOOKAT, hle_register("camjit:lookat", lookat));
     fnhook_set(FN_PROJECTION, hle_register("camjit:projection", projection));
     fnhook_set(FN_EVENT_LOOKAT, hle_register("camjit:event_lookat", event_lookat));

@@ -244,6 +244,13 @@ test-settings: $(LIB_STAMPS)
 	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
+# Host-only test of the screen-camera aspect sync (ultrawide boot / live switches).
+.PHONY: test-camera-aspect
+test-camera-aspect: $(LIB_STAMPS)
+	@mkdir -p $(O)/settings-test
+	$(CC) $(RTFLAGS) tests/test_camera_aspect.c $(if $(filter windows,$(PLATFORM)),-lwinpthread,-lpthread) -lm -o $(O)/settings-test/test-camera-aspect$(if $(filter windows,$(PLATFORM)),.exe)
+	$(O)/settings-test/test-camera-aspect$(if $(filter windows,$(PLATFORM)),.exe)
+
 # Host-only test of game-action rebinding (runtime/actions.c): ini, sampling, and the golden property of the defaults.
 .PHONY: test-actions
 test-actions: $(LIB_STAMPS)

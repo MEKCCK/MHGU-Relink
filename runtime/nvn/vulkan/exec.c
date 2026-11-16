@@ -1014,6 +1014,7 @@ static uint64_t ui_loading_seen_frame;  // loading can draw in another render pa
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
+static uint64_t ui_frontend_frame = UINT64_MAX;  // the frame whose backdrop that was (FSR can split its HUD into a later pass)
 static bool ui_stamp_pass;  // this pass draws the Quest Complete stamp (its borders, layer 97 at x 640, y 53 / 687, came first)
 static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
 static bool ui_meownster_pass;  // this pass draws the Meownster Hunters return screen (its map frame, layer 105, came first)
@@ -1033,7 +1034,7 @@ static struct {
     int n, predict;  // predict: the anchor this group got last frame (ui_group_known), -1 if not seen
     float z, x0, y0, xmin, xmax, ymin, ymax;
     uint8_t anchors;  // (bit per vertical anchor among its pieces)
-    struct { float *m, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
+    struct { float *m, pos_x, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
 // The group settled last in this pass (16:10), as it was placed: a window stacked right under it on the same layer
 // (the chat log's box under its "Chat" label) goes with it (ui_group_end)
@@ -1069,9 +1070,47 @@ static int ui_group_vanchor(void) {
     float above = ui_group.ymin, below = 720.0f - ui_group.ymax;  // (piece centres: the edges and corners lie on the frame)
     return above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
 }
+// Wider than 16:9 (a menu window, cbuf_info) the group is placed sideways as one, from where the whole of it sits:
+// centred on the canvas (a dialog: its sides mirror about x 640) Centre, else the half it is in (a submenu beside the
+// menu it opened from stays with it)
+static int ui_group_hside(float x0, float x1) {
+    return x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f ? 2 : x0 + x1 < 1280.0f ? 0 : 1;
+}
+static int ui_float_cmp(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+static void ui_group_hend(int n) {
+    float x0 = ui_group.xmin, x1 = ui_group.xmax, cut = INFINITY, asp = g_render_aspect;
+    int h = ui_group_hside(x0, x1), h2 = h;
+    if (h != 2 && x0 < 640.0f && x1 > 640.0f) {
+        static float xs[UI_GROUP_MAX];
+        for (int i = 0; i < n; i++) xs[i] = ui_group.p[i].pos_x;
+        qsort(xs, (size_t)n, sizeof xs[0], ui_float_cmp);
+        int k = 0;
+        for (int i = 1; i < n; i++)
+            if (xs[i] - xs[i - 1] > (k ? xs[k] - xs[k - 1] : 0.0f)) k = i;
+        if (k && xs[k] - xs[k - 1] > 320.0f) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
+    }
+    float s = (16.0f / 9.0f) / asp, anchor = g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
+    float left = 640.0f * (1.0f - anchor / asp);
+    for (int i = 0; i < n; i++) {
+        float x = ui_group.p[i].pos_x;
+        int a = x < cut ? h : h2;
+        ui_group.p[i].m[12] = a == 0 ? left + x * s : a == 1 ? 1280.0f - left - (1280.0f - x) * s : 640.0f + (x - 640.0f) * s;
+        if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].hanchor = (uint8_t)a;
+    }
+    if (g_hudtrace_active)
+        LOG("[hud] group z %.1f: %d pieces, x %.1f..%.1f -> %c%c (cut %.1f)\n", ui_group.z, n, x0, x1, "LRC"[h], "LRC"[h2], cut);
+}
 static void ui_group_end(void) {
     int n = ui_group.n;
     if (!n) return;
+    if (g_render_aspect > 16.0f / 9.0f) {
+        ui_group.n = 0;
+        ui_group_hend(n);
+        return;
+    }
     int v = n < 2 ? -1 : ui_group_vanchor();
     ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
@@ -1121,7 +1160,8 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
     // pieces line up with the rest of it on one side: its other corner, its bottom edge)
     const float margin = 24.0f;
-    bool apart = !(ui_group.anchors & (1u << vanchor)) && (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
+    bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
+                 (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
     // Meownster Hunters: the map in its frame (lower edge y 495 / 510) and the launcher under it (cannon, Palico picker,
     // prompts, y 562 and below) are two windows of layer 100. After a launch the flight's dots (y 551..630) are drawn
@@ -1139,7 +1179,8 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     ui_group.xmin = fminf(ui_group.xmin, pos_x), ui_group.xmax = fmaxf(ui_group.xmax, pos_x);
     ui_group.ymin = fminf(ui_group.ymin, pos_y), ui_group.ymax = fmaxf(ui_group.ymax, pos_y);
     ui_group.anchors |= (uint8_t)(1u << vanchor);
-    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_y = pos_y, ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
+    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_x = pos_x, ui_group.p[ui_group.n].pos_y = pos_y;
+    ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
     ui_group.p[ui_group.n].recent = ui_nrecent - 1;  // (cbuf_info recorded it just before)
     ui_group.n++;
 }
@@ -1883,7 +1924,7 @@ static void begin_pass(void) {
     ui_loading_pass = false;
     ui_loading_rows = 0;
     ui_title_pass = false;
-    ui_frontend_pass = false;
+    ui_frontend_pass = ui_frontend_frame == g_present_count;
     ui_stamp_pass = false;
     ui_results_pass = false;
     ui_meownster_pass = false;
@@ -3673,7 +3714,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
                 bool backdrop = fabsf(pos_z - 250.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && fabsf(pos_y - 360.0f) < 0.5f;
                 if (backdrop) {
-                    ui_frontend_pass = true;
+                    ui_frontend_pass = true, ui_frontend_frame = g_present_count;
                     // (the front-end's screens: the title, the main menu, the character select and creation are menus
                     // too, driven with the d-pad and A / B: the touch controls' menu layout)
                     touch_hud_menu();
