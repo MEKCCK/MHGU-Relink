@@ -671,35 +671,31 @@ static void put_label_box(uint8_t *tile, const uint32_t *text, int n, uint8_t in
         }
 }
 // ------------------------------------------------------------------ controller prompt skins and key caps
-// The game's controller glyphs are a white ring (or a capsule) around a white letter; Xbox / PlayStation prompts are
-// drawn in the same 24 x 24 cells. Keyboard caps use the same ring outline, with no white fill behind them.
-static float seg_dist(float x, float y, float ax, float ay, float bx, float by) {
-    float dx = bx - ax, dy = by - ay, n = dx * dx + dy * dy;
-    float t = n > 0 ? ((x - ax) * dx + (y - ay) * dy) / n : 0;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    float px = ax + dx * t - x, py = ay + dy * t - y;
-    return sqrtf(px * px + py * py);
-}
-static void white_px(uint8_t *d, float a) {
+// High contrast: a white filled button (circle or capsule) with the black letter / PlayStation shape / key name.
+// The game's cells are 24 x 24 with transparency around the button.
+static void paint_px(uint8_t *d, float a, uint8_t r, uint8_t g, uint8_t b) {
     if (a <= 0) return;
     if (a > 1) a = 1;
-    d[0] = d[1] = d[2] = 255;
-    if (d[3] < 255) d[3] = (uint8_t)((float)d[3] + (255.0f - (float)d[3]) * a);
+    float da = d[3] / 255.0f, oa = a + da * (1 - a);
+    if (oa <= 0) return;
+    d[0] = (uint8_t)((r * a + d[0] * da * (1 - a)) / oa);
+    d[1] = (uint8_t)((g * a + d[1] * da * (1 - a)) / oa);
+    d[2] = (uint8_t)((b * a + d[2] * da * (1 - a)) / oa);
+    d[3] = (uint8_t)(oa * 255 + .5f);
 }
-static void ring_tile(uint8_t *tile, float cx, float cy, float radius, float thick) {
+static void disc_tile(uint8_t *tile, float cx, float cy, float radius) {
     for (int py = 0; py < CELL; py++)
         for (int px = 0; px < CELL; px++) {
             int hit = 0;
             for (int sy = 0; sy < 4; sy++)
                 for (int sx = 0; sx < 4; sx++) {
                     float x = px + (sx + .5f) / 4, y = py + (sy + .5f) / 4;
-                    hit += fabsf(hypotf(x - cx, y - cy) - radius) <= thick * .5f;
+                    hit += (x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius;
                 }
-            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
+            if (hit) paint_px(tile + (py * CELL + px) * 4, hit / 16.0f, 255, 255, 255);
         }
 }
-// rounded box outline: half sizes and corner radius
-static void capsule_tile(uint8_t *tile, float x0, float y0, float x1, float y1, float radius, float thick) {
+static void round_tile(uint8_t *tile, float x0, float y0, float x1, float y1, float radius) {
     float cx = (x0 + x1) * .5f, cy = (y0 + y1) * .5f;
     float hx = (x1 - x0) * .5f - radius, hy = (y1 - y0) * .5f - radius;
     for (int py = 0; py < CELL; py++)
@@ -709,12 +705,18 @@ static void capsule_tile(uint8_t *tile, float x0, float y0, float x1, float y1, 
                 for (int sx = 0; sx < 4; sx++) {
                     float x = px + (sx + .5f) / 4, y = py + (sy + .5f) / 4;
                     float qx = fabsf(x - cx) - hx, qy = fabsf(y - cy) - hy;
-                    float out = hypotf(fmaxf(qx, 0), fmaxf(qy, 0));
-                    float dist = out + fminf(fmaxf(qx, qy), 0) - radius;
-                    hit += fabsf(dist) <= thick * .5f;
+                    float dist = hypotf(fmaxf(qx, 0), fmaxf(qy, 0)) + fminf(fmaxf(qx, qy), 0) - radius;
+                    hit += dist <= 0;
                 }
-            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
+            if (hit) paint_px(tile + (py * CELL + px) * 4, hit / 16.0f, 255, 255, 255);
         }
+}
+static float seg_dist(float x, float y, float ax, float ay, float bx, float by) {
+    float dx = bx - ax, dy = by - ay, n = dx * dx + dy * dy;
+    float t = n > 0 ? ((x - ax) * dx + (y - ay) * dy) / n : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float px = ax + dx * t - x, py = ay + dy * t - y;
+    return sqrtf(px * px + py * py);
 }
 static float ps_shape(int shape, float x, float y) {
     const float cx = CELL * .5f, cy = CELL * .5f;
@@ -735,7 +737,7 @@ static void shape_tile(uint8_t *tile, int shape) {
             for (int sy = 0; sy < 4; sy++)
                 for (int sx = 0; sx < 4; sx++)
                     hit += ps_shape(shape, px + (sx + .5f) / 4, py + (sy + .5f) / 4) != 0;
-            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
+            if (hit) paint_px(tile + (py * CELL + px) * 4, hit / 16.0f, 0, 0, 0);
         }
 }
 static bool text_in(uint8_t *tile, const char *text, float x0, float x1, float y0, float y1, float maxs) {
@@ -743,38 +745,36 @@ static bool text_in(uint8_t *tile, const char *text, float x0, float x1, float y
     uint32_t t[3];
     int n = 0;
     for (const char *p = text; *p && n < 3; p++) t[n++] = (uint8_t)*p;
-    put_label_box(tile, t, n, 255, x0, x1, y0, y1, maxs);
+    put_label_box(tile, t, n, 0, x0, x1, y0, y1, maxs);  // black ink on the white button
     return true;
 }
 static void keycap_tile(uint8_t *tile, const uint32_t *text, int n) {
-    memset(tile, 0, CELL * CELL * 4);
-    capsule_tile(tile, 1.0f, 3.5f, 23.0f, 20.5f, 3.0f, 1.6f);  // (no white fill: the game's own backgrounds show through)
-    put_label_box(tile, text, n, 255, 2.0f, 22.0f, 5.0f, 19.0f, .62f);
+    memcpy(tile, prompt_icons[PROMPT_KEYCAP], CELL * CELL * 4);  // the light key cap, black name
+    put_label_box(tile, text, n, 32, FACE_X0, FACE_X1, FACE_Y0, FACE_Y1, .62f);
 }
-
 static bool draw_pad_tile(uint8_t *tile, const Cell *c, int skin) {
     if (!skin || c->btn2 >= 0) return false;
     int b = c->btn;
     if (b == BTN_A || b == BTN_B || b == BTN_X || b == BTN_Y) {
         memset(tile, 0, CELL * CELL * 4);
-        ring_tile(tile, CELL * .5f, CELL * .5f, 9.9f, 1.9f);
+        disc_tile(tile, CELL * .5f, CELL * .5f, 10.2f);
         if (skin == 2) {  // PlayStation: circle east, cross south, triangle north, square west
             shape_tile(tile, b == BTN_A ? 1 : b == BTN_B ? 0 : b == BTN_X ? 2 : 3);
             return true;
         }
         bool labels = config_live_face_buttons() == FACE_LABEL;
-        char letter = labels ? (char)("ABXY"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3])
-                             : (char)("BAYX"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3]);
+        char letter = labels ? (char)("ABXY"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : b == BTN_Y ? 3 : 0])
+                             : (char)("BAYX"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : b == BTN_Y ? 3 : 0]);
         char text[2] = {letter, 0};
-        return text_in(tile, text, 5.5f, 18.5f, 4.5f, 19.5f, .72f);
+        return text_in(tile, text, 5.5f, 18.5f, 4.5f, 19.5f, .75f);
     }
     const char *label = NULL;
     if (skin == 1) label = b == BTN_L ? "LB" : b == BTN_R ? "RB" : b == BTN_ZL ? "LT" : b == BTN_ZR ? "RT" : NULL;
     else label = b == BTN_L ? "L1" : b == BTN_R ? "R1" : b == BTN_ZL ? "L2" : b == BTN_ZR ? "R2" : NULL;
     if (!label) return false;
     memset(tile, 0, CELL * CELL * 4);
-    capsule_tile(tile, 1.0f, 5.5f, 23.0f, 18.5f, 4.0f, 1.8f);
-    return text_in(tile, label, 4.0f, 20.0f, 7.0f, 17.0f, .45f);
+    round_tile(tile, 1.0f, 5.5f, 23.0f, 18.5f, 4.0f);
+    return text_in(tile, label, 2.5f, 21.5f, 6.5f, 17.5f, .55f);
 }
 
 // ------------------------------------------------------------------ drawing a cell

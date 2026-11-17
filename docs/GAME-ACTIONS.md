@@ -569,7 +569,7 @@ game's own glyphs back at its next button press.
 
 `[Controls] PromptIcons = Switch|Xbox|PlayStation` (Controls > Controller prompts, default Switch). Switch leaves the
 game's own glyphs. Xbox and PlayStation redraw the same sheet cells: face buttons become letters (with `FaceButtons`'s
-position/label choice) or PlayStation shapes, L/R/ZL/ZR become LB/RB/LT/RT or L1/R1/L2/R2. The port draws white glyphs
+position/label choice) or PlayStation shapes, L/R/ZL/ZR become LB/RB/LT/RT or L1/R1/L2/R2. The port draws black glyphs on a filled white button
 in the game's 24 x 24 cells; D-pad, stick clicks and Plus/Minus keep the game's pictures. The same redraw/BC3/write-back
 path as the keyboard prompts is used, so every arc's copies switch together.
 
