@@ -89,8 +89,10 @@ that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input 
 **Touch-stick automatic running** is the Android mainline's rim gesture, optional through `[Touch] AutoR=On`. With
 the weapon sheathed, sliding the left thumb past 1.60x the stick's radius holds the game's native R; it keeps holding
 down to 1.45x and stops below that (the same hysteresis as the Android mainline). With the weapon drawn it does not run:
-R would be a guard or a weapon action. It adds the real `BTN_R` bit to the same pad sample, so manual R, a combo's R and
-a physical controller's R remain the same input and no separate request channel exists.
+R would be a guard or a weapon action. It also waits while Y is held: Valor's special sheathe reports the weapon as
+sheathed until the button is released, and injecting R during that stance would act on a drawn weapon. It adds the real
+`BTN_R` bit to the same pad sample, so manual R, a combo's R and a physical controller's R remain the same input and no
+separate request channel exists.
 
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.

@@ -1989,7 +1989,12 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     bool was_run = s.run;
     s.run = false;
-    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0 && s.drawn != 1) {
+    // Y held is a sheathe (Valor's special sheathe keeps the weapon out until the button is released): let the
+    // sheathe finish instead of injecting R into the same sample, which the game would read as a drawn-weapon action.
+    bool sheathing = (*buttons & B(BTN_Y)) != 0;
+    // (the Android mainline asks the game now, not the value cached at the start of this sample: a sheathe that
+    // completes while the pad is polled must stop the run in the same frame)
+    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0 && weapon_drawn() != 1 && !sheathing) {
         float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
         float m = r > 0 ? hypotf((s.kx - s.bx) / r, (s.by - s.ky) / r) : 0;
         // The thumb past the rim holds native R, as on the Android mainline. Hysteresis keeps the edge quiet.

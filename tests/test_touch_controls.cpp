@@ -685,6 +685,12 @@ static void auto_r() {
         move(1.6001f,true);
         drawn=1; check(update(),false);          // weapon out: R would be a guard/attack
         drawn=out; move(1.6001f,true);
+        // Valor's special sheathe: Y held, the game reports sheathed until release. AutoR must not inject R yet.
+        if (!out) {
+            Input y = update(B(BTN_Y));
+            assert(!y.run && !g_s.run && !((y.b | y.touch_b) & B(BTN_R)));
+            move(1.6001f,true);                  // released: the sheathe finished, running resumes
+        }
         event(SDL_EVENT_FINGER_UP,1,origin.x+1.6001f*g.r,origin.y);
         check(update(),false); assert(!update().lx && !update().ly);
         event(SDL_EVENT_FINGER_DOWN,2,origin.x,origin.y);
