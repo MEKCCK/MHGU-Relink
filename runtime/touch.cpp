@@ -1954,7 +1954,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         float m = r > 0 ? hypotf((s.kx - s.bx) / r, (s.by - s.ky) / r) : 0;
         // The thumb past the rim holds native R, as on the Android mainline. Hysteresis keeps the edge quiet.
         s.run = r > 0 && m > .3f && hypotf(s.fx - s.bx, s.fy - s.by) > r * (was_run ? 1.45f : 1.60f);
-        if (s.run) *buttons |= B(BTN_R);
+        if (s.run) touch_b |= B(BTN_R), *buttons |= B(BTN_R);  // keep synthetic R through action rebinding
     }
     if (classic || s.layout_profile == UNIVERSAL_LAYOUT) {
         if (s.stick_on && s.h > 0) {

@@ -66,3 +66,7 @@ packaging/*/*.pkg.tar.zst
 
 # built gateway source (GPL sub-tree)
 /xxgu-gateway/build/
+
+# Local test output and runtime data
+/analysis/
+/run/

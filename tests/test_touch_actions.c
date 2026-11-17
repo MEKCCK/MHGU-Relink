@@ -55,6 +55,13 @@ static void sample(uint64_t touch, uint64_t physical, uint64_t allowed, bool men
     host_touch_sample(physical, 0, allowed, menu, typing);
 }
 
+static void expect_r(bool held) {
+    const int views[] = {ACT_VIEW_MB1, ACT_VIEW_SHEATHED, ACT_VIEW_HUNT_ANY, ACT_VIEW_MB2, ACT_VIEW_TOWN};
+    for (int variant = 0; variant < ACT_VARS; ++variant)
+        for (unsigned view = 0; view < sizeof views / sizeof *views; ++view)
+            assert(act_view(views[view], 0x200, staged.hold[variant], false) == (held ? 0x200 : 0));
+}
+
 int main(void) {
     const int views[] = {ACT_VIEW_MB1, ACT_VIEW_MB2, ACT_VIEW_TOWN};
     const uint32_t engine_bit[] = {0x2000, 0x4000, 0x1000, 0x8000, 0x2, 0x4, 0x100, 0x200,
@@ -67,6 +74,26 @@ int main(void) {
             for (unsigned view = 0; view < sizeof views / sizeof *views; ++view)
                 assert(act_view(views[view], engine_bit[btn], staged.hold[variant], false) == engine_bit[btn]);
     }
+
+    const uint64_t r = 1ull << 7;  // BTN_R in the host's Switch button word.
+    sample(0, r, UINT64_MAX, false, false);
+    assert(host_buttons == r && !held_key);
+    expect_r(false);  // A raw R bit without a physical or marked touch source is replaced by ActView.
+    sample(r, 0, UINT64_MAX, false, false);
+    expect_r(true);   // AutoR must return its native R in touch_b to survive the real host staging.
+    held_key = SDL_SCANCODE_A + 7;
+    sample(r, r, UINT64_MAX, false, false);
+    expect_r(true);
+    sample(0, r, UINT64_MAX, false, false);
+    expect_r(true);   // Releasing touch leaves the physical R source held.
+    sample(r, r, UINT64_MAX, false, false);
+    held_key = 0;
+    sample(r, 0, UINT64_MAX, false, false);
+    expect_r(true);   // Releasing physical R leaves the marked touch source held.
+    sample(0, 0, UINT64_MAX, false, false);
+    expect_r(false);
+    puts("PASS: real host/ActView preserves source-marked AutoR R, rejects unmarked raw R, and keeps either overlapping source through release");
+
     sample(0, 0, UINT64_MAX, false, false);
     assert(staged.hold[0] == 0 && staged.pulse[0] == 0);
     sample(1, 0, UINT64_MAX, false, false);

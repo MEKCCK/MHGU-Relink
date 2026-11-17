@@ -35,6 +35,8 @@
 #include "../../touch.h"
 #include "../../overlay.h"
 
+int presence_in_quest(void);
+
 // BEGIN CPU RENDER TRACE
 // Requested diagnostics only: retain six whole frames in memory, then write once without GPU inspection.
 #define TRACE_CAPACITY (768u * 1024u)
@@ -3735,7 +3737,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // the hunt's HUD (not a menu, the results, a loading screen, the title): its item bar, Hunter Arts and
                 // target camera answer a finger (runtime/touch.cpp), moved or not; with the touch controls they move
                 bool loading_candidate = hud_loading_candidate(ui_loading_rows, g_present_count, ui_loading_seen_frame);
-                bool hunt_hud = !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !loading_candidate &&
+                // Town windows share these layers and must not inherit saved quest HUD offsets.
+                bool hunt_hud = presence_in_quest() && !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !loading_candidate &&
                                 !ui_title_pass && !ui_meownster_pass;
                 int touch_zone = hud_touch_zone_for_frame(pos_x, pos_y, pos_z, hunt_hud, loading_candidate);
                 bool item_bar_part = false, arts_part = false, target_part = false, map_part = false;
@@ -3965,8 +3968,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f && !arts_move && !target_move;
                     // Wider than 16:9: one anchor per window sideways for menus (97, text over them 98) and the
                     // windows/prompts of 100. By their own place a piece went left of x 430 and right of it, splitting
-                    // the item box's submenu and the multiplayer dialog.
-                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f ||
+                    // the item box's submenu and the multiplayer dialog. A resolved menu canvas must not be re-anchored.
+                    if (s < 1.0f && !menu_canvas && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f ||
                                     fabsf(pos_z - 100.0f) < 0.5f) &&
                         !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
                         !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)

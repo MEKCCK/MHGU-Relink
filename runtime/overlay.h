@@ -3,6 +3,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
@@ -35,6 +36,11 @@ void overlay_pad(const OverlayPad *p);
 
 // The game's thread, once a frame (after the plugins' forge_onUpdate): the overlay's frame, plugins' UI included.
 void overlay_frame(void *cpu);
+// Forge 2 caller-owned NVN images. The render thread prepares their Vulkan descriptors outside a render pass.
+uint64_t overlay_register_texture(const void *texture, const void *view, size_t view_size);
+void overlay_unregister_texture(uint64_t id);
+void overlay_forget_texture(const void *texture);
+void overlay_prepare_textures(void);
 
 // Render thread, inside the window image's render pass (runtime/nvn/vulkan/device.c, under the Vulkan lock).
 typedef struct {

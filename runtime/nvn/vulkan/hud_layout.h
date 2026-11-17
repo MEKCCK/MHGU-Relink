@@ -25,6 +25,8 @@ static inline bool hud_loading_candidate(unsigned rows, uint64_t frame, uint64_t
 // The entire item group includes the bowgun's ammo list above y 500.
 static inline int hud_touch_zone_for_frame(float x, float y, float z, bool hunt_hud, bool loading_candidate) {
     if (!hunt_hud) return HUD_TOUCH_NONE;
+    // HP/stamina span the top at any x; their ends belong to neither the map nor the item bar.
+    if (fabsf(z - 103.0f) < 0.5f && y < 300.0f) return HUD_TOUCH_NONE;
     if (fabsf(z - 100.0f) < 0.5f) {
         if (x >= 700.0f && x <= 900.0f && y > 560.0f) return HUD_TOUCH_ARTS;
     }

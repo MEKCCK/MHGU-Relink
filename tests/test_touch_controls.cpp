@@ -591,7 +591,7 @@ static void auto_r() {
         auto check=[&](Input v,bool expected) {
             const bool run=flag&&!out&&expected;
             assert(v.run==run && g_s.run==run);
-            assert(v.b==(run?B(BTN_R):0) && !v.touch_b);
+            assert(v.b==(run?B(BTN_R):0) && v.touch_b==(run?B(BTN_R):0));
             assert(!v.rx && !v.ry && !v.dx && !v.dy);
         };
         auto move=[&](float radius,bool expected) {
@@ -612,7 +612,7 @@ static void auto_r() {
         event(SDL_EVENT_FINGER_MOTION,2,origin.x+1.6001f*g.r,origin.y); check(update(),true);
         event(SDL_EVENT_FINGER_CANCELED,2,origin.x+1.6001f*g.r,origin.y); check(update(),false);
     }
-    puts("PASS: optional AutoR holds native R only past 1.60 rim radius (1.45 hold) for fixed/floating sticks in town/quests, never with the weapon drawn, and clears on release at four sizes");
+    puts("PASS: optional AutoR holds source-marked native R past 1.60 rim radius (1.45 hold) for fixed/floating sticks in town/quests, never with the weapon drawn, and clears on release at four sizes");
 }
 
 static void floating_stick() {
@@ -3244,7 +3244,7 @@ static void auto_r_sources_and_ownership() {
         auto expect=[&](bool run,uint64_t touch=0,uint64_t physical=0) {
             const Input v=update(physical,physical!=0);
             assert(v.run==run && g_s.run==run);
-            assert(v.touch_b==touch && v.b==(touch|physical|(run?B(BTN_R):0))); no_stick_camera(v);
+            assert(v.touch_b==(touch|(run?B(BTN_R):0)) && v.b==(touch|physical|(run?B(BTN_R):0))); no_stick_camera(v);
         };
         down(); at(SDL_EVENT_FINGER_DOWN,C_R,2); move(1.7001f); expect(true,B(BTN_R));
         at(SDL_EVENT_FINGER_CANCELED,C_R,2); expect(true);
@@ -3268,7 +3268,7 @@ static void auto_r_sources_and_ownership() {
         event(SDL_EVENT_FINGER_CANCELED,2,origin.x+g.r*2,origin.y);
         cancel(); expect(false);
     }
-    puts("PASS: rim AutoR is the same native R bit as manual R, combo R and physical R (no separate touch channel), follows live Off/On, and secondary stick touches cannot copy or steal the run");
+    puts("PASS: rim AutoR marks native R as a touch source, preserves overlapping manual/combo R through either release order, follows live Off/On, and secondary stick touches cannot copy or steal the run");
 }
 
 static void auto_r_lifecycle() {
@@ -3279,7 +3279,7 @@ static void auto_r_lifecycle() {
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y);
         event(SDL_EVENT_FINGER_MOTION,1,origin.x+g.r*1.7f,origin.y);
-        Input v=update(); assert(v.run && g_s.run && v.b==B(BTN_R) && !v.touch_b); no_stick_camera(v);
+        Input v=update(); assert(v.run && g_s.run && v.b==B(BTN_R) && v.touch_b==B(BTN_R)); no_stick_camera(v);
         switch(mode) {
             case 0: game_menu_state(true); break;
             case 1: settings_open=true; break;
@@ -3293,16 +3293,16 @@ static void auto_r_lifecycle() {
         }
         auto stopped=[&]() {
             const Input input=update(0,false,mode==5);
-            if(input.run || g_s.run || (input.b&B(BTN_R))) fprintf(stderr,"AUTOR LIFECYCLE FAILURE: floating=%d mode=%d run=%d b=%llx\n",floating,mode,input.run,(unsigned long long)input.b);
-            assert(!input.run && !g_s.run && !(input.b&B(BTN_R))); no_stick_camera(input);
+            if(input.run || g_s.run || ((input.b|input.touch_b)&B(BTN_R))) fprintf(stderr,"AUTOR LIFECYCLE FAILURE: floating=%d mode=%d run=%d b=%llx touch_b=%llx\n",floating,mode,input.run,(unsigned long long)input.b,(unsigned long long)input.touch_b);
+            assert(!input.run && !g_s.run && !((input.b|input.touch_b)&B(BTN_R))); no_stick_camera(input);
         };
         stopped(); event(SDL_EVENT_FINGER_UP,1,screen_w+10000.f,-10000.f); stopped();
         if(mode==0) game_menu_state(false);
         settings_open=false; cfg.touch_controls=TOUCH_ON; cfg.touch_show[TB_STICK]=1;
         if(g_s.edit) { editor_click(E_CANCEL); update(); }
-        v=update(); assert(!v.run && !g_s.run && !(v.b&B(BTN_R))); no_stick_camera(v);
+        v=update(); assert(!v.run && !g_s.run && !((v.b|v.touch_b)&B(BTN_R))); no_stick_camera(v);
     }
-    puts("PASS: rim AutoR clears in game menus, overlays, editor, Off, hidden stick, typing, reset, scene/template changes; it is a native R bit, so no stale separate request survives");
+    puts("PASS: rim AutoR clears native and touch-source R in game menus, overlays, editor, Off, hidden stick, typing, reset and scene/template changes");
 }
 
 static void preview(const char *path) {
@@ -3444,7 +3444,7 @@ int main(int argc,char **argv) {
         const ImVec2 origin=floating?ImVec2(screen_w*.35f,screen_h*.75f):g.c;
         event(SDL_EVENT_FINGER_DOWN,1,origin.x,origin.y);
         event(SDL_EVENT_FINGER_MOTION,1,origin.x+1.7f*g.r,origin.y); const Input v=update();
-        assert(v.run==(enabled!=0) && g_s.run==v.run && !v.touch_b && v.b==(enabled?B(BTN_R):0));
+        assert(v.run==(enabled!=0) && g_s.run==v.run && v.touch_b==(enabled?B(BTN_R):0) && v.b==(enabled?B(BTN_R):0));
         char path[100]; snprintf(path,sizeof path,"touch-auto-r-%s-%s-1280x720.png",floating?"floating":"fixed",enabled?"on":"off");
         preview(path); event(SDL_EVENT_FINGER_CANCELED,1,origin.x+g.r,origin.y); update();
     }

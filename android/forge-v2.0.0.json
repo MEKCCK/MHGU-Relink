@@ -1,0 +1,57 @@
+{
+  "archive": "forge-v2.0.0.zip",
+  "archive_sha256": "8bbc1e4036af2404c4808ba988035680425d673f18c518c3568b217ba439706e",
+  "version": "2.0.0",
+  "api_reference": {
+    "repository": "Fexty12573/forge",
+    "tag": "v2.0.0",
+    "commit": "fd03ecb4c4ad16a02edb508c5a9b7731b84008d3"
+  },
+  "resources": [
+    {
+      "member": "forge/romfs/nativeNX/forge/config.ini",
+      "size": 54,
+      "sha256": "43aee71c19e97423d5b6d8a55be4a57ed9b6cc87372e2ca278ee548a378b18da",
+      "asset": "forge-v2.0.0/romfs/nativeNX/forge/config.ini"
+    },
+    {
+      "member": "forge/romfs/nativeNX/forge/shaders/imgui_vert.vsh",
+      "size": 372,
+      "sha256": "cfdc32fe588dc9111c49ec46c7df079151d75e66e5e59d60076b8c5c3d0371bf",
+      "asset": "forge-v2.0.0/romfs/nativeNX/forge/shaders/imgui_vert.vsh"
+    },
+    {
+      "member": "forge/romfs/nativeNX/forge/shaders/imgui_frag.fsh",
+      "size": 234,
+      "sha256": "b675aec5aac991df46a385e4a5731352806c2b3a2a9a2a9cf358ba21ab325668",
+      "asset": "forge-v2.0.0/romfs/nativeNX/forge/shaders/imgui_frag.fsh"
+    },
+    {
+      "member": "forge/romfs/nativeNX/forge/shaders/compiled/imgui.fbin",
+      "size": 6984,
+      "sha256": "d2a71cfbed6ba8365ddb92c57c1fe53e3de74328de6c881651e8cf9f8e205d5d",
+      "asset": "forge-v2.0.0/romfs/nativeNX/forge/shaders/compiled/imgui.fbin"
+    },
+    {
+      "member": "forge/romfs/nativeNX/forge/fonts/Roboto-Medium.ttf",
+      "size": 168644,
+      "sha256": "9d0d55a303bfd13b79a87721f65185e93f235e2d77fe398b2dca67ac519915f5",
+      "asset": "forge-v2.0.0/romfs/nativeNX/forge/fonts/Roboto-Medium.ttf"
+    }
+  ],
+  "excluded": [
+    {
+      "member": "forge/exefs/main.npdm",
+      "size": 1576,
+      "sha256": "bf1d963f3b184a6a045d8054c57cdf0873fa6ddebe9e7306a3b737dc40b9846a",
+      "reason": "Console ExeFS metadata/NSO loader is not an Android native library or plugin. Android uses its own compatibility adapter; these console executable components are not packaged or installed."
+    },
+    {
+      "member": "forge/exefs/subsdk9",
+      "size": 861165,
+      "sha256": "0e916acf194abd9e41c744faa825a1b532ff7085d39e2fd5094c6d82d6de34d7",
+      "reason": "Console ExeFS metadata/NSO loader is not an Android native library or plugin. Android uses its own compatibility adapter; these console executable components are not packaged or installed."
+    }
+  ],
+  "integration": "Android uses its native Forge 2.0.0 compatibility adapter for the menu and supported plugin interfaces. Built-in resources are copied to getFilesDir()/forge-v2.0.0/romfs and are lower priority than game RomFS and enabled mod RomFS files. Existing user/mod configuration and the old private forge-v1.5.1 directory are left untouched. No plugins (.nro) are present in the supplied archive. Original console shaders are preserved as resources; Android rendering uses the existing host ImGui backend. Console ExeFS code is excluded."
+}

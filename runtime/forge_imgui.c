@@ -663,6 +663,7 @@ HLE_FUNC("igGetDrawData", ig_igGetDrawData) { frame_call(c, "GetDrawData"); }
 // ------------------------------------------------------------------ the plugins' entry points (overlay.cpp)
 void forge_imgui_init(void *cpu) {
     Cpu *c = cpu;
+    forge_plugins_nvn_init(c);
     if (!g_alloc_fn) {
         g_alloc_fn = hle_register("forge:imgui_alloc", imgui_alloc);
         g_free_fn = hle_register("forge:imgui_free", imgui_free);
@@ -671,6 +672,7 @@ void forge_imgui_init(void *cpu) {
     uint32_t ctx = m_out(igGetCurrentContext(), T_ImGuiContext);
     forge_plugins_imgui(c, FORGE_IMGUI_INIT, ctx, g_alloc_fn, g_free_fn);
     hot_push();
+    forge_plugins_nvn_ready(c);
 }
 
 void forge_imgui_run(void *cpu, int which) {

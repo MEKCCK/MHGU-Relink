@@ -3,8 +3,11 @@
 // 64-bit results (handles, GPU addresses) in r0:r1.
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "../kernel.h"
+#include "../forge.h"
+#include "../overlay.h"
 #include "nvn.h"
 
 static uint64_t next_debug_id = 1;
@@ -37,6 +40,7 @@ NVN(nvnDeviceInitialize) {
     static bool once;
     if (!once) { once = true; backend_init(); }
     LOG("[nvn] device initialized\n");
+    forge_nvn_device((uint32_t)A(0));
     RET(1);
 }
 NVN(nvnDeviceFinalize) { (void)c; }
@@ -341,11 +345,18 @@ static NvnTexture *texture_from_builder(uint64_t b) {
 }
 
 _Thread_local bool g_nvn_making_screenshot;
+static pthread_mutex_t texture_objects_lock = PTHREAD_MUTEX_INITIALIZER;
+static NvnTexture *texture_objects;
 
 NVN(nvnTextureInitialize) {
     NvnTexture *t = texture_from_builder(A(1));
     t->screenshot = g_nvn_making_screenshot;
+    pthread_mutex_lock(&texture_objects_lock);
+    t->guest_object = (uint32_t)A(0);
+    t->next_object = texture_objects;
+    texture_objects = t;
     SET_HOST(A(0), t);
+    pthread_mutex_unlock(&texture_objects_lock);
     if (ENV("MHGU_TEX_LOG"))  // (debug) every texture made: format, size, flags, storage, layout
         LOG("[tex] init fmt %#x %ux%ux%u target %u flags %#x levels %u addr %llx bh %u stride %llu\n", t->format, t->width,
             t->height, t->depth, t->target, t->flags, t->levels, (unsigned long long)t->addr, t->layout.block_height_log2,
@@ -353,9 +364,17 @@ NVN(nvnTextureInitialize) {
     RET(1);
 }
 NVN(nvnTextureFinalize) {
-    NvnTexture *t = HOST(NvnTexture, A(0));
-    if (t) { backend_texture_destroyed(t); free(t); }
+    pthread_mutex_lock(&texture_objects_lock);
+    NvnTexture **link = &texture_objects;
+    while (*link && (*link)->guest_object != (uint32_t)A(0)) link = &(*link)->next_object;
+    NvnTexture *t = *link;
+    if (t) {
+        *link = t->next_object;
+        overlay_forget_texture(t);
+    }
     SET_HOST(A(0), 0);
+    pthread_mutex_unlock(&texture_objects_lock);
+    if (t) { backend_texture_destroyed(t); free(t); }
 }
 NVN(nvnTextureSetDebugLabel) {
     NvnTexture *t = HOST(NvnTexture, A(0));
@@ -626,11 +645,19 @@ NVN(nvnProgramSetShaders) { set_shaders(c, na_, 16); }     // NVNshaderData {dat
 NVN(nvnProgramSetShadersExt) { set_shaders(c, na_, 24); }  // NVNshaderDataExt {data, control, debug hash}
 
 // ================================================================== window
+static uint32_t forge_swapchain, forge_swapchain_count;
 // WindowBuilder: device@0 native@8 num@0x10 textures@0x18 interval@0x20 active@0x24
 NVN(nvnWindowBuilderSetDevice) { G(uint64_t, A(0), 0) = A(1); }
 NVN(nvnWindowBuilderSetDefaults) { memset(AP(0) + 8, 0, 0x20); G(uint32_t, A(0), 0x20) = 1; }
 NVN(nvnWindowBuilderSetNativeWindow) { G(uint64_t, A(0), 8) = A(1); }
-NVN(nvnWindowBuilderSetTextures) { G(uint32_t, A(0), 0x10) = (uint32_t)A(1); G(uint64_t, A(0), 0x18) = A(2); }
+NVN(nvnWindowBuilderSetTextures) {
+    G(uint32_t, A(0), 0x10) = (uint32_t)A(1); G(uint64_t, A(0), 0x18) = A(2);
+    uint32_t count = A(1) <= 8 ? (uint32_t)A(1) : 8;
+    if (!forge_swapchain) forge_swapchain = hle_alloc(8 * 4);
+    if (!kernel_mapped((uint32_t)A(2), count * 4)) count = 0;
+    if (count) memcpy(G2H(forge_swapchain), AP(2), count * 4);
+    __atomic_store_n(&forge_swapchain_count, count, __ATOMIC_RELEASE);
+}
 NVN(nvnWindowBuilderSetPresentInterval) { G(uint32_t, A(0), 0x20) = (uint32_t)A(1); }
 NVN(nvnWindowBuilderSetNumActiveTextures) { G(uint32_t, A(0), 0x24) = (uint32_t)A(1); }
 NVN(nvnWindowBuilderGetDevice) { RET(G(uint64_t, A(0), 0)); }
@@ -682,7 +709,39 @@ NVN(nvnQueueAcquireTexture) {
 NVN(nvnQueuePresentTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
     int i = (int)A(2);
-    if (i >= 0 && i < w->num) backend_present(HOST(NvnTexture, w->textures[i]));
+    if (i >= 0 && i < w->num) {
+        forge_nvn_present(c, (uint32_t)A(0), (uint32_t)A(1), i);
+        backend_present(HOST(NvnTexture, w->textures[i]));
+    }
+}
+
+// Forge 2 textures use its caller-owned NVN objects, but their IDs belong to the host ImGui backend.
+HLE_FUNC("forge_graphics_registerTexture", f_forge_register_texture) {
+    uint32_t guest = c->r[0], view = c->r[1];
+    uint64_t id = 0;
+    if (!view || kernel_mapped(view, sizeof(NvnTextureView))) {
+        pthread_mutex_lock(&texture_objects_lock);
+        for (NvnTexture *t = texture_objects; t; t = t->next_object)
+            if (t->guest_object == guest) {
+                id = overlay_register_texture(t, view ? G2H(view) : NULL, sizeof(NvnTextureView));
+                break;
+            }
+        pthread_mutex_unlock(&texture_objects_lock);
+    }
+    c->r[0] = (uint32_t)id; c->r[1] = (uint32_t)(id >> 32);
+}
+
+HLE_FUNC("forge_graphics_unregisterTexture", f_forge_unregister_texture) {
+    overlay_unregister_texture((uint64_t)c->r[0] | (uint64_t)c->r[1] << 32);
+}
+
+HLE_FUNC("forge_graphics_getSwapChainTextures", f_forge_get_swapchain) {
+    uint32_t out = c->r[0], count = __atomic_load_n(&forge_swapchain_count, __ATOMIC_ACQUIRE);
+    if (out) {
+        if (!kernel_mapped(out, 4)) { c->r[0] = 0; return; }
+        ST32(out, count);
+    }
+    c->r[0] = count ? forge_swapchain : 0;
 }
 
 // ================================================================== small state objects

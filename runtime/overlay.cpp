@@ -26,6 +26,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "forge_canvas.h"
+#include "forge_textures.h"
+#include "forge_texture_command.h"
 #include "imgui_internal.h"  // (the Forge window's Cancel: ImGui's active item, popups and nav window)
 #ifndef MHGU_NULL_BACKEND
 #include "backends/imgui_impl_vulkan.h"
@@ -64,6 +66,8 @@ static std::atomic<bool> g_enabled, g_ready, g_open;
 static std::atomic<bool> g_settings_open, g_forge_open;
 static std::atomic<bool> g_forge_over;  // the Forge menu was opened from the settings: they wait under it, not drawn
 static std::mutex g_frame_lock;  // ImGui's frame: the game's thread, or the loading screen's before the game's first
+static std::mutex g_texture_lock;
+static ForgeTextures g_forge_textures;
 static int g_menu_key;
 static float g_font_size;
 static ImGuiStyle g_base_style;  // (unscaled; scaled copies follow the window's height)
@@ -1007,8 +1011,12 @@ void overlay_frame(void *cpu) {
     vi_pause_game();
     if (!g_ready) return;
     std::lock_guard<std::mutex> frame(g_frame_lock);
+    if (!g_plugins_init && forge_plugins_graphics_ready()) {
+        g_plugins_init = true;
+        forge_imgui_init(cpu);
+    }
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
-    bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
+    bool open = g_open, free_render = g_plugins_init && forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
     char line[256];
@@ -1035,10 +1043,6 @@ void overlay_frame(void *cpu) {
     float scale = frame_setup(io, w, h, now);
     apply_input(io);
 
-    if (!g_plugins_init) {  // (Forge: right after its context is made)
-        g_plugins_init = true;
-        forge_imgui_init(cpu);
-    }
     ImGui_ImplVulkan_NewFrame();
     // Cancel in the Forge window closes it when there is nothing else in it to cancel (an item being edited, a popup,
     // a child window): as of before this frame's NewFrame, which acts on Cancel
@@ -1097,7 +1101,7 @@ void overlay_frame(void *cpu) {
             ImGui::BeginChild("##forge_contents");
 #endif
             if (ImGui::CollapsingHeader("About Forge")) {
-                ImGui::Text("Version: %s", "1.5.1");
+                ImGui::Text("Version: %s", "2.0.0");
                 ImGui::SeparatorText("Developers");
                 ImGui::BulletText("Fexty");
                 ImGui::BulletText("jeffi2287");
@@ -1114,7 +1118,7 @@ void overlay_frame(void *cpu) {
                 int n = forge_plugin_titles(names, 16);
                 for (int i = 0; i < n; i++) ImGui::BulletText("%s", names[i]);
             }
-            if (ImGui::CollapsingHeader("Plugin UI")) forge_imgui_run(cpu, FORGE_IMGUI_RENDER);
+            if (ImGui::CollapsingHeader("Plugin UI") && g_plugins_init) forge_imgui_run(cpu, FORGE_IMGUI_RENDER);
 #ifdef __ANDROID__
             forge_finger_scroll();
             ImGui::EndChild();
@@ -1163,6 +1167,44 @@ void overlay_frame(void *cpu) {
 }
 
 // ------------------------------------------------------------------ drawing (render thread)
+uint64_t overlay_register_texture(const void *texture, const void *view, size_t view_size) {
+    std::lock_guard<std::mutex> l(g_texture_lock);
+    uint64_t id = g_forge_textures.add(texture, view, view_size);
+    if (!id) LOG("[forge] could not register texture\n");
+    return id;
+}
+
+void overlay_unregister_texture(uint64_t id) {
+    std::lock_guard<std::mutex> l(g_texture_lock);
+    g_forge_textures.remove(id);
+}
+
+void overlay_forget_texture(const void *texture) {
+    std::lock_guard<std::mutex> l(g_texture_lock);
+    g_forge_textures.forget(texture);
+}
+
+#ifndef MHGU_NULL_BACKEND
+extern "C" uint64_t renderer_forge_texture_view(const void *texture, const void *view, uint64_t *identity);
+extern "C" uint64_t vk_pending_seq(void);
+extern "C" uint64_t vk_completed_seq(void);
+#endif
+
+void overlay_prepare_textures(void) {
+#ifndef MHGU_NULL_BACKEND
+    if (!g_ready) return;
+    std::lock_guard<std::mutex> l(g_texture_lock);
+    g_forge_textures.prepare(vk_pending_seq(), vk_completed_seq(), [](const void *texture, const void *view) {
+            ForgeTextureImage image;
+            image.view = renderer_forge_texture_view(texture, view, &image.identity);
+            return image;
+        },
+        [](uint64_t image) {
+            return (uint64_t)(uintptr_t)ImGui_ImplVulkan_AddTexture((VkImageView)(uintptr_t)image, VK_IMAGE_LAYOUT_GENERAL);
+        }, [](uint64_t descriptor) { ImGui_ImplVulkan_RemoveTexture((VkDescriptorSet)(uintptr_t)descriptor); });
+#endif
+}
+
 static VkRenderPass g_pass;
 
 static void vk_check(VkResult r) {
@@ -1250,7 +1292,17 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         }
     }
     std::lock_guard<std::mutex> l(g_snap_lock);
-    if (g_snap.Valid && g_snap.CmdListsCount) ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+    if (g_snap.Valid && g_snap.CmdListsCount) {
+        std::lock_guard<std::mutex> textures(g_texture_lock);
+        std::vector<ForgeTextureCommand> saved;
+        for (ImDrawList *list : g_snap.CmdLists)
+            for (ImDrawCmd &command : list->CmdBuffer) {
+                ForgeTextureCommand patch;
+                if (ForgeTextureCommand::apply(g_forge_textures, command, patch)) saved.push_back(patch);
+            }
+        ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+        for (const ForgeTextureCommand &s : saved) s.restore();
+    }
 #endif
 }
 

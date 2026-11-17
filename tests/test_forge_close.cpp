@@ -41,6 +41,8 @@ const char *ImGuiTestEngine_FindItemDebugLabel(ImGuiContext *, ImGuiID) { return
 extern "C" {
 Config g_config = {};
 volatile uint64_t g_present_count;
+uint32_t g_render_size[2] = {1280, 720};
+float g_render_aspect = 16.0f / 9.0f;
 const unsigned char _binary_font_ttf_start[] = {0};
 const unsigned char _binary_font_ttf_end[] = {0};
 SDL_Window *ui_window(void) { return nullptr; }
@@ -50,6 +52,7 @@ void vi_pause_game(void) {}
 bool shader_prewarm_progress(uint64_t *, uint64_t *) { return false; }
 bool romfs_mods_progress(int *, int *) { return false; }
 bool forge_plugins_have(int) { return false; }
+bool forge_plugins_graphics_ready(void) { return true; }
 int forge_plugin_titles(const char **, int) { return 0; }
 void forge_imgui_init(void *) {}
 void forge_imgui_run(void *, int which) {

@@ -34,10 +34,10 @@
 #include "mods.h"
 #include "overlay.h"
 
-#define FORGE_MAJOR 1
-#define FORGE_MINOR 5
-#define FORGE_PATCH 1
-#define FORGE_VERSION_STRING "1.5.1"
+#define FORGE_MAJOR 2
+#define FORGE_MINOR 0
+#define FORGE_PATCH 0
+#define FORGE_VERSION_STRING "2.0.0"
 
 // Main module offsets (from its text) Forge uses, MHGU 1.4.0
 #define OFF_APP_RUN     0xB8692Cu  // sApp::run
@@ -53,6 +53,7 @@ typedef struct {
     Module *m;
     uint32_t on_load, on_init, on_update;
     uint32_t on_imgui[3];  // forge_onImGuiInit, forge_onImGuiRender, forge_onImGuiFreeRender (FORGE_IMGUI_*)
+    uint32_t on_nvn[3];    // optional Forge 2 callbacks; old plugins leave them zero
     uint32_t param;  // PluginInitParam: u16 major, minor, patch; char name[64]
     bool active;  // not rejected (a plugin without forge_onLoad is active too)
 } Plugin;
@@ -885,6 +886,39 @@ HLE_FUNC("forge_fs_fileExists", f_file_exists) {
     RET(r == 0);
 }
 
+HLE_FUNC("forge_fs_openFile", f_file_open) {
+    uint32_t path = ARG(0), mode = ARG(1), out = ARG(2), sp = c->r[13];
+    uint32_t fn = gsym("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci");
+    uint32_t handle = (sp - 16) & ~7u;
+    if (!fn || !path || !out || !kernel_mapped(path, 1) || !kernel_mapped(out, 4) ||
+        sp < 16 || !kernel_mapped(handle, 16)) { RET(0); return; }
+    c->r[13] = handle;
+    uint32_t r = gcall(c, fn, handle, path, mode, 0);
+    if (!r) ST32(out, LD32(handle));  // nn::fs::FileHandle is one u32 on AArch32.
+    c->r[13] = sp;
+    RET(r == 0);
+}
+
+HLE_FUNC("forge_fs_getFileSize", f_file_size) {
+    uint32_t handle = ARG(0), out = ARG(1);
+    uint32_t fn = gsym("_ZN2nn2fs11GetFileSizeEPxNS0_10FileHandleE");
+    if (!fn || !out || !kernel_mapped(out, 8)) { RET(0); return; }
+    RET(gcall(c, fn, out, handle, 0, 0) == 0);
+}
+
+HLE_FUNC("forge_fs_readFile", f_file_read) {
+    if (!kernel_mapped(c->r[13], 8)) { RET(0); return; }
+    uint32_t buffer = STK(0), size = STK(1);
+    uint32_t fn = gsym("_ZN2nn2fs8ReadFileENS0_10FileHandleExPvj");
+    if (!fn || (size && (!buffer || !kernel_mapped(buffer, size)))) { RET(0); return; }
+    // Both APIs take handle in r0, the aligned s64 offset in r2:r3, then buffer/size on the unchanged stack.
+    RET(gcall(c, fn, ARG(0), 0, ARG(2), ARG(3)) == 0);
+}
+
+HLE_FUNC("forge_fs_closeFile", f_file_close) {
+    gcall(c, gsym("_ZN2nn2fs9CloseFileENS0_10FileHandleE"), ARG(0), 0, 0, 0);
+}
+
 // ------------------------------------------------------------------ nn::os wrappers (same arguments as the SDK's)
 #define FORWARD(name, sym, fn)                         \
     HLE_FUNC(name, fn) {                               \
@@ -1179,6 +1213,46 @@ HLE_FUNC("__aeabi_read_tp", f_read_tp) {
 }
 
 // ------------------------------------------------------------------ plugins
+static uint32_t nvn_device, nvn_queue;
+static bool nvn_started, nvn_ready;
+
+void forge_nvn_device(uint32_t device) { __atomic_store_n(&nvn_device, device, __ATOMIC_RELEASE); }
+
+bool forge_plugins_graphics_ready(void) {
+    if (__atomic_load_n(&nvn_device, __ATOMIC_ACQUIRE) && __atomic_load_n(&nvn_queue, __ATOMIC_ACQUIRE)) return true;
+    for (int i = 0; i < nplugins; i++)
+        if (plugins[i].active && (plugins[i].on_nvn[0] || plugins[i].on_nvn[1] || plugins[i].on_nvn[2])) return false;
+    return true;
+}
+
+static void plugins_nvn(Cpu *c, int which, uint32_t a0, uint32_t a1, uint32_t a2) {
+    Cpu saved = *c;
+    for (int i = 0; i < nplugins; i++)
+        if (plugins[i].active && plugins[i].on_nvn[which]) gcall(c, plugins[i].on_nvn[which], a0, a1, a2, 0);
+    *c = saved;
+}
+
+void forge_plugins_nvn_init(Cpu *c) {
+    uint32_t device = __atomic_load_n(&nvn_device, __ATOMIC_ACQUIRE);
+    uint32_t queue = __atomic_load_n(&nvn_queue, __ATOMIC_ACQUIRE);
+    if (nvn_started || !device || !queue) return;
+    nvn_started = true;
+    uint32_t proc = hle_register("nvnDeviceGetProcAddress", hle_lookup_impl("nvnDeviceGetProcAddress"));
+    plugins_nvn(c, FORGE_NVN_INIT, proc, device, queue);
+}
+
+void forge_plugins_nvn_ready(Cpu *c) {
+    if (!nvn_started || __atomic_load_n(&nvn_ready, __ATOMIC_ACQUIRE)) return;
+    plugins_nvn(c, FORGE_NVN_READY, 0, 0, 0);
+    __atomic_store_n(&nvn_ready, true, __ATOMIC_RELEASE);
+}
+
+void forge_nvn_present(Cpu *c, uint32_t queue, uint32_t window, int texture_index) {
+    __atomic_store_n(&nvn_queue, queue, __ATOMIC_RELEASE);
+    if (__atomic_load_n(&nvn_ready, __ATOMIC_ACQUIRE))
+        plugins_nvn(c, FORGE_NVN_RENDER, window, (uint32_t)texture_index, 0);
+}
+
 void forge_plugins_imgui(Cpu *c, int which, uint32_t a0, uint32_t a1, uint32_t a2) {
     for (int i = 0; i < nplugins; i++)
         if (plugins[i].active && plugins[i].on_imgui[which]) gcall(c, plugins[i].on_imgui[which], a0, a1, a2, 0);
@@ -1470,7 +1544,7 @@ static void overlay_start(const char **layers, int nl) {
     const char *internal = SDL_GetAndroidInternalStoragePath();
     if (internal) {
         char builtin[1400];
-        snprintf(builtin, sizeof builtin, "%s/forge-v1.5.1/romfs", internal);
+        snprintf(builtin, sizeof builtin, "%s/forge-v2.0.0/romfs", internal);
         if (ci_path(builtin, "nativeNX/forge/fonts/Roboto-Medium.ttf", path, sizeof path)) snprintf(font, sizeof font, "%s", path);
         if (ci_path(builtin, "nativeNX/forge/config.ini", path, sizeof path)) snprintf(file, sizeof file, "%s", path);
     }
@@ -1564,6 +1638,9 @@ void forge_init(void) {
         p->on_imgui[FORGE_IMGUI_INIT] = loader_module_symbol(m, "forge_onImGuiInit");
         p->on_imgui[FORGE_IMGUI_RENDER] = loader_module_symbol(m, "forge_onImGuiRender");
         p->on_imgui[FORGE_IMGUI_FREE_RENDER] = loader_module_symbol(m, "forge_onImGuiFreeRender");
+        p->on_nvn[FORGE_NVN_INIT] = loader_module_symbol(m, "forge_onNvnInit");
+        p->on_nvn[FORGE_NVN_READY] = loader_module_symbol(m, "forge_onNvnReady");
+        p->on_nvn[FORGE_NVN_RENDER] = loader_module_symbol(m, "forge_onNvnRender");
         interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);
         kernel_map_region(m->base + m->text_off, m->ro_off - m->text_off, 3, 5);
         kernel_map_region(m->base + m->ro_off, m->data_off - m->ro_off, 3, 1);
