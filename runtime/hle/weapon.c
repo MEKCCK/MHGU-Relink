@@ -17,6 +17,8 @@
 #define VT_DRAWN      94u          // the slot of the vtable
 #define FN_DRAWN      0x4a2444u
 #define PL_FLAGS      0x2749u      // (bit 0: the weapon is out, drawing included)
+#define PL_SHEATH_1   0x4B5u       // 0 fully sheathed, 5 while the weapon/sheath is still shown
+#define PL_SHEATH_2   0x114Cu      // 0 fully sheathed, 1 while drawn or in the sheathe animation
 #define PL_DATA       0x13c4u
 #define PD_WEAPON     0x14cu
 #define PL_ACT_ST     0x2506u      // the current action (u16 act_st, act_no: hle/movelog.c)
@@ -105,6 +107,14 @@ uint64_t weapon_art_buttons(int slot) {
 int weapon_drawn(void) {
     uint32_t h = weapon_hunter();
     return h ? LD8(h + PL_FLAGS) & 1 : -1;
+}
+
+// 1 only once the sheathe (Valor's special sheathe included) has finished: the game clears PL_FLAGS bit 0 when the
+// sheathe starts, but keeps these two bytes set until the weapon is actually away (docs/GAME-ACTIONS.md, PLSNAP).
+int weapon_sheathed(void) {
+    uint32_t h = weapon_hunter();
+    if (!h || (LD8(h + PL_FLAGS) & 1)) return 0;
+    return LD8(h + PL_SHEATH_1) == 0 && LD8(h + PL_SHEATH_2) == 0;
 }
 
 // WEAPON_*: of a hunter (0: none, or another weapon)

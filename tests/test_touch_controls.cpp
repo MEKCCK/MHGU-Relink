@@ -153,6 +153,8 @@ bool menuptr_screen_map(float m[4]) {
 }
 uint32_t weapon_hunter(void) { return local_hunter; }
 int weapon_drawn(void) { return drawn; }
+static bool sheathing;
+int weapon_sheathed(void) { return !drawn && !sheathing; }
 int weapon_ranged(uint32_t) { return ranged; }
 int weapon_type(void) { return weapon_override == UNKNOWN_WEAPON ? -1 : weapon_override >= 0 ? weapon_override : ranged == WEAPON_BOWGUN ? 4 : ranged == WEAPON_BOW ? 10 : 0; }
 int presence_in_quest(void) { return in_quest; }
@@ -310,7 +312,7 @@ static void fresh(int w = 1280, int h = 720) {
     g_s.touched = true; g_s.w = (float)w; g_s.h = (float)h; g_s.sel = -1;
     cfg = {}; cfg.touch_controls = TOUCH_ON; cfg.touch_auto_r = 0;
     const int shown[] = TOUCH_SHOW_DEFAULT; std::copy(shown, shown + TB_COUNT, cfg.touch_show);
-    settings_open = false; config_save_fail=companion_commit_fail=false; config_saves=0; drawn = 0; ranged = 0; bow_type = 0; aiming = lock_on = persistent_lock_on = false; hunt_camera = hunter_moving = true;
+    settings_open = false; config_save_fail=companion_commit_fail=false; config_saves=0; drawn = 0; ranged = 0; bow_type = 0; aiming = lock_on = persistent_lock_on = false; hunt_camera = hunter_moving = true; sheathing = false;
     local_hunter=0; bow_drag={};
     std::copy(std::begin(EXPECTED_ART_INPUTS),std::end(EXPECTED_ART_INPUTS),art_inputs);
     target_cycles = 0; item_steps.clear();
@@ -685,11 +687,15 @@ static void auto_r() {
         move(1.6001f,true);
         drawn=1; check(update(),false);          // weapon out: R would be a guard/attack
         drawn=out; move(1.6001f,true);
-        // Valor's special sheathe: Y held, the game reports sheathed until release. AutoR must not inject R yet.
+        // Valor's special sheathe: Y held, the game reports PL_FLAGS bit 0 clear until release. AutoR must not fire.
         if (!out) {
             Input y = update(B(BTN_Y));
             assert(!y.run && !g_s.run && !((y.b | y.touch_b) & B(BTN_R)));
-            move(1.6001f,true);                  // released: the sheathe finished, running resumes
+            sheathing = true;                    // released, but the sheathe animation still runs
+            Input s = update();
+            assert(!s.run && !g_s.run && !((s.b | s.touch_b) & B(BTN_R)));
+            sheathing = false;                   // fully sheathed: running resumes
+            move(1.6001f,true);
         }
         event(SDL_EVENT_FINGER_UP,1,origin.x+1.6001f*g.r,origin.y);
         check(update(),false); assert(!update().lx && !update().ly);

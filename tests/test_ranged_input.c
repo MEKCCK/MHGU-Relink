@@ -646,6 +646,19 @@ static void virtual_right_stick_camera_routing(void) {
     puts("PASS: virtual right-stick axes stay available to game logic but do not turn the camera; independent mouse/touch deltas still turn it");
 }
 
+static void sheathe_state(void) {
+    world();
+    ST8(hunter + 0x2749, 0); ST8(hunter + 0x4B5, 5); ST8(hunter + 0x114C, 1);
+    assert(!weapon_drawn() && !weapon_sheathed());        // sheathing: bit 0 clear, animation bytes still set
+    ST8(hunter + 0x4B5, 0);
+    assert(!weapon_sheathed());
+    ST8(hunter + 0x114C, 0);
+    assert(weapon_sheathed());                            // fully away
+    ST8(hunter + 0x2749, 1);
+    assert(weapon_drawn() == 1 && !weapon_sheathed());
+    puts("PASS: full-sheathe state waits for the sheathe animation bytes, not only the game's drawn bit.");
+}
+
 int main(void) {
     hunter_art_controls(); world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
     shot_left_stick(VT_HEAVY, 0); shot_left_stick(VT_LIGHT, 0); shot_left_stick(VT_BOW, 0); shot_left_stick(VT_BOW, 1);
@@ -653,6 +666,7 @@ int main(void) {
     actual_aim(); persistent_scope(); scope_left_stick(VT_HEAVY); scope_left_stick(VT_LIGHT); scope_left_stick(VT_BOW);
     no_unscoped_steering(); relative_drag();
     bow_charge_drag_angles(); bow_charge_drag_lifecycle(); bow_charge_drag_races(); virtual_right_stick_camera_routing();
+    sheathe_state();
     puts("PASS: sticky target/cycle, standing bowgun fire, manual aim/crouch, bow charge gates, actual aim states, relative drag.");
     return 0;
 }

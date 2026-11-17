@@ -7,6 +7,7 @@ enum { WEAPON_BOW = 1, WEAPON_BOWGUN };  // (runtime/hle/weapon.c)
 uint32_t weapon_hunter(void);
 int weapon_type(void);  // game's weapon id, 0..4 / 6..15; -1 when unknown
 int weapon_drawn(void);
+int weapon_sheathed(void);       // 1 only after the sheathe animation (Valor special sheathe included) finished
 int weapon_ranged(uint32_t hunter);
 bool weapon_aiming(uint32_t hunter);
 bool mousecam_hunter_aiming(uint32_t hunter);  // native aiming action query, including weapon-specific aim actions
