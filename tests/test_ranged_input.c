@@ -656,7 +656,10 @@ static void sheathe_state(void) {
     assert(weapon_sheathed());                            // fully away
     ST8(hunter + 0x2749, 1);
     assert(weapon_drawn() == 1 && !weapon_sheathed());
-    puts("PASS: full-sheathe state waits for the sheathe animation bytes, not only the game's drawn bit.");
+    ST32(G_SPLAYER, 0);                                   // town / hub: no hunter object
+    assert(weapon_hunter() == 0 && weapon_sheathed());
+    ST32(G_SPLAYER, 0x08001000);                          // restore the fixture
+    puts("PASS: full-sheathe state waits for the sheathe animation bytes, not only the game's drawn bit; town still runs.");
 }
 
 int main(void) {

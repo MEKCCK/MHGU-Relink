@@ -113,7 +113,8 @@ int weapon_drawn(void) {
 // sheathe starts, but keeps these two bytes set until the weapon is actually away (docs/GAME-ACTIONS.md, PLSNAP).
 int weapon_sheathed(void) {
     uint32_t h = weapon_hunter();
-    if (!h || (LD8(h + PL_FLAGS) & 1)) return 0;
+    if (!h) return 1;  // town, hub, a menu, a Prowler: no weapon to guard with (old drawn -1 allowed running)
+    if (LD8(h + PL_FLAGS) & 1) return 0;
     return LD8(h + PL_SHEATH_1) == 0 && LD8(h + PL_SHEATH_2) == 0;
 }
 
