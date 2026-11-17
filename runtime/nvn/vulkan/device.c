@@ -1089,6 +1089,7 @@ void backend_present(NvnTexture *t) {
     b->presented = true;
     vk_end_pass();
     vk_ms_resolve(b);
+    overlay_prepare_textures();
     if (g_hdr_out) vk_hdr_analyze(vk_cmd(), b);  // ([HDR] Analysis: measured before it is drawn, hdr.c)
     if (frame_begin()) {
         // the game's image, as large as fits with its aspect ratio, centred

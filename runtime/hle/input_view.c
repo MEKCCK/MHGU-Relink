@@ -5,8 +5,8 @@
 // gameplay view: the Player copy, the town avatar, the camera) and f_5de4f8 for mb2 (the ~320 menu readers), and
 // derives cur / prev / trig / rel from what comes back. Both are pure functions of r1, so they are hooked: r1 becomes
 // act_view(), the original runs, and the engine's own edge logic sees the rebound word (chords and combos come out
-// right for free). Rebinding hooks are installed with [Actions] Enable=1; the pad snapshot and R-role hooks also
-// carry the independent touch-stick run request when rebinding is off.
+// right for free). Rebinding hooks are installed with [Actions] Enable=1; the pad snapshot and R-role hooks remain
+// installed when rebinding is off.
 //
 // The actions come from the host (runtime/hle/input.c): the set active when the game polled the pad this frame.
 // The context (field / town / menu) and the weapon class come from the engine's own code running: the player's
@@ -40,7 +40,6 @@
                                   // are read from the MENU word's pressed bits (sPad+0x6bfc), not the gameplay word's
 #define FN_PL_IS_LOCAL 0x47bcd0u  // (player) 1: ours
 #define FN_KC_R        0x85f93cu  // () the R-role mask the game tests: R (mb1 0x40), or ZR (0x800) with the second Control Type
-#define FN_PL_EVENT    0x485de4u  // (player, event) ORs the native control event into player+0x1414
 #define FN_PAD_INDEX   0xdad28cu  // (sPad) the index of the pad slot in use
 #define G_SPAD         0x1a3cbfcu // GOT entry: **sPad
 #define G_OPTIONS      0x1a97f78u // options object *
@@ -177,7 +176,7 @@ static void mb_update(Cpu *c) {
         uint32_t opt = LD32(G_OPTIONS);
         g_dash_zr = sane(opt) && LD8(opt + OPT_DASH_ROLE) != 0;
     }
-    if (!g_on) {  // (rebinding is off; the independent run request was still latched with this pad frame)
+    if (!g_on) {  // (rebinding is off: use the engine's original button update)
         fnhook_call_next(c, FN_MB_UPDATE);
         return;
     }

@@ -624,7 +624,7 @@ its buttons, as above.
 
 ### List menus with the mouse (2026-11-11)
 
-What made it possible: most list menus move a shared cursor object (`docs/research/title-menu.md`: update `0x74ee98(cursor,
+What made it possible: most list menus move a shared cursor object (update `0x74ee98(cursor,
 pad bits)`, +0xd the row on the page, +0xe rows a page, +0x10 / +0x12 page / pages, +0x14 items). The recompiled code
 calls it from 408 places; a menu is told apart by its call's return address (a hunt's pause menu `0x86f8ec`: 13 items,
 7 a page; Up 0x10, Down 0x40; greyed-out rows are not skipped; Gestures `0x874af0`). The cursor's +0xd is the real row

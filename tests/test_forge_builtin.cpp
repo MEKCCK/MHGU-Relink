@@ -46,8 +46,9 @@ static void expect(const fs::path &path, float size, int key, int level) {
 int main(int argc, char **argv) {
     assert(argc == 3);
     internal = fs::path(argv[1]).generic_string();
-    fs::path resources = fs::path(argv[2]) / "forge-v1.5.1/romfs/nativeNX/forge";
-    fs::path builtin = fs::path(internal) / "forge-v1.5.1/romfs/nativeNX/forge";
+    fs::path resources = fs::path(argv[2]) / "forge-v2.0.0/romfs/nativeNX/forge";
+    fs::path builtin = fs::path(internal) / "forge-v2.0.0/romfs/nativeNX/forge";
+    fs::path legacy = fs::path(internal) / "forge-v1.5.1/romfs/nativeNX/forge";
     const char *layers[] = {"game/romfs", "mod-a/romfs", "mod-b/romfs"};
     const char *config = "nativeNX/forge/config.ini", *ttf = "nativeNX/forge/fonts/Roboto-Medium.ttf";
 
@@ -55,6 +56,10 @@ int main(int argc, char **argv) {
     overlay_start(nullptr, 0);
     expect({}, 12.f, 73, 1);
     storage_available = true;
+    put(legacy / "config.ini", "[log]\nlevel=debug\n[menu]\nkey=55\nfont_size=17\n");
+    put(legacy / "fonts/Roboto-Medium.ttf", "legacy private font");
+    overlay_start(nullptr, 0);
+    expect({}, 12.f, 73, 1);  // Old private defaults cannot shadow the new version.
     fs::create_directories(builtin);
     fs::copy(resources, builtin, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
     overlay_start(layers, 3);
@@ -71,6 +76,10 @@ int main(int argc, char **argv) {
     overlay_start(layers, 3);
     expect(fs::path(layers[2]) / ttf, 18.f, 51, 0);
 
+    put(fs::path(layers[2]) / config, "[menu]\nkey=52\n");
+    overlay_start(layers, 3);
+    expect(fs::path(layers[2]) / ttf, 12.f, 52, 1);  // Files override; missing keys are not merged.
+
     // Preserve the existing whole-file override policy, including malformed files.
     put(fs::path(layers[2]) / config, "bad config\n");
     overlay_start(layers, 3);
@@ -83,5 +92,5 @@ int main(int argc, char **argv) {
     internal += "/missing";
     overlay_start(nullptr, 0);
     expect({}, 12.f, 73, 1);
-    puts("PASS: native Forge builtin defaults, game/mod per-file precedence, malformed config and log override");
+    puts("PASS: native Forge 2.0.0 defaults, legacy private defaults ignored, game/mod per-file precedence, whole-file overrides, malformed config and log override");
 }

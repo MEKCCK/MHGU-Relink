@@ -1,0 +1,4 @@
+
+# Preserve resource-manifest hashes on every platform.
+/android/app/src/main/assets/forge-v1.5.1/** -text
+/android/app/src/main/assets/forge-v2.0.0/** -text

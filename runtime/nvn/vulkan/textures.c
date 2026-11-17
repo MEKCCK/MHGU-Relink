@@ -742,8 +742,9 @@ void renderer_upload_rgba(NvnTexture *t, const void *rgba, uint32_t w, uint32_t 
 
 // ================================================================== views
 #define VIEW_TAB 16384
-typedef struct { TexBackend *b; uint64_t k1, k2; VkImageView view; } ViewEnt;
+typedef struct { TexBackend *b; uint64_t k1, k2; VkImageView view; uint64_t identity; } ViewEnt;
 static ViewEnt view_tab[VIEW_TAB];
+static uint64_t view_identity, last_view_identity;
 
 // Views may still be referenced by submitted or pending work: destroyed once that has completed.
 void vk_views_forget(TexBackend *b) { views_forget(b); }
@@ -760,7 +761,7 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     uint32_t slot = (uint32_t)(h ^ (h >> 32)) & (VIEW_TAB - 1);
     for (int probe = 0; probe < 16; probe++, slot = (slot + 1) & (VIEW_TAB - 1)) {
         ViewEnt *e = &view_tab[slot];
-        if (e->b == b && e->k1 == k1 && e->k2 == k2) return e->view;
+        if (e->b == b && e->k1 == k1 && e->k2 == k2) { last_view_identity = e->identity; return e->view; }
         if (!e->b) break;
     }
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = b->image, .viewType = type,
@@ -773,7 +774,8 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     }
     ViewEnt *e = &view_tab[slot];
     if (e->b) vk_defer_view(e->view);  // evict (16 probes taken)
-    *e = (ViewEnt){b, k1, k2, v};
+    *e = (ViewEnt){b, k1, k2, v, ++view_identity};
+    last_view_identity = e->identity;
     return v;
 }
 
@@ -858,6 +860,17 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
     if (nlog++ < 30) LOG("[tex] type mismatch: want %d have %d (%ux%ux%u target %u fmt %#x layers %u)\n", want, have, t->width,
                          t->height, t->depth, t->target, t->format, b->layers);
     return vk_dummy_view(want_textype);
+}
+
+// Called under the Vulkan lock, outside render passes, while the Forge registry keeps this caller-owned object live.
+uint64_t renderer_forge_texture_view(const void *texture, const void *view, uint64_t *identity) {
+    NvnTexture *t = (NvnTexture *)texture;
+    TexBackend *b = vk_tex(t, false);
+    vk_ms_resolve(b);
+    last_view_identity = 0;
+    VkImageView image = vk_view(t, view, view != NULL, false, TEXTYPE_2D);
+    *identity = image ? last_view_identity : 0;
+    return (uint64_t)(uintptr_t)image;
 }
 
 // 1x1 black textures for unbound slots, per type

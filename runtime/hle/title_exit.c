@@ -1,6 +1,6 @@
 // B on the title screen's Main Menu asks to quit, as closing the window does (runtime/ui.c): the settings menu's
 // Exit confirmation. The title sequence's own update (vtable slot 9, 0x87b544) keeps its state at +4; 0x11 is the
-// Main Menu and 0x10 the screen it arrives from (docs/research/title-menu.md). Elsewhere the menu's own Back applies.
+// Main Menu and 0x10 the screen it arrives from. Elsewhere the menu's own Back applies.
 #include "../hle.h"
 #include "../app_actions.h"
 #include "../overlay.h"

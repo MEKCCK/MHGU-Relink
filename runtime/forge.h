@@ -16,7 +16,13 @@ void forge_format(char *out, size_t n, const char *fmt, struct Cpu *c, int reg, 
 // the plugins' ImGui entry points: FORGE_IMGUI_INIT forge_onImGuiInit(ctx, alloc, free), FORGE_IMGUI_RENDER
 // forge_onImGuiRender() (in Forge's window), FORGE_IMGUI_FREE_RENDER forge_onImGuiFreeRender() (every frame)
 enum { FORGE_IMGUI_INIT, FORGE_IMGUI_RENDER, FORGE_IMGUI_FREE_RENDER };
+enum { FORGE_NVN_INIT, FORGE_NVN_READY, FORGE_NVN_RENDER };
 void forge_plugins_imgui(struct Cpu *c, int which, uint32_t a0, uint32_t a1, uint32_t a2);
+bool forge_plugins_graphics_ready(void);
+void forge_plugins_nvn_init(struct Cpu *c);
+void forge_plugins_nvn_ready(struct Cpu *c);
+void forge_nvn_device(uint32_t device);
+void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int texture_index);
 bool forge_plugins_have(int which);                  // a started plugin has that entry point
 int forge_plugin_titles(const char **out, int max);  // the started plugins' names (their own, else the file's)
 void forge_test_hook(uint32_t target);  // (debug) a plugin-style hook on target (MHGU_FORGE_TESTHOOK, "testhook")

@@ -441,7 +441,7 @@ public class GameActivity extends SDLActivity {
 
     private void prepareForgeAssets() {
         // Built-in defaults live outside the player's mods; their RomFS files still take precedence.
-        String root = "forge-v1.5.1/romfs/nativeNX/forge/";
+        String root = "forge-v2.0.0/romfs/nativeNX/forge/";
         for (String name : new String[] {"config.ini", "fonts/Roboto-Medium.ttf",
                 "shaders/imgui_vert.vsh", "shaders/imgui_frag.fsh", "shaders/compiled/imgui.fbin"}) {
             String asset = root + name;

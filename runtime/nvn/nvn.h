@@ -62,6 +62,8 @@ typedef struct NvnTexture {
     uint64_t debug_id;
     char label[64];
     bool screenshot;  // a buffer of the game's sScreenShot (made while g_nvn_making_screenshot was set)
+    uint32_t guest_object;  // live object registry: Forge must not trust a host pointer supplied in a plugin's blob
+    struct NvnTexture *next_object;
 } NvnTexture;
 // Set by runtime/hle/camera_jitter.c on the thread making the game's screenshot buffers, while it does
 extern _Thread_local bool g_nvn_making_screenshot;

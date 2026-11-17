@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 project = Path(__file__).resolve().parents[1]
+version = (project / 'VERSION').read_text(encoding='utf-8').strip()
 workspace = Path(os.environ.get('MHGU_TEST_WORKSPACE', str(Path(__file__).resolve().parents[1])))
 deps = workspace / 'analysis/host-test-deps'
 output = Path(os.environ.get('MHGU_SETTINGS_PANEL_OUTPUT', workspace / 'analysis/relink-settings-panel-build'))
@@ -21,7 +22,7 @@ toolchain = Path(os.environ.get('ANDROID_NDK_HOME', str(Path(os.environ.get('LOC
 sdl = deps / 'SDL3-3.4.18'
 imgui = project / 'third_party/cimgui/imgui'
 common = ['--target=x86_64-pc-windows-msvc', '-g', '-gcodeview', '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE',
-          '-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH', '-DMHGU_TOUCH_ICON_PICKER_TEST',
+          '-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH', '-DMHGU_TOUCH_ICON_PICKER_TEST', f'-DMHGU_VERSION="{version}"',
           '-DW_OK=2', '-Dstrtok_r=strtok_s', '-Wno-deprecated-declarations', '-Wno-microsoft-goto',
           '-I' + str(project / 'tests/host_compat'), '-I' + str(deps), '-I' + str(project / 'runtime'),
           '-I' + str(imgui), '-I' + str(sdl / 'include')]

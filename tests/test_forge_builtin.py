@@ -35,11 +35,17 @@ def run(command, cwd):
 
 
 def main():
-    manifest = json.loads((ROOT / 'android/forge-v1.5.1.json').read_text(encoding='utf-8'))
+    manifest = json.loads((ROOT / 'android/forge-v2.0.0.json').read_text(encoding='utf-8'))
+    assert manifest['version'] == '2.0.0'
     resources = manifest['resources']
     expected = {item['asset'] for item in resources}
     assert len(expected) == 5
-    assert {p.relative_to(ASSETS).as_posix() for p in (ASSETS / 'forge-v1.5.1').rglob('*') if p.is_file()} == expected
+    assert {p.relative_to(ASSETS).as_posix() for p in (ASSETS / 'forge-v2.0.0').rglob('*') if p.is_file()} == expected
+    # Keep the older resources as requested; verify their provenance too.
+    legacy = json.loads((ROOT / 'android/forge-v1.5.1.json').read_text(encoding='utf-8'))
+    for item in legacy['resources']:
+        data = (ASSETS / item['asset']).read_bytes()
+        assert len(data) == item['size'] and hashlib.sha256(data).hexdigest() == item['sha256']
     for item in resources:
         data = (ASSETS / item['asset']).read_bytes()
         assert len(data) == item['size'] and hashlib.sha256(data).hexdigest() == item['sha256']
@@ -53,7 +59,7 @@ def main():
             for item in entries:
                 data = z.read(item['member'])
                 assert len(data) == item['size'] and hashlib.sha256(data).hexdigest() == item['sha256']
-    print('PASS: all five packaged Forge resources match the provenance manifest; no console ExeFS or plugins packaged')
+    print('PASS: active Forge 2.0.0 and retained legacy resources match their provenance manifests')
 
     java = (ROOT / 'android/app/src/main/java/com/mhgu/relink/GameActivity.java').read_text(encoding='utf-8')
     assert 'prepareForgeAssets();' in function(java, 'private void prepareFiles(')

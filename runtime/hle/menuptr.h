@@ -43,6 +43,11 @@ int menuptr_hit(float x, float y);       // a point of the 1280x720 screen: a ce
 void menuptr_row_centre(int cell, float *x, float *y);  // (1280x720)
 void menuptr_select(int cell, bool pick); // move the selection there (the game's way); pick: then Confirm it
 void menuptr_select_at(int cell, bool pick, float x, float y);  // the same, from the pointer at (x, y) of the layout
+void menuptr_touch_select_at(int cell, bool pick, float x, float y);  // touch Combine starts the native A-hold loop
+uint64_t menuptr_mix_buttons(bool cancel); // this frame's touch-owned Npad A/B; ends at the recipe list
+void menuptr_mix_cancel(void);          // stop touch auto-combining, including before background/pause
+bool menuptr_mix_pause_region(MenuGeom *out); // frozen original row in the picture's 1280x720 canvas, even during animation
+bool menuptr_mix_pause_at(float x, float y);  // picture coordinates: stop automatic input without queuing native A/B
 void menuptr_nudged(void);               // the host pressed Down to wake a quiet cursor: no update takes it as a step
 bool menuptr_frame_taken(const MenuGeom *g);  // another menu with g's frame ran lately (render thread: menulearn.c)
 bool menuptr_take_confirm(void);         // a picked cell is selected: Confirm it now (once)

@@ -44,6 +44,7 @@
 #include "input.h"
 #include "input_view.h"
 #include "menuptr.h"
+#include "mousecam.h"
 #include "prompt_icons.h"
 
 #define ARC_PATH   "nativeNX/loc/arc/resident.arc"
@@ -450,7 +451,7 @@ void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
     }
 }
 
-// cGUIObjTexture and cGUIObjText supply texel UVs; match the direction glyph, never the visible row number.
+// cGUIObjTexture and cGUIObjText supply texel UVs; the current native Art masks identify the slot, not its visible row.
 int prompts_hunter_art_slot(uint32_t addr, float u0, float v0, float u1, float v1) {
     for (int sheet = 0; sheet < 2; sheet++) {  // button_festa and HD_custom_pnl2, identified by complete contents
         Sheet *s = &sheets[sheet];
@@ -461,11 +462,19 @@ int prompts_hunter_art_slot(uint32_t addr, float u0, float v0, float u1, float v
         float u = (u0 + u1) * 0.5f, v = (v0 + v1) * 0.5f;
         for (int i = 0; i < s->ncells; i++) {
             const Cell *c = &s->cells[i];
-            int slot = c->btn == BTN_UP ? 0 : c->btn == BTN_RIGHT ? 1 : c->btn == BTN_DOWN ? 2 : -1;
-            if (slot < 0 || c->btn2 >= 0 || u < c->x || u > c->x + c->w || v < c->y || v > c->y + c->h) continue;
+            if (c->btn2 >= 0 || u < c->x || u > c->x + c->w || v < c->y || v > c->y + c->h) continue;
             // The panel ink box has one texel of padding; either draw path can inset UVs by half a texel.
-            if (u0 <= c->x + 1 && v0 <= c->y + 1 && u1 >= c->x + c->w - 1 && v1 >= c->y + c->h - 1)
-                return slot;
+            if (u0 <= c->x + 1 && v0 <= c->y + 1 && u1 >= c->x + c->w - 1 && v1 >= c->y + c->h - 1) {
+                uint64_t marker = 1ull << c->btn;
+                if (c->btn == BTN_UP) marker |= 1ull << 21;
+                if (c->btn == BTN_RIGHT) marker |= 1ull << 22;
+                if (c->btn == BTN_DOWN) marker |= 1ull << 23;
+                unsigned slots = 0;
+                for (int slot = 0; slot < 3; slot++)
+                    if (weapon_art_buttons(slot) & marker) slots |= 1u << slot;
+                // Every R+A+B glyph belongs to slot 0; a shared modifier such as ZL identifies no one slot.
+                return slots == 1 ? 0 : slots == 2 ? 1 : slots == 4 ? 2 : -1;
+            }
         }
     }
     return -1;

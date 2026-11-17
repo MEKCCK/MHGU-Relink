@@ -136,7 +136,6 @@ static bool menu_ptr_warp;    // put the pointer on the selected row once the ca
 static int menu_ptr_hover = MENUPTR_NONE;  // the row the pointer was last over
 static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx, float *sy);
 static float mouse_dx, mouse_dy;  // counts moved since the last update
-static uint64_t touch_cam_ns;  // when a finger last turned the camera (runtime/touch.cpp)
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
 static uint64_t test_until;
@@ -1020,6 +1019,7 @@ void host_input_event(const SDL_Event *e) {
         break;
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
+        menuptr_mix_cancel();
         memset(keys, 0, sizeof keys);
         mouse_held = 0, mouse_grab = false, mouse_released = true;
         config_window_focus(false);  // ([Audio] MuteInBackground)
@@ -1138,7 +1138,7 @@ static void mouse_update(int *rx, int *ry) {
         vx += (mouse_dx / dt - vx) * a, vy += (mouse_dy / dt - vy) * a;
     }
     mouse_dx = mouse_dy = 0;
-    if (!mouse_captured && now >= test_until && now - touch_cam_ns > 150000000ull) vx = vy = 0;  // (let go while moving: the stick stops at once)
+    if (!mouse_captured && now >= test_until) vx = vy = 0;  // (let go while moving: the stick stops at once)
     float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);
@@ -1301,7 +1301,14 @@ int host_input_held(int *out, int max) {
     return n;
 }
 
-static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
+static bool mix_input_cancel(uint64_t b, int lx, int ly, int rx, int ry, bool menu, bool typing) {
+    const uint64_t navigation = B(BTN_B) | B(BTN_LEFT) | B(BTN_UP) | B(BTN_RIGHT) | B(BTN_DOWN) |
+                                B(BTN_L) | B(BTN_R) | B(BTN_ZL) | B(BTN_ZR) | B(BTN_PLUS) | B(BTN_MINUS);
+    return menu || typing || chat_active() || padmap_active() || ui_window_away() || (b & navigation) ||
+           abs(lx) > 12000 || abs(ly) > 12000 || abs(rx) > 12000 || abs(ry) > 12000;
+}
+
+static uint64_t act_update(uint64_t b, uint64_t script_b, bool suppress, bool mix_cancel) {
     ActSnap s;
     memset(&s, 0, sizeof s);
     if (act_enabled()) {
@@ -1310,8 +1317,24 @@ static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
         act_sample(&h, &s);
         if (act_profile()->menus && (s.pulse[0] >> ACT_MENU_CONFIRM & 1)) g_a_pressed_ns = plat_now_ns();  // (a cutscene's skip)
         if (test_ptr.valid) s.ptr_x = test_ptr.x, s.ptr_y = test_ptr.y, s.ptr_down = test_ptr.down, s.ptr_valid = true;
+        if (act_profile()->menus) {
+            int weapon = input_view_weapon(), variant = weapon >= 0 && weapon < ACT_WEAPONS ? weapon + 1 : 0;
+            const uint64_t navigation = (1ull << ACT_MENU_CANCEL) | (1ull << ACT_MENU_UP) | (1ull << ACT_MENU_DOWN) |
+                                        (1ull << ACT_MENU_LEFT) | (1ull << ACT_MENU_RIGHT) | (1ull << ACT_MENU_TAB_L) |
+                                        (1ull << ACT_MENU_TAB_R) | (1ull << ACT_MENU_PAGE_L) | (1ull << ACT_MENU_PAGE_R) |
+                                        (1ull << ACT_MENU_PLUS) | (1ull << ACT_MENU_MINUS);
+            mix_cancel |= ((s.hold[variant] | s.pulse[variant]) & navigation) != 0;
+        }
+    }
+    // Keep these holds separate from queued presses and real action edges, including their cancellation checks.
+    uint64_t mix_b = menuptr_mix_buttons(suppress || mix_cancel);
+    b |= mix_b;
+    for (int variant = 0; variant < ACT_VARS; ++variant) {
+        if (mix_b & B(BTN_A)) s.hold[variant] |= 1ull << ACT_MENU_CONFIRM;
+        if (mix_b & B(BTN_B)) s.hold[variant] |= 1ull << ACT_MENU_CANCEL;
     }
     input_act_stage(&s);
+    return b;
 }
 
 void host_input_update(void) {
@@ -1356,8 +1379,9 @@ void host_input_update(void) {
     lx += kx * k, ly += ky * k;
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
     uint64_t touch_b = touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
-    if (tdx != 0 || tdy != 0) mouse_dx += tdx, mouse_dy += tdy, touch_cam_ns = plat_now_ns();
-    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0;  // (the mouse or a finger turning the camera: the lock-on waits)
+    // Touch look always uses camera angles, never the control-type-dependent right-stick fallback.
+    if (tdx != 0 || tdy != 0) mousecam_add(tdx, tdy);
+    bool mouse_moved = mouse_dx != 0 || mouse_dy != 0 || tdx != 0 || tdy != 0;  // manual look pauses lock-on
     mouse_update(&rx, &ry);
 
     if (pad) {
@@ -1484,6 +1508,7 @@ void host_input_update(void) {
         memset(keys, 0, sizeof keys);  // (keys held as it opened went to the menu: nothing stays pressed)
         mouse_held = 0;
     }
+    bool mix_cancel = mix_input_cancel(b, lx, ly, rx, ry, menu, typing);
     if (padmap_active()) b = 0, lx = ly = rx = ry = 0;  // (being mapped: its presses are the mapping's)
     if (menu) {  // Forge's menu has the controller (as in Forge: A activates, B cancels, stick and d-pad move)
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
@@ -1516,6 +1541,6 @@ void host_input_update(void) {
         b &= ~(B(BTN_PLUS) | B(BTN_B));
     }
     // Touch buttons have no physical source; carry them through action rebinding after the input suppressions.
-    act_update(b, script_b | (touch_b & b), menu || (typing && !chat_active()));
+    b = act_update(b, script_b | (touch_b & b), menu || (typing && !chat_active()), mix_cancel);
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }
