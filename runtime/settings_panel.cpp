@@ -2461,10 +2461,8 @@ std::vector<Row> main_rows() {
         header(r, "ctrl.pad.header", tr("Controller"));
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
-#ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
-#endif
 #ifndef __ANDROID__  // (a phone pauses in the background; no mouse, no keyboard)
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
