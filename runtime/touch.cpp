@@ -1989,10 +1989,9 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     }
     bool was_run = s.run;
     s.run = false;
-    // Y held is a sheathe (Valor's special sheathe keeps the weapon out until the button is released); after the
-    // release the game still reports PL_FLAGS bit 0 clear for the whole sheathe animation, so wait for the full state.
-    bool sheathing = (*buttons & B(BTN_Y)) != 0;
-    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0 && !sheathing && weapon_sheathed()) {
+    // The game clears its drawn bit when a sheathe starts (Valor's special sheathe included), so wait for the full
+    // state: Y by itself is not enough, as holding it while sheathed is just the item key.
+    if (config_live_touch_auto_r() && s.stick_on && !s.menu && s.h > 0 && weapon_sheathed()) {
         float r = DEFS[C_STICK].r * s.layout.scale[C_STICK] * s.h;
         float m = r > 0 ? hypotf((s.kx - s.bx) / r, (s.by - s.ky) / r) : 0;
         // The thumb past the rim holds native R, as on the Android mainline. Hysteresis keeps the edge quiet.

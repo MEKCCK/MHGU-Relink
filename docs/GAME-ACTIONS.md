@@ -91,8 +91,9 @@ the weapon sheathed, sliding the left thumb past 1.60x the stick's radius holds 
 down to 1.45x and stops below that (the same hysteresis as the Android mainline). With the weapon drawn it does not run:
 R would be a guard or a weapon action. It also waits until the sheathe has fully finished: the game clears its drawn
 bit when a sheathe starts and through Valor's special sheathe, while the weapon stays in hand until the animation ends.
-It adds the real `BTN_R` bit to the same pad sample, so manual R, a combo's R and a physical controller's R remain the
-same input and no separate request channel exists.
+Y held while the weapon is already fully away is not treated as a sheathe (it is the item key) and does not block
+running. It adds the real `BTN_R` bit to the same pad sample, so manual R, a combo's R and a physical controller's R
+remain the same input and no separate request channel exists.
 
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.

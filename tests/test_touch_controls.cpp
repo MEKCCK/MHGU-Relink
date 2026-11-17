@@ -687,11 +687,11 @@ static void auto_r() {
         move(1.6001f,true);
         drawn=1; check(update(),false);          // weapon out: R would be a guard/attack
         drawn=out; move(1.6001f,true);
-        // Valor's special sheathe: Y held, the game reports PL_FLAGS bit 0 clear until release. AutoR must not fire.
-        if (!out) {
+        // Fully sheathed with Y held (the item key) still runs; only the full sheathe state gates R.
+        if (!out && flag) {
             Input y = update(B(BTN_Y));
-            assert(!y.run && !g_s.run && !((y.b | y.touch_b) & B(BTN_R)));
-            sheathing = true;                    // released, but the sheathe animation still runs
+            assert(y.run && g_s.run && (y.b & B(BTN_R)) && (y.touch_b & B(BTN_R)));
+            sheathing = true;                    // a sheathe animation started (or Valor's hold): no R yet
             Input s = update();
             assert(!s.run && !g_s.run && !((s.b | s.touch_b) & B(BTN_R)));
             sheathing = false;                   // fully sheathed: running resumes
