@@ -636,14 +636,14 @@ static void virtual_right_stick_camera_routing(void) {
     virtual_right_stick = true;
     uint32_t yaw = LD32(camera + QC_YAW_TO);
     clock_ns += 16000000; camera_stick(&c);
-    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) == yaw);
+    assert(camera_original_calls == 2 && LD32(camera + QC_YAW_TO) == yaw);  // the native handler now runs
     mousecam_add(12, 0); clock_ns += 16000000; camera_stick(&c);
-    assert(camera_original_calls == 1 && LD32(camera + QC_YAW_TO) != yaw);
+    assert(camera_original_calls == 3 && LD32(camera + QC_YAW_TO) != yaw);
     assert(stick_state[0] == original_axes[0] && stick_state[1] == original_axes[1] &&
            stick_state[2] == original_axes[2] && stick_state[3] == original_axes[3]);
     virtual_right_stick = false; clock_ns += 16000000; camera_stick(&c);
-    assert(camera_original_calls == 2);
-    puts("PASS: virtual right-stick axes stay available to game logic but do not turn the camera; independent mouse/touch deltas still turn it");
+    assert(camera_original_calls == 4);
+    puts("PASS: virtual right-stick axes reach the game's native camera handler (no suppression), and mouse/touch deltas still turn it independently");
 }
 
 static void sheathe_state(void) {

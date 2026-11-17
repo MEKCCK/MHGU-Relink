@@ -17,7 +17,7 @@ bool touch_event(const SDL_Event *e);  // a finger event: true when it was the c
 // ORs into buttons and returns the buttons contributed by touch, including overlaps with other input sources.
 uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
                      float *cam_dx, float *cam_dy);
-bool touch_virtual_right_stick_active(void);  // the virtual stick remains native input; its axes are not camera input
+bool touch_virtual_right_stick_active(void);  // the virtual stick's axes are native right-stick input (the game's camera handler consumes them)
 void touch_art_axes(int *rx, int *ry);  // the axes this call's Hunter Art pulses added; not manual camera input
 // game thread (runtime/overlay.cpp): drawn over the game, under the port's menus
 bool touch_visible(void);
