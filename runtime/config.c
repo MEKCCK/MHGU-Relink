@@ -111,6 +111,7 @@
     .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
     .background_input = 1,                                                                          \
     .kbm_prompts = 1,                                                                               \
+    .prompt_icons = 0,                                                                               \
     .combo_window = COMBO_LENIENT,                                                                  \
     .chat_key = "/",                                                                                \
     .menu_chord = 1,                                                                                \
@@ -454,6 +455,10 @@ static const char DEFAULT_INI[] =
     "; button that does it instead. A controller always gets the game's own prompts\n"
     "; Default: On\n"
     "KeyboardPrompts = On\n"
+    "\n"
+    "; In-game controller button prompts: Switch (the game's own), Xbox or PlayStation\n"
+    "; Default: Switch\n"
+    "PromptIcons = Switch\n"
     "\n"
     "; How long the game waits for a second button after the first, for inputs like X+A. Lenient: as long as at 30 fps\n"
     "; (on the Switch) at any frame rate. Strict: a fixed number of frames, so the higher the frame rate, the closer\n"
@@ -1074,6 +1079,7 @@ const ConfigSetting g_settings[] = {
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
     ON_OFF("Controls", "BackgroundInput", background_input, false),
     ON_OFF("Controls", "KeyboardPrompts", kbm_prompts, false),
+    {"Controls", "PromptIcons", SET_CHOICE, F(prompt_icons), 0, 0, 0, "Switch,Xbox,PlayStation", NULL, false, ERR_ICONS},
     ON_OFF("Controls", "MenuChord", menu_chord, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},

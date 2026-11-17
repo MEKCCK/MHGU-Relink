@@ -501,6 +501,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fxaa_mode);
     SAME(face_buttons);
     SAME(kbm_prompts);
+    SAME(prompt_icons);
     SAME(ldn_port);
     SAME(crossplay);
     SAME(ryu_host);
@@ -1890,6 +1891,7 @@ void reset_section() {
         c.button_icons = f.button_icons;
         c.background_input = f.background_input;
         c.kbm_prompts = f.kbm_prompts;
+        c.prompt_icons = f.prompt_icons;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.mouse_sensitivity_y = f.mouse_sensitivity_y;
@@ -2463,6 +2465,9 @@ std::vector<Row> main_rows() {
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
+        add_choice(r, "prompts", "Controller prompts", c.prompt_icons, {"Switch", "Xbox", "PlayStation"},
+                   [](int v) { c.prompt_icons = v; }, ini("PromptIcons"));
+        r.back().help = tr("The in-game controller prompts: Switch uses the game's own; Xbox and PlayStation are drawn by the port.");
 #ifndef __ANDROID__  // (a phone pauses in the background; no mouse, no keyboard)
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},

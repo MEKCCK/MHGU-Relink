@@ -222,6 +222,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Too many settings to save (ENTRY_MAX).", "Demasiados ajustes para guardar (ENTRY_MAX).", "要保存的设置过多（ENTRY_MAX）。"},
         {"Could not save settings; the previous file was kept.", "No se pudo guardar. Se ha conservado el archivo anterior.", "无法保存设置；已保留之前的文件。"},
         {"Button icons", "Iconos del mando", "按键图标"},
+        {"Controller prompts", "Indicaciones del mando", "手柄按键提示"},
+        {"The in-game controller prompts: Switch uses the game's own; Xbox and PlayStation are drawn by the port.", "Las indicaciones del mando en el juego: Switch usa las del juego; Xbox y PlayStation las dibuja el port.", "游戏内手柄按键提示：Switch 使用游戏原版，Xbox 与 PlayStation 由本程序绘制。"},
         {"Invalid button icon layout.", "Estilo de iconos no válido.", "按键图标布局无效。"},
         {"Invalid update setting.", "Ajuste de actualizaciones no válido.", "更新设置无效。"},
         {"Draw distance must be 0-10 (0: no limit).", "La distancia de dibujado debe ser de 0 a 10 (0: sin límite).", "绘制距离必须为 0-10（0：无限制）。"},

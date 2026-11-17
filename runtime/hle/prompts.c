@@ -631,7 +631,7 @@ static bool lay_out(const uint32_t *text, int n, bool stacked, int box[4], float
     *scale = fw / iw < fh / ih ? fw / iw : fh / ih;
     return true;
 }
-static void put_label(uint8_t *tile, const uint32_t *text, int n) {
+static void put_label_ink(uint8_t *tile, const uint32_t *text, int n, uint8_t ink) {
     // side by side, or for two symbols one above the other where that draws them bigger (two arrows across)
     int box[4];
     float s;
@@ -665,10 +665,81 @@ static void put_label(uint8_t *tile, const uint32_t *text, int n) {
             if (a <= 0) continue;
             if (a > 1) a = 1;
             uint8_t *d = tile + (py * CELL + px) * 4;
-            for (int k = 0; k < 3; k++) d[k] = (uint8_t)((float)d[k] * (1 - a) + 32.0f * a);  // (the ink: near black)
+            for (int k = 0; k < 3; k++) d[k] = (uint8_t)((float)d[k] * (1 - a) + (float)ink * a);
             if (d[3] < 255) d[3] = (uint8_t)((float)d[3] + (255.0f - (float)d[3]) * a);
         }
 }
+static void put_label(uint8_t *tile, const uint32_t *text, int n) {
+    put_label_ink(tile, text, n, 32);  // (the keycap's ink: near black)
+}
+// ------------------------------------------------------------------ controller prompt skins
+// Xbox / PlayStation prompts are drawn here, in the same 24 x 24 cells as the keyboard cap: white ink on the game's
+// transparent glyph box. Switch (0) keeps the game's own pictures.
+static float seg_dist(float x, float y, float ax, float ay, float bx, float by) {
+    float dx = bx - ax, dy = by - ay, n = dx * dx + dy * dy;
+    float t = n > 0 ? ((x - ax) * dx + (y - ay) * dy) / n : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float px = ax + dx * t - x, py = ay + dy * t - y;
+    return sqrtf(px * px + py * py);
+}
+static float ps_shape(int shape, float x, float y) {
+    const float cx = CELL * .5f, cy = CELL * .5f;
+    if (shape == 0) {  // cross
+        return fminf(seg_dist(x, y, cx - 7, cy - 7, cx + 7, cy + 7), seg_dist(x, y, cx - 7, cy + 7, cx + 7, cy - 7)) <= 1.6f;
+    }
+    if (shape == 1) {  // circle
+        return fabsf(hypotf(x - cx, y - cy) - 7.0f) <= 1.25f;
+    }
+    if (shape == 2) {  // triangle
+        return fminf(seg_dist(x, y, cx, 4, 4, 19), fminf(seg_dist(x, y, 4, 19, 20, 19), seg_dist(x, y, 20, 19, cx, 4))) <= 1.2f;
+    }
+    return fminf(fabsf(fabsf(x - cx) - 6.5f), fabsf(fabsf(y - cy) - 6.5f)) <= 1.15f && fabsf(x - cx) <= 7.8f && fabsf(y - cy) <= 7.8f;  // square
+}
+static void shape_tile(uint8_t *tile, int shape) {
+    memset(tile, 0, CELL * CELL * 4);
+    for (int py = 0; py < CELL; py++)
+        for (int px = 0; px < CELL; px++) {
+            int hit = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++)
+                    hit += ps_shape(shape, px + (sx + .5f) / 4, py + (sy + .5f) / 4) != 0;
+            if (!hit) continue;
+            uint8_t *d = tile + (py * CELL + px) * 4;
+            d[0] = d[1] = d[2] = 255, d[3] = (uint8_t)(255 * hit / 16);
+        }
+}
+static bool draw_text_tile(uint8_t *tile, const char *text) {
+    if (g_nletters <= 0) return false;  // (the game's font not read: keep its glyph)
+    uint32_t t[3];
+    int n = 0;
+    for (const char *p = text; *p && n < 3; p++) t[n++] = (uint8_t)*p;
+    memset(tile, 0, CELL * CELL * 4);
+    put_label_ink(tile, t, n, 255);
+    return true;
+}
+static bool draw_pad_tile(uint8_t *tile, const Cell *c, int skin) {
+    if (!skin || c->btn2 >= 0) return false;
+    int b = c->btn;
+    if (b == BTN_A || b == BTN_B || b == BTN_X || b == BTN_Y) {
+        if (skin == 2) {  // PlayStation: circle east, cross south, triangle north, square west
+            shape_tile(tile, b == BTN_A ? 1 : b == BTN_B ? 0 : b == BTN_X ? 2 : 3);
+            return true;
+        }
+        bool labels = config_live_face_buttons() == FACE_LABEL;
+        char letter = labels ? (char)("ABXY"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3])
+                             : (char)("BAYX"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3]);
+        char text[2] = {letter, 0};
+        return draw_text_tile(tile, text);
+    }
+    const char *label = NULL;
+    if (skin == 1) {  // Xbox
+        label = b == BTN_L ? "LB" : b == BTN_R ? "RB" : b == BTN_ZL ? "LT" : b == BTN_ZR ? "RT" : NULL;
+    } else {  // PlayStation
+        label = b == BTN_L ? "L1" : b == BTN_R ? "R1" : b == BTN_ZL ? "L2" : b == BTN_ZR ? "R2" : NULL;
+    }
+    return label && draw_text_tile(tile, label);
+}
+
 // ------------------------------------------------------------------ drawing a cell
 // A cell's picture, 24 x 24: false where the game's glyph stays (no input, or none that can be drawn)
 static bool draw_tile(uint8_t *tile, const Cell *c, int code, int code2) {
@@ -743,12 +814,16 @@ void prompts_frame(void) {
     if (g_ready <= 0) return;
     static int shown[16];
     static bool shown_kbm, any_shown;
+    static int shown_skin = -1;
     static int shown_view = -1;
 #ifdef __ANDROID__
     bool kbm = false;  // (touch/controller: there is no keyboard prompt set on a phone)
 #else
     bool kbm = config_live_kbm_prompts() && host_input_last_device() == 1;
 #endif
+    int skin = config_live_prompt_icons();  // 0 Switch (the game's), 1 Xbox, 2 PlayStation
+    bool pad_skin = skin != 0;
+    bool redraw = kbm || pad_skin;
     int want[16], view = -1;  // (each Switch button's input now; 0: the game's glyph)
     memset(want, 0, sizeof want);
     if (kbm) {
@@ -763,8 +838,8 @@ void prompts_frame(void) {
             LOG("[prompts] context: %s\n", view == ACT_VIEW_MB1 ? "hunt" : view == ACT_VIEW_TOWN ? "town" : "menus");
         shown_view = view;
     }
-    bool changed = !any_shown || kbm != shown_kbm || memcmp(want, shown, sizeof want);
-    memcpy(shown, want, sizeof want), shown_kbm = kbm, any_shown = true;
+    bool changed = !any_shown || kbm != shown_kbm || skin != shown_skin || memcmp(want, shown, sizeof want);
+    memcpy(shown, want, sizeof want), shown_kbm = kbm, shown_skin = skin, any_shown = true;
     const char *dump = getenv("MHGU_PROMPTS_DUMP");  // (tests: each sheet's texels as drawn, <prefix><n>.raw)
     for (int i = 0; i < NSHEETS; i++) {
         Sheet *s = &sheets[i];
@@ -774,7 +849,7 @@ void prompts_frame(void) {
             bool has = false;
             for (int k = 0; k < s->ncopies && !has; k++) has = s->copies[k].v == v;
             if (!has) continue;
-            if (!kbm) { write_copies(s, v, s->var[v]); continue; }
+            if (!redraw) { write_copies(s, v, s->var[v]); continue; }
             uint64_t bytes = vbytes(s, v);
             int sw = vw(s, v), sh = vh(s, v), k = s->vk[v];
             if (s->cap < bytes) continue;
@@ -783,7 +858,9 @@ void prompts_frame(void) {
             for (int c = 0; c < s->ncells; c++) {
                 const Cell *cell = &s->cells[c];
                 uint8_t tile[CELL * CELL * 4];
-                if (!draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
+                bool drawn_ok = kbm ? draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)
+                                    : draw_pad_tile(tile, cell, skin);
+                if (!drawn_ok) continue;
                 // (the cell's box at this version's scale, and the blocks it touches)
                 Cell box = {cell->x * k, cell->y * k, cell->w * k, cell->h * k, cell->btn, cell->btn2};
                 int bx0 = box.x / 4, by0 = box.y / 4, bx1 = (box.x + box.w - 1) / 4, by1 = (box.y + box.h - 1) / 4;
@@ -811,7 +888,8 @@ void prompts_frame(void) {
             }
             static int logged;
             if (logged++ < 32)
-                LOG("[prompts] %s (%s): %d of %d button glyphs drawn for keyboard and mouse\n", s->file, s->from[v], drawn, s->ncells);
+                LOG("[prompts] %s (%s): %d of %d button glyphs drawn for %s\n", s->file, s->from[v], drawn, s->ncells,
+                    kbm ? "keyboard and mouse" : skin == 1 ? "Xbox" : "PlayStation");
         }
     }
 }

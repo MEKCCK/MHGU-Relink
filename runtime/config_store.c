@@ -42,7 +42,7 @@ static SDL_AtomicInt live_hdr_exposure = {0x3f266666}, live_hdr_flare = {0}, liv
 static SDL_AtomicInt live_hdr_highlights = {0x42700000}, live_hdr_shadows = {0x42480000}, live_hdr_contrast = {0x42480000};  // 60, 50, 50
 static SDL_AtomicInt live_hdr_saturation = {0x42480000}, live_hdr_highlight_saturation = {0x42a40000};  // 50, 82
 // [Controls]
-static SDL_AtomicInt live_kbm_prompts;
+static SDL_AtomicInt live_kbm_prompts, live_prompt_icons;
 // [Mouse]
 static SDL_AtomicInt live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture;
 // [Multiplayer]
@@ -77,6 +77,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->vsync != saved.vsync) SDL_SetAtomicInt(&live_vsync, c->vsync);
     if (all || c->face_buttons != saved.face_buttons) SDL_SetAtomicInt(&live_face, c->face_buttons);
     if (all || c->kbm_prompts != saved.kbm_prompts) SDL_SetAtomicInt(&live_kbm_prompts, c->kbm_prompts);
+    if (all || c->prompt_icons != saved.prompt_icons) SDL_SetAtomicInt(&live_prompt_icons, c->prompt_icons);
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
@@ -215,6 +216,7 @@ int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
 int config_live_kbm_prompts(void) { return SDL_GetAtomicInt(&live_kbm_prompts); }
+int config_live_prompt_icons(void) { return SDL_GetAtomicInt(&live_prompt_icons); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
 int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
