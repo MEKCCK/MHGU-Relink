@@ -1887,11 +1887,9 @@ void reset_section() {
         break;
     case 2:
         c.face_buttons = f.face_buttons;
-        c.menu_confirm = f.menu_confirm;
         c.button_icons = f.button_icons;
         c.background_input = f.background_input;
         c.kbm_prompts = f.kbm_prompts;
-        c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.mouse_sensitivity_y = f.mouse_sensitivity_y;
@@ -1961,6 +1959,8 @@ void reset_section() {
         c.pause_background = f.pause_background;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
+        c.menu_confirm = f.menu_confirm;
+        c.menu_chord = f.menu_chord;
         break;
     }
     pop();
@@ -2088,6 +2088,8 @@ void mods_rows(std::vector<Row> &r) {
     if (mods.draft.empty())
         action(r, "mods.none", tr("No mods found in the mods folder"), []() {});
 #endif
+    if (!mods.draft.empty())
+        header(r, "mods.order.header", tr("Load order"));
     for (int i = 0; i < (int)mods.draft.size(); ++i) {
         std::string name = mods.draft[i].name;
         bool on = mods.draft[i].on, clash = false;
@@ -2255,13 +2257,35 @@ std::vector<Row> main_rows() {
             r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
         }
         aspect_rows(r);  // (phones with 21:9 / 21:10 screens use the same presets)
+        add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
         number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
-        add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
         break;
     case 1:
+        header(r, "audio.header", tr("Audio"));
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+        add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
+                   [](int v) { c.audio_output = v; }, ini("Output"));
+        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
+#endif
+        header(r, "voice.header", tr("Voice chat"));
+        add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
+                   [](int v) { c.voice_mode = v; }, ini("VoiceChat"));
+        r.back().help = tr("Talk to the other hunters while you play, when their game has voice chat on too. Always: the microphone is open for the whole hunt. Push to talk: it is open while you hold the voice key.");
+        number(r, "voice.mic", "Mic volume", &c.mic_volume, (int)lo("MicVolume"), (int)hi("MicVolume"), 1, ini("MicVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud the other hunters hear you.");
+        number(r, "voice.level", "Voice volume", &c.voice_volume, (int)lo("VoiceVolume"), (int)hi("VoiceVolume"), 1, ini("VoiceVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud you hear the other hunters. Doubled, as in MHXX: 50 is the game's own sound's level.");
+        add_bool(r, "voice.noise", "Noise suppression", &c.noise_suppression, ini("NoiseSuppression"));
+        r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
+        header(r, "graphics.header", tr("Graphics"));
         add_choice(
             r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > 2 ? 0 : c.low_end, {tr("Off"), tr("On"), tr("Toaster")},
             [](int v) {  // (it brings the resolution, the frame rate and the switches along; all can then be changed)
@@ -2349,42 +2373,6 @@ std::vector<Row> main_rows() {
             }
         }
 #endif
-        number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
-               ini("DrawDistance"));
-        if (c.draw_distance == 0)
-            r.back().value = tr("No limit");
-        add_bool(r, "shadows", "Shadows", &c.shadows, ini("ShadowsOn"));
-        add_bool(r, "grass", "Grass", &c.draw_grass, ini("GrassOn"));
-        add_bool(r, "bloom", "Bloom and depth of field", &c.bloom, ini("BloomOn"));
-        if (c.fsr && !c.low_end) {  // (FSR finds the start of the HUD from these passes: lowend_skipped)
-            r.back().enabled = false;
-            r.back().value = tr("On (FSR)");
-        }
-#ifndef __ANDROID__  // (a phone: not worth a row)
-        add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
-#endif
-        add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
-        add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
-        add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
-#ifndef __ANDROID__  // (a phone: not worth a row)
-        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
-        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
-                   [](int v) { c.audio_output = v; }, ini("Output"));
-        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
-#endif
-        header(r, "voice.header", tr("Voice chat"));
-        add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
-                   [](int v) { c.voice_mode = v; }, ini("VoiceChat"));
-        r.back().help = tr("Talk to the other hunters while you play, when their game has voice chat on too. Always: the microphone is open for the whole hunt. Push to talk: it is open while you hold the voice key.");
-        number(r, "voice.mic", "Mic volume", &c.mic_volume, (int)lo("MicVolume"), (int)hi("MicVolume"), 1, ini("MicVolume"));
-        r.back().value += " %";
-        r.back().help = tr("How loud the other hunters hear you.");
-        number(r, "voice.level", "Voice volume", &c.voice_volume, (int)lo("VoiceVolume"), (int)hi("VoiceVolume"), 1, ini("VoiceVolume"));
-        r.back().value += " %";
-        r.back().help = tr("How loud you hear the other hunters. Doubled, as in MHXX: 50 is the game's own sound's level.");
-        add_bool(r, "voice.noise", "Noise suppression", &c.noise_suppression, ini("NoiseSuppression"));
-        r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.hdr) {
             r.back().enabled = false;
@@ -2417,6 +2405,22 @@ std::vector<Row> main_rows() {
             add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
 #endif
         }
+        number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
+               ini("DrawDistance"));
+        if (c.draw_distance == 0)
+            r.back().value = tr("No limit");
+        add_bool(r, "shadows", "Shadows", &c.shadows, ini("ShadowsOn"));
+        add_bool(r, "grass", "Grass", &c.draw_grass, ini("GrassOn"));
+        add_bool(r, "bloom", "Bloom and depth of field", &c.bloom, ini("BloomOn"));
+        if (c.fsr && !c.low_end) {  // (FSR finds the start of the HUD from these passes: lowend_skipped)
+            r.back().enabled = false;
+            r.back().value = tr("On (FSR)");
+        }
+#ifndef __ANDROID__  // (a phone: not worth a row)
+        add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
+#endif
+        add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
+        add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
         header(r, "hdr.header", "HDR");
         add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
         if (c.fsr)  // (FSR is turned off for HDR at the next start)
@@ -2454,29 +2458,35 @@ std::vector<Row> main_rows() {
 #endif
         break;
     case 2:
+        header(r, "ctrl.pad.header", tr("Controller"));
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
-        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
-                   {tr("Original"), tr("Bottom button"), tr("Right button")},
-                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
 #endif
 #ifndef __ANDROID__  // (a phone pauses in the background; no mouse, no keyboard)
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
-        add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
 #endif
+        action(r, "pad.map", tr("Map a controller"), []() { push(View::PadList, "pad.0"); });
+        r.back().help = tr("For a controller the game does not read well: press each button once and it works from then on.");
 #ifndef __ANDROID__
+        header(r, "ctrl.kbm.header", tr("Keyboard and mouse"));
+        add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         number(r, "mouse.y", tr("Vertical sensitivity"), &c.mouse_sensitivity_y, lo("MouseSensitivityY"), hi("MouseSensitivityY"), .05f, ini("MouseSensitivityY"));
         add_bool(r, "mouse.invert", "Invert mouse Y", &c.mouse_invert_y, ini("MouseInvertY"));
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
+        action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
+        r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
+        action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
+        r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon, with the controller or the keyboard drawn beside the list. The keys for moving, the item bar and chat are there too (Keys). Off by default.");
 #endif
+        header(r, "ctrl.touch.header", tr("Touch layout"));
         add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
                    [](int v) { c.touch_controls = v; }, ini("Controls"));
         add_bool(r, "touch.hud", "Move the HUD for touch", &c.touch_hud, ini("MoveHUD"));
@@ -2484,11 +2494,6 @@ std::vector<Row> main_rows() {
         r.back().help = tr("On: the left stick appears where your finger lands. Off: it stays at the saved position. The stick moves the hunter, never the camera. Automatic running uses its separate switch.");
         add_bool(r, "touch.auto_r", "Full stick automatically runs", &c.touch_auto_r, ini("AutoR"));
         r.back().help = tr("On: with the weapon sheathed, slide the fixed or floating movement stick past its rim to hold the game's native R and run, when the game allows running. The hold starts at 1.60x the radius and stays until 1.45x; with the weapon drawn it does not trigger, so R never becomes a guard or attack. Manual R, combos and a controller's R work as before. Default: Off.");
-        add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
-        r.back().help = tr("Tap the target icon to lock on, then tap again to switch monsters. Hold it for half a second, or click a controller's right stick, to toggle the lock. Off: the icon turns the camera to the monster once, as in the original game.");
-        add_bool(r, "lock.persistent", "Persistent lock-on", &c.persistent_lock_on, ini("PersistentLockOn"));
-        r.back().enabled = c.lock_on != 0;
-        r.back().help = tr("Keeps an enabled lock until you turn it off. While aiming a bow or bowgun, the reticle continuously follows the selected monster's body. Tap the target icon to switch monsters; hold it for half a second or click the right stick to unlock. Opening the scope remains manual. Requires Lock-on. Default: Off.");
         action(r, "touch.buttons", tr("Buttons on the screen"), []() { push(View::TouchButtons, "tb.0"); });
         r.back().help = tr("Choose visible buttons and six combinations. Item and ammo arrows never turn the camera when dragged. Independent ammo arrows are available only during quests with a bow or bowgun; move and resize them in the layout editor.");
         number(r, "touch.camera", tr("Touch camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));
@@ -2510,22 +2515,19 @@ std::vector<Row> main_rows() {
                 r.back().help = tr("Edit the universal layout used in quests and menus. Save in the editor, then open Custom touch templates to save its positions, sizes and six combined buttons as a template.");
             }
         }
-        action(r, "pad.map", tr("Map a controller"), []() { push(View::PadList, "pad.0"); });
-        r.back().help = tr("For a controller the game does not read well: press each button once and it works from then on.");
-#ifndef __ANDROID__
-        action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
-        r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
-        action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
-        r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon, with the controller or the keyboard drawn beside the list. The keys for moving, the item bar and chat are there too (Keys). Off by default.");
-        add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
-        r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
-#endif
         action(r, "touch.templates", tr("Custom touch templates"), []() { open_touch_templates(); });
         r.back().help = tr("Open a template slot to save the current layout, icons and six combined buttons. An empty slot has a default name and can be saved immediately. Applying restores its independent snapshot.");
         action(r, "touch.icons", tr("Touch button icons"), []() { push(View::TouchIcons, "ti.0"); });
         r.back().help = tr("Choose default, built-in or custom image icons for each common button and all six combined buttons. Icons are saved immediately with the current layout and copied into templates.");
+        header(r, "ctrl.camera.header", tr("Camera"));
+        add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
+        r.back().help = tr("Tap the target icon to lock on, then tap again to switch monsters. Hold it for half a second, or click a controller's right stick, to toggle the lock. Off: the icon turns the camera to the monster once, as in the original game.");
+        add_bool(r, "lock.persistent", "Persistent lock-on", &c.persistent_lock_on, ini("PersistentLockOn"));
+        r.back().enabled = c.lock_on != 0;
+        r.back().help = tr("Keeps an enabled lock until you turn it off. While aiming a bow or bowgun, the reticle continuously follows the selected monster's body. Tap the target icon to switch monsters; hold it for half a second or click the right stick to unlock. Opening the scope remains manual. Requires Lock-on. Default: Off.");
         break;
     case 3:
+        header(r, "net.hub.header", tr("Hub"));
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
         text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), ini("Join"));
         // (internet hubs through a hub server of the player's choice, crates/mhgu-hub: none is built in, LDN_DEFAULT_SERVER)
@@ -2537,6 +2539,7 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
+        header(r, "net.crossplay.header", tr("Crossplay"));
         add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
                    [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
         r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn), suyu rooms, or both (a mixed hub).");
@@ -2640,6 +2643,7 @@ std::vector<Row> main_rows() {
         cheat_rows(r);
         break;
     case APP_PAGE:
+        header(r, "app.appearance.header", tr("Appearance"));
         add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
                    [](int v) { c.language = v; }, ini("Language"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
@@ -2647,6 +2651,7 @@ std::vector<Row> main_rows() {
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
 #endif
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
+        header(r, "app.general.header", tr("General"));
         add_bool(r, "pause.bg", "Pause in the background", &c.pause_background, ini("PauseInBackground"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
@@ -2656,8 +2661,15 @@ std::vector<Row> main_rows() {
                    [](int v) { c.updates = v; }, ini("Updates"));
 #endif
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
-#ifndef __ANDROID__  // (Android: its own tab's Save folder)
+#ifndef __ANDROID__
+        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
+                   {tr("Original"), tr("Bottom button"), tr("Right button")},
+                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
+        add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
+        r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
+#endif
         header(r, "save.header", tr("Save data"));
+#ifndef __ANDROID__  // (the PC build keeps its save in a folder of its choice)
         text(r, "save.location", "Save folder", c.save_location, sizeof c.save_location,
              *c.save_location ? c.save_location : tr("Default folder"), ini("SaveLocation"));
         r.back().help = tr("Where the save is kept (the folder that holds save_0), for example on another drive or in a folder you sync. Type a path, or use Choose folder. Press Save, then restart the game. Your current save is not moved: copy the save_0 folder there first.");
@@ -2666,6 +2678,11 @@ std::vector<Row> main_rows() {
         action(r, "save.location.reset", tr("Use the default folder"), []() { s.draft.save_location[0] = 0; },
                *c.save_location != 0);
         r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
+#else
+        action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });
+        r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
+        action(r, "save.export", tr("Export save"), []() { ui_request_save_export(); });
+        r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
 #endif
 #ifdef __ANDROID__
         header(r, "files.header", tr("App files"));
@@ -2680,10 +2697,6 @@ std::vector<Row> main_rows() {
         }
         action(r, "game.folder", tr("Game folder"), []() { ui_request_game_folder(); });
         r.back().help = tr("Where the game's exefs and romfs are read from. A new folder is used the next time the game starts.");
-        action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });
-        r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
-        action(r, "save.export", tr("Export save"), []() { ui_request_save_export(); });
-        r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
         action(r, "log.share", tr("Share log"), []() { ui_request_share_log(); });
         r.back().help = tr("Sends the game's log to the app you choose, for whoever is helping you with a problem.");
         action(r, "log.graphics", tr("Record graphics diagnostic"), []() { vk_trace_request(); });
@@ -2692,6 +2705,7 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Read the changes in this version.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });
 #endif
+        header(r, "app.application.header", tr("Application"));
         if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)
             action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"), []() {
                 s.floating = !s.floating;
@@ -3175,13 +3189,13 @@ const PhoneHelp PHONE_HELP[] = {
      "在游戏菜单的 R 旁显示 ZR 按钮。道具箱、加工店等部分菜单用它切换分类或查看更多信息。"},
     {"BloomOn", "The glow around lights and the blur of what is far away. Off: faster on a weak phone. Low-end mode turns it off.",
      "El resplandor alrededor de las luces y el desenfoque de lo lejano. Apagado: más rápido en un teléfono débil. El modo gama baja lo apaga.",
-     "光源周围的泛光与远处景物的景深模糊。关闭可提高低配置手机的运行速度；低配置模式会自动关闭此效果。"},
+     "光源周围的泛光与远处景物的景深模糊。关闭可提高低配置手机的运行速度；低配模式会自动关闭此效果。"},
     {"Reverb", "The echo of caves and rooms. Off: the sound is dry, and a weak phone's processor does less.",
      "El eco de cuevas y salas. Apagada: el sonido queda seco y el procesador de un teléfono débil trabaja menos.",
      "洞穴和房间内的回声。关闭后声音不带混响，可减轻低配置手机的处理器负担。"},
     {"LowEnd", "For a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays sharp over a smaller 3D picture. Toaster: everything for speed and the battery before looks.",
      "Para un teléfono débil: sin resplandor ni profundidad de campo, texturas más livianas y más chicas, y el HUD sigue nítido sobre una imagen 3D más chica. Tostadora: todo para la velocidad y la batería antes que el aspecto.",
-     "适合低配置手机：关闭泛光和景深，使用更小、更省资源的纹理，并在降低 3D 分辨率的同时保持界面清晰。极低配置模式优先提高速度、节省电量。"},
+     "适合性能较弱的手机：关闭泛光和景深，使用更小、更省资源的纹理，并在降低 3D 分辨率的同时保持界面清晰。“极限省电”优先提高速度、节省电量。"},
     {"ShadowsOn", "The shadows of hunters, monsters and scenery. Off: a little faster on a weak phone.",
      "Las sombras de cazadores, monstruos y escenario. Apagadas: un poco más rápido en un teléfono débil.",
      "猎人、怪物和场景的阴影。关闭可略微提高低配置手机的运行速度。"},
@@ -3218,7 +3232,7 @@ const PhoneHelp PHONE_HELP[] = {
     {"ShowAim", "A bowgun: a tap, the scope; held, the quick aim. A bow: the aiming mode.", "Ballesta: un toque, la mira; mantenido, el apuntado rápido. Arco: el modo de apuntado.",
      "弩炮轻按切换瞄准镜，弓轻按切换瞄准模式。按住并滑动可向左右、上下调整瞄准方向，松开后停止调整。"},
     {"ShowRangedSpecial", "A bowgun's crouching fire. A bow applies its coating.", "El fuego agachado de la ballesta. El arco aplica su capa.",
-     "发送游戏原生的 X+A 组合键：弩炮在游戏允许时进入蹲射，弓用于装填瓶。也可手动按 X+A，按键顺序不限。"},
+     "显示 X+A 组合键：弩炮在游戏允许时进入蹲射，弓用于涂瓶。也可手动按 X+A，按键顺序不限。"},
     {"ShowAmmo", "Independent ammo/coating arrows in the universal layout, shown only during quests with a bow or bowgun. Hold to repeat; dragging on an arrow never turns the camera. Move and resize them in the layout editor during a quest.",
      "Flechas independientes de munición o capa en el diseño universal, solo en misiones con arco o ballesta. Mantén para repetir; arrastrar sobre una flecha nunca gira la cámara. Muévelas y cambia su tamaño en el editor durante una misión.",
      "通用布局的独立弹药／瓶切换箭头，仅任务内使用弓或弩炮时显示。按住连续切换；在箭头上滑动不转视角。任务内可在布局编辑器中移动、缩放。"},
@@ -4337,7 +4351,7 @@ void report(bool *open) {
     // (a left click on the capture view's buttons is theirs; any other button, or a left click anywhere else, is the
     // mouse button chosen - a finger's tap is no mouse button)
     bool for_action = is_capturing && acts().capture >= 0;
-    capture_mouse = is_capturing && (for_action ? acts().dev == 1 : s.capture_bind >= 0) && !s.pointing && !touch_ui();
+    capture_mouse = is_capturing && (for_action ? acts().dev == 1 : s.capture_bind >= 0) && !touch_ui();
     capture_pointing = s.pointing || g_bv_pointing;
     capture_wheel = capture_mouse.load();  // (the capture view doesn't scroll)
     capture_pad = for_action && acts().dev == 0;

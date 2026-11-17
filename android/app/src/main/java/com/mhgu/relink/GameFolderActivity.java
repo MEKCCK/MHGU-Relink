@@ -168,10 +168,10 @@ public class GameFolderActivity extends Activity {
         String text = (had
                 ? tr("The app keeps its files (settings, save, mods, cheats, screenshots, log.txt) in its own folder, in Android/data, which this device's file managers can't open. It can copy them into a folder you choose and keep them there instead.",
                      "La app guarda sus archivos (ajustes, partida, mods, trucos, capturas, log.txt) en su carpeta propia, en Android/data, que los gestores de archivos del dispositivo no pueden abrir. Puede copiarlos a una carpeta que elijas y guardarlos allí.",
-                     "应用把自己的文件（设置、存档、模组、金手指、截图、log.txt）保存在 Android/data 中，本设备的文件管理器无法打开。应用可以把它们复制到你选择的文件夹中并在那里保存。")
+                     "应用把自己的文件（设置、存档、模组、作弊码、截图、log.txt）保存在 Android/data 中，本设备的文件管理器无法打开。应用可以把它们复制到你选择的文件夹中并在那里保存。")
                 : tr("Where should the app keep its files (settings, save, mods, cheats, screenshots, log.txt)? Its own folder is in Android/data, which this device's file managers can't open.",
                      "¿Dónde debe guardar la app sus archivos (ajustes, partida, mods, trucos, capturas, log.txt)? Su carpeta propia está en Android/data, que los gestores de archivos del dispositivo no pueden abrir.",
-                     "应用应该把文件（设置、存档、模组、金手指、截图、log.txt）保存在哪里？它自己的文件夹位于 Android/data，本设备的文件管理器无法打开。"))
+                     "应用应该把文件（设置、存档、模组、作弊码、截图、log.txt）保存在哪里？它自己的文件夹位于 Android/data，本设备的文件管理器无法打开。"))
                 + " " + tr("In a folder you choose (a new MHGU folder in the device's storage, say) you can open them, back them up and put mods in them yourself.",
                            "En una carpeta que elijas (por ejemplo una carpeta MHGU nueva en el almacenamiento) puedes abrirlos, hacer copias y poner mods tú mismo.",
                            "在你选择的文件夹中（例如设备存储中的新 MHGU 文件夹），你可以自行打开、备份它们并放入模组。")
@@ -215,7 +215,7 @@ public class GameFolderActivity extends Activity {
                         + "The app copies its files there; the game files are not copied.",
                 "Elige la carpeta para los archivos de la app (ajustes, partida, mods, trucos, capturas, log.txt). La app copia "
                         + "allí sus archivos; los del juego no se copian.",
-                "选择应用文件（设置、存档、模组、金手指、截图、log.txt）的文件夹。应用会把文件复制到那里；游戏文件不会被复制。"),
+                "选择应用文件（设置、存档、模组、作弊码、截图、log.txt）的文件夹。应用会把文件复制到那里；游戏文件不会被复制。"),
                 14, CREAM, false);
         intro.setGravity(Gravity.CENTER);
         intro.setPadding(0, dp(10), 0, dp(10));

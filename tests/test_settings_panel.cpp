@@ -757,14 +757,14 @@ static void touch_button_rows_regression() {
 static void removed_motion_rows_regression() {
     opened = true;
     idle();
-    seek_row("lock.persistent");
+    seek_row("touch.auto_r");
     down();
     assert(focused_row("touch.buttons"));
     down();
     assert(focused_row("touch.camera") && !settings_panel_dirty());
     opened = false;
     frame();
-    puts("PASS: Controls moves directly from persistent lock-on to screen buttons and touch-camera speed, with no motion controls or sensitivity/inversion rows");
+    puts("PASS: Controls moves directly from automatic running to screen buttons and touch-camera speed, with no motion controls or sensitivity/inversion rows");
 }
 static void auto_r_regression() {
     char error[256];
@@ -1076,8 +1076,7 @@ int main(int argc, char **argv) {
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
     selected("volume");  // (Audio first)
-    down(4);  // (mutebg, audio.output, show.fps, fps)
-    selected("fps");
+    seek_row("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
     // The frame rate: Confirm lists the common ones, left / right go a frame at a time
@@ -1092,9 +1091,7 @@ int main(int argc, char **argv) {
     selected("save");
     confirm();
     assert(config_editable().fps == 91);
-    press(ImGuiKey_Home);
-    down(4);
-    selected("fps");
+    seek_row("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
     press(ImGuiKey_GamepadDpadUp);
@@ -1103,8 +1100,7 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(config_editable().fps == 60);
-    press(ImGuiKey_Home);
-    down(4);
+    seek_row("fps");
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -1113,9 +1109,7 @@ int main(int argc, char **argv) {
     tab();
     selected("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
-    press(ImGuiKey_Home);
-    down(9);  // (background, keyboard prompts, combo, mouse, vertical, invert, smoothing, capture, keybinds)
-    selected("keybinds");
+    seek_row("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
     down(6);             // (past the Buttons title)
@@ -1166,8 +1160,7 @@ int main(int argc, char **argv) {
     confirm();
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
     assert(config_live_bind(BIND_X, 0) == KEY_MOUSE + SDL_BUTTON_X1);
-    press(ImGuiKey_Home);
-    down(9);
+    seek_row("keybinds");
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -1212,7 +1205,7 @@ int main(int argc, char **argv) {
     tab();
     tab();
     selected("sync");  // (the Hub heading first)
-    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
+    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the HP heading is passed)
     selected("hp.0");
     tab();
     selected("mod.Aaa");
@@ -1303,7 +1296,7 @@ int main(int argc, char **argv) {
     }
     fs::remove_all("obj/settings-test/mods/Eee");
     tab();
-    selected("cheats.add");  // (the Cheats tab: Add a cheat, then the cheats)
+    selected("cheat.1");  // (the Cheats tab: the master code is always on, the cheat after it takes the focus)
     tab();
     selected("language");
     tab();
@@ -1422,8 +1415,7 @@ int main(int argc, char **argv) {
     tab();  // (Misc, Mods, Cheats, Menu Options)
     selected("language");
     // The menu's confirm button (Menu controls): saved, it applies to the menu right away
-    down(4);  // (theme, scale, detach, menu.confirm)
-    selected("menu.confirm");
+    seek_row("menu.confirm");
     press(ImGuiKey_GamepadDpadRight);
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -1432,9 +1424,7 @@ int main(int argc, char **argv) {
     assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
     assert(config_editable().face_buttons == FACE_POSITION);
     assert(!config_restart_required(&baseline));
-    press(ImGuiKey_Home);
-    down(4);
-    selected("menu.confirm");
+    seek_row("menu.confirm");
     press(ImGuiKey_GamepadDpadLeft);
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -1443,10 +1433,8 @@ int main(int argc, char **argv) {
     press(ImGuiKey_Home);
     selected("language");
     // Save folder (PC): Choose folder opens the system's picker, whose folder lands in the draft; Save keeps it
-    down(8);  // (theme, scale, detach, menu.confirm, icons, confirm.exit, updates, bonus)
-    selected("bonus");
-    down();
-    selected("save.location");
+    seek_row("bonus");
+    seek_row("save.location");
     down();
     selected("save.location.pick");
     confirm();
@@ -1463,17 +1451,13 @@ int main(int argc, char **argv) {
     confirm();
     assert(!strcmp(config_editable().save_location, "/games/MHGU saves"));
     { Config saved = config_editable(); assert(config_restart_required(&saved)); }
-    press(ImGuiKey_Home);
-    down(11);
-    selected("save.location.reset");
+    seek_row("save.location.reset");
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(!config_editable().save_location[0]);
-    press(ImGuiKey_Home);
-    down(11);  // (Use the default folder: disabled again, skipped)
-    selected("restart");
+    seek_row("restart");  // (Use the default folder: disabled again, skipped)
     confirm();
     selected("dialog.cancel");
     back();
@@ -1484,6 +1468,19 @@ int main(int argc, char **argv) {
     assert(requested == 2);
     back();
     requested = 0;
+    // Pinned-guide scrolling at a normal size: Home brings the focused row back under the pinned tabs. (The 200%
+    // layout in a 640x480 window below collapses the body clip, where no scroll can make a row visible.)
+    {
+        auto *root = ImGui::FindWindowByName("Settings##main");
+        press(ImGuiKey_End);
+        idle(40);
+        float pinned_top = pinned_content_top(), pinned_bottom = pinned_content_bottom();
+        assert(root->NavRectRel[ImGuiNavLayer_Main].Max.y + root->Pos.y <= pinned_bottom + 1);
+        press(ImGuiKey_Home);
+        idle(40);
+        assert(root->NavRectRel[ImGuiNavLayer_Main].Min.y + root->Pos.y >= pinned_top - 1);
+        assert(pinned_content_top() == pinned_top && pinned_content_bottom() == pinned_bottom);
+    }
     opened = false;
     frame();
     baseline = config_editable();
@@ -1501,7 +1498,7 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("sync");  // (the Hub heading first)
-    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
+    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the HP heading is passed)
     selected("hp.0");
     down(5);
     confirm();
@@ -1538,12 +1535,10 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(14);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
-    selected("fsr");
+    seek_row("fsr");
     confirm();
     assert(settings_panel_dirty());
-    down();
-    selected("fsr.quality");
+    seek_row("fsr.quality");
     press(ImGuiKey_GamepadDpadRight);
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -1571,12 +1566,13 @@ int main(int argc, char **argv) {
     assert(pinned_content_bottom() == pinned_bottom); // Guide position does not follow the scroll.
     assert(pinned_content_top() == pinned_top);
     assert(root->NavRectRel[ImGuiNavLayer_Main].Max.y + root->Pos.y <= pinned_bottom + 1);
+    float end_scroll = root->Scroll.y;
     press(ImGuiKey_Home);
     idle(40);
     selected("volume");
     assert(pinned_content_bottom() == pinned_bottom);
     assert(pinned_content_top() == pinned_top);
-    assert(root->NavRectRel[ImGuiNavLayer_Main].Min.y + root->Pos.y >= pinned_top - 1);
+    assert(root->Scroll.y < end_scroll);  // (Home scrolls the first row back up under the pinned tabs)
     press(ImGuiKey_End);
     idle(20);
     float font = root->FontRefSize;

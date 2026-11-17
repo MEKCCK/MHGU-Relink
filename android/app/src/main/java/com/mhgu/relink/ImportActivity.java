@@ -140,13 +140,13 @@ public class ImportActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(24), dp(14), dp(24), dp(16));
         box.setBackground(plate(WINE));
-        String[] titles = zh ? new String[] {"金手指", "模组", "DLC"}
+        String[] titles = zh ? new String[] {"作弊码", "模组", "DLC"}
                 : es ? new String[] {"TRUCOS", "MODS", "DLC"} : new String[] {"CHEATS", "MODS", "DLC"};
         TextView title = text(titles[kind], 20, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
         String[] bodies = zh ? new String[] {
-            "Atmosphere 格式的作弊 .txt 文件，适用于 1.4.0 版本（构建 ID 为 FB08F1D20FD1204F）。添加后，可在“金手指”页面逐项启用。修改游戏代码的作弊也能使用，但对应部分运行速度会变慢。",
+            "Atmosphere 格式的作弊 .txt 文件，适用于 1.4.0 版本（构建 ID 为 FB08F1D20FD1204F）。添加后，可在“作弊码”页面逐项启用。修改游戏代码的作弊也能使用，但对应部分运行速度会变慢。",
             "支持含 romfs、exefs 或 nativeNX 的文件夹、ZIP、RAR，也可直接导入 .nro 插件、.ips、.ips32、.pchtxt 补丁。压缩包含多个版本时请选择一个。RAR 暂不支持加密或分卷包。导入后在“模组”页面排序和启用，重启后加载。模组和补丁须符合各自格式并匹配游戏版本；导入成功不代表内容一定兼容。",
             "导入你自己的游戏 DLC：每个 DLC 文件夹中都应有一个 DLC.dlcp 文件。选择一个文件夹后，其中找到的 DLC 都会被复制。进入游戏主菜单并选择“下载内容”即可使用。此功能仍在实验阶段。"}
             : es ? new String[] {
@@ -190,7 +190,7 @@ public class ImportActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(12), 0, 0);
-        String[] adds = zh ? new String[] {"添加金手指", "添加模组", "添加 DLC"}
+        String[] adds = zh ? new String[] {"添加作弊码", "添加模组", "添加 DLC"}
                            : es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
                            : new String[] {"Add cheats", "Add a mod", "Add DLC"};
         add = button(adds[kind], true, BRONZE);
@@ -313,7 +313,7 @@ public class ImportActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(plate(PANEL));
         box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        String[] heads = zh ? new String[] {"选择金手指文件", "选择模组文件夹、ZIP、RAR、插件或补丁", "选择 DLC 文件夹"}
+        String[] heads = zh ? new String[] {"选择作弊文件", "选择模组文件夹、ZIP、RAR、插件或补丁", "选择 DLC 文件夹"}
                             : es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE CARPETA, ZIP, RAR, PLUGIN O PARCHE", "ELIGE LA CARPETA DE TUS DLC"}
                             : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE A MOD FOLDER, ZIP, RAR, PLUGIN OR PATCH", "CHOOSE YOUR DLC'S FOLDER"};
         TextView title = text(heads[kind], 16, GOLD, true);

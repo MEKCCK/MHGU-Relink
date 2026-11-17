@@ -138,7 +138,7 @@ public class FilesFolderActivity extends Activity {
                      + "mods, los trucos y las capturas de " + from + " se copian allí (pregunta antes de reemplazar los "
                      + "más antiguos que ya haya) y la app se cierra: vuelve a abrirla para jugar. Los archivos de " + from
                      + " se quedan donde están.",
-                     "应用文件将回到自己的文件夹（Android/data）：" + from + " 中的设置、存档、模组、金手指和截图会被复制"
+                     "应用文件将回到自己的文件夹（Android/data）：" + from + " 中的设置、存档、模组、作弊码和截图会被复制"
                      + "过去（替换其中较旧的文件前会询问），然后应用关闭：请重新打开以游玩。" + from + " 中的文件保持原样。")
                 : tr("Pick a folder for the app's files: the settings (mhgurecomp.ini), the save, mods, cheats, "
                      + "screenshots and log.txt, so you can open them with the file managers on this device (the app's own "
@@ -156,7 +156,7 @@ public class FilesFolderActivity extends Activity {
                      + "ya haya) y usa esa carpeta desde ahora" + (returnOnly ? "." : ", y se cierra: vuelve a abrirla para jugar.")
                      + " Los archivos del juego no se copian: se usan donde están. La app lee y escribe la carpeta, así que "
                      + "Android pide \"Acceso a todos los archivos\".",
-                     "为应用文件选择文件夹：设置（mhgurecomp.ini）、存档、模组、金手指、截图和 log.txt，以便用本设备的文件"
+                     "为应用文件选择文件夹：设置（mhgurecomp.ini）、存档、模组、作弊码、截图和 log.txt，以便用本设备的文件"
                      + "管理器打开（应用自己的文件夹位于 Android/data，文件管理器无法访问）。例如在设备存储中新建一个 "
                      + "MHGU 文件夹；如果以前用过（并重装了应用），请再次选择它。应用会把文件复制到那里（替换其中较旧的"
                      + "文件前会询问），并从现在起使用该文件夹" + (returnOnly ? "。" : "，然后关闭：请重新打开以游玩。")
