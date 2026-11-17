@@ -5,6 +5,7 @@
 static inline const char *settings_text_zh(int language, const char *english) {
     if (language == 0) return english;
     static const struct { const char *en, *zh; } messages[] = {
+        {"Pause combining", "暂停调和"},
         {"Touch button icons", "触控按键图标"},
         {"Template details", "模板详情"},
         {"Default icon", "默认图标"},

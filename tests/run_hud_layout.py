@@ -38,6 +38,7 @@ report = {
         'Existing menu, reticle, loading-row and panel regressions at 16:9, 2.2, 21:9, 32:9 and 16:10.',
         'Actual grouping eligibility and final group functions preserve independently layered menu body/text/right-border X in 21:9, 32:9 and Edges HUD placement, with 16:9 control, across all five render aspects; non-menu grouping and custom quest Arts offsets remain active.',
         'Quest-only target, Hunter Arts and entire item/ammo group classification, including boundaries.',
+        'Synthetic screenshot-derived complete R+A+B and panel fixtures at three row baselines: Arts left boundary 630/629.9, all 256 quest gate states, and unchanged relative geometry through native group flush at five render aspects, four HUD anchors and five manual offsets.',
         'All 256 combinations of actual quest presence and seven production HUD exclusions, using the extracted production gate.',
         'Synthetic village-panel overlap points and top status-bar endpoints receive no quest HUD offsets; actual quest map, item/ammo, Hunter Arts and target offsets remain active.',
         'Positive and negative offsets for every HUD region at five aspect ratios, hidden and invalid regions.',
@@ -45,7 +46,7 @@ report = {
     ],
     'device_tested': False,
     'limits': [
-        'CPU helpers, gate and grouping use synthetic matrices; full renderer command dispatch, GPU draws, the game and Android device are not executed.',
+        'CPU helpers, gate and grouping use synthetic matrices, including screenshot-derived combo fixtures rather than captured guest matrices; automatic MoveHUD branches, full renderer command dispatch, GPU draws, the game and Android device are not executed.',
         'presence_in_quest is a controlled stub; actual quest-state detection is not executed.',
         'Does not verify the rendered HUD, touch editor or device behavior.',
     ],

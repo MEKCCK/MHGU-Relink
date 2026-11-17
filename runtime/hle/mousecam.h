@@ -13,6 +13,7 @@ bool mousecam_hunter_aiming(uint32_t hunter);  // native aiming action query, in
 bool weapon_moving(uint32_t hunter);
 unsigned weapon_action(uint32_t hunter);  // st << 16 | no
 int weapon_bow_type(void);
+uint64_t weapon_art_buttons(int slot);  // slots 0..2, resolved from the game's current control options; 0 if unknown
 void mousecam_lock_shot(void);         // (each update of the hunter, hle/itembar.c)
 // A single touch on the Bow's charge key; counts never enter the camera accumulator.
 void mousecam_bow_drag_begin(uint32_t hunter, int type);

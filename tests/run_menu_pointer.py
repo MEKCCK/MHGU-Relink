@@ -24,7 +24,7 @@ def snapshot():
 before = snapshot()
 record = dict(passed=False, source_sha256=before, source_unchanged=False,
               pass_groups=0, checks=[], device_tested=False,
-              limits=['The original native cursor is represented by a one-step synthetic-memory fixture.',
+              limits=['Native cursor steps and held/pressed Combine behavior use synthetic guest-memory fixtures.',
                       'No game or physical Android device is run.'])
 try:
     vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
@@ -52,7 +52,9 @@ try:
     if compiled.returncode:
         print((compiled.stdout + compiled.stderr).decode('utf-8', errors='replace'), end='')
     compiled.check_returncode()
-    for case in ('known', 'select', 'nudge', 'unknown', 'expiry', 'mapping', 'mix', 'context', 'mix-repeat', 'mix-guards'):
+    for case in ('known', 'select', 'nudge', 'unknown', 'expiry', 'mapping', 'mix', 'context',
+                 'mix-repeat', 'mix-guards', 'mix-auto', 'mix-auto-limits', 'mix-auto-cancel',
+                 'mix-pause', 'mix-pause-guards', 'mix-pause-mapping', 'mix-visibility'):
         with tempfile.TemporaryDirectory(prefix='menu-pointer-', dir=output) as scratch:
             result = subprocess.run([str(exe), case], env=env, cwd=scratch,
                                     capture_output=True, timeout=30)

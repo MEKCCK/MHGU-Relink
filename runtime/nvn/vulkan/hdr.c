@@ -19,7 +19,7 @@
 //   window image is that picture (+ the settings overlay) decoded (gamma correction 2.2 / 2.4 as RenoDX's), scaled to
 //   UI brightness, clamped to the peak in BT.2020 and encoded as HDR10 (PQ) or scRGB.
 //
-// The passes are recognised by the frame's structure (docs/FSR-PORT.md "Frame structure"), not by shader ids: B is the
+// The passes are recognised by the frame's structure, not by shader ids: B is the
 // texture FXAA (its known code hash) samples; the colour grading is the last draw into B before FXAA (its fragment
 // program's code hash is learnt from the previous frame); H is what the last draw before a present sampled.
 // Logs: [hdr] lines when B, H or the grading's program are found. MHGU_HDR=0|1 overrides the setting.

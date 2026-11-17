@@ -28,7 +28,8 @@ static inline int hud_touch_zone_for_frame(float x, float y, float z, bool hunt_
     // HP/stamina span the top at any x; their ends belong to neither the map nor the item bar.
     if (fabsf(z - 103.0f) < 0.5f && y < 300.0f) return HUD_TOUCH_NONE;
     if (fabsf(z - 100.0f) < 0.5f) {
-        if (x >= 700.0f && x <= 900.0f && y > 560.0f) return HUD_TOUCH_ARTS;
+        // Type 2's R+A+B prefix extends left of the single-button prompts near x 709.
+        if (x >= 630.0f && x <= 900.0f && y > 560.0f) return HUD_TOUCH_ARTS;
     }
     if (hud_touch_target_piece(x, y, z)) return HUD_TOUCH_TARGET;
     if (!loading_candidate && hud_touch_map_piece(x, y, z)) return HUD_TOUCH_MAP;

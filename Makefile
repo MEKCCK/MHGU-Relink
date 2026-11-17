@@ -331,11 +331,11 @@ $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 $(O)/rt/forge_imgui.o: runtime/forge_imgui_thunks.inc $(IMGUI)/cimgui.h
 $(O)/rt/forge_imgui.o: RTFLAGS += -DCIMGUI_NO_EXPORT -Wno-unused-variable
 
-$(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h
+$(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h runtime/forge_canvas.h runtime/forge_textures.h runtime/forge_texture_command.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) $(if $(filter 1,$(NULL_GPU)),-DMHGU_NULL_BACKEND) -Wall -Iruntime -c $< -o $@
 
-$(O)/rt/touch.o: runtime/touch.cpp runtime/touch.h runtime/config.h runtime/hle/input.h updater/updater.h
+$(O)/rt/touch.o: runtime/touch.cpp runtime/touch.h runtime/config.h runtime/hle/input.h runtime/hle/mousecam.h updater/updater.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
 

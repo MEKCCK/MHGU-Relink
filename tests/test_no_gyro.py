@@ -1,11 +1,13 @@
-"""Keep retained gyro files inactive while preserving the stationary guest HID ABI."""
+"""Keep removed gyro files absent while preserving the stationary guest HID ABI."""
 from pathlib import Path
 import re
 
 
 project = Path(__file__).resolve().parents[1]
 roots = (project / "runtime", project / "android/app/src/main/java/com/mhgu")
-retained = {project / "runtime/gyro.h", roots[1] / "relink/MotionSensor.java"}
+for removed_path in (project / "runtime/gyro.h", roots[1] / "relink/MotionSensor.java",
+                     project / "tests/test_gyro_sources.c"):
+    assert not removed_path.exists(), f"Removed gyro file returned: {removed_path.relative_to(project)}"
 removed = re.compile(
     r"\b(?:config_motion_\w+|mousecam_motion_\w+|host_input_motion_\w+|"
     r"motion_mode|motion_gain|motion_flip_[xy]|g_mot_yaw|g_mot_pitch|"
@@ -19,13 +21,12 @@ removed = re.compile(
 violations = []
 for root in roots:
     for path in sorted(root.rglob("*")):
-        if path in retained or path.suffix not in {".c", ".cpp", ".h", ".java"}:
+        if path.suffix not in {".c", ".cpp", ".h", ".java"}:
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if removed.search(line) or re.search(r'^\s*#\s*include\s*["<][^">]*\bgyro\.h[">]', line):
                 violations.append(f"{path.relative_to(project)}:{number}: {line.strip()}")
 assert not violations, "Gyro input remains:\n" + "\n".join(violations)
-# Historical files may remain, but active code must not reference or include them.
 
 hid = (project / "runtime/hle/input.c").read_text(encoding="utf-8")
 for handler in ("handles", "start", "stop", "rest", "state"):
@@ -33,4 +34,4 @@ for handler in ("handles", "start", "stop", "rest", "state"):
 assert re.search(r"hid_sixaxis_rest\)\s*\{\s*RET\(1\);", hid)
 state = hid.split("hid_sixaxis_state) {", 1)[1].split("\n}", 1)[0]
 assert "memset(s, 0, 0x60);" in state and "memcpy(s + 0x18 + 8, &one, 4);" in state
-print("PASS: active code has no gyro settings, sensor subscriptions or references to retained gyro files; stationary guest six-axis ABI remains.")
+print("PASS: removed gyro files stay absent; active code has no gyro settings or sensor subscriptions; stationary guest six-axis ABI remains.")

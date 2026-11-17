@@ -278,9 +278,6 @@ const float BAND_GUARD = .30f, BAND_SEAM0 = .63f, BAND_SEAM1 = .69f;
 const float KNOB = .45f;             // the stick's knob, in its base's radius
 const float CAMERA_COUNTS = 1150.0f; // mouse counts for a drag the screen's height (hle/mousecam.c: 0.08 degrees each)
 const uint64_t MS = 1000000ull;
-// The row's D-pad glyph identifies its art; ZL is the activation modifier.
-const uint64_t ART_BUTTONS[3] = {B(BTN_ZL) | B(BTN_UP), B(BTN_ZL) | B(BTN_RIGHT), B(BTN_ZL) | B(BTN_DOWN)};
-
 // What a control of the ranged layout presses. Out, a bowgun: A fires, X reloads, R aims (a tap the scope, held the quick
 // aim), X + A crouching fire; a bow: the game's Bow Controls say which of X and R draws (held, let go it shoots).
 // The separate R control stays the native R in every state; A is bow melee, X + A its coating. Sheathed the large button brings the weapon out (X: R
@@ -748,7 +745,7 @@ struct Zones {
     float gy[TZ_COUNT][32], cx[TZ_COUNT][32], cy[TZ_COUNT][32];  // the game's y; where on the canvas
     uint64_t ns[TZ_COUNT];
     unsigned art_slot_mask;
-    float art_slot_y[3];  // the native Up / Right / Down icons identify slots even when empty rows are absent
+    float art_slot_y[3];  // native direction or X / A / B icons identify slots even when empty rows are absent
     uint64_t art_slot_ns;
 };
 std::mutex g_zone_lock;
@@ -828,6 +825,29 @@ struct Rect {
     bool ok;
     bool in(float x, float y) const { return ok && x >= x0 && x <= x1 && y >= y0 && y <= y1; }
 };
+Pic mix_picture(float w, float h) {
+    const float aspect = g_render_aspect > 0 ? g_render_aspect : 16.0f / 9.0f;
+    if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0 || !std::isfinite(aspect)) return {};
+    const float pw = std::min(w, h * aspect), ph = pw / aspect;
+    return {(w - pw) * .5f, (h - ph) * .5f, pw, ph};
+}
+bool mix_pause_point(float u, float v, float w, float h, float *x, float *y) {
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0 || u >= 1 || v < 0 || v >= 1) return false;
+    const Pic p = mix_picture(w, h);
+    const float mx = u * w, my = v * h;
+    if (p.w <= 0 || p.h <= 0 || mx < p.x0 || mx >= p.x0 + p.w || my < p.y0 || my >= p.y0 + p.h) return false;
+    *x = (mx - p.x0) * 1280 / p.w, *y = (my - p.y0) * 720 / p.h;
+    return std::isfinite(*x) && std::isfinite(*y);
+}
+Rect mix_pause_rect(const MenuGeom &g, float w, float h) {
+    const Pic p = mix_picture(w, h);
+    if (p.w <= 0 || p.h <= 0) return {};
+    // The native session froze this picture-space row when Combine was first touched; later menus cannot move it.
+    Rect r{p.x0 + g.x * p.w / 1280, p.y0 + g.y * p.h / 720,
+           p.x0 + (g.x + g.w) * p.w / 1280, p.y0 + (g.y + g.h) * p.h / 720, false};
+    r.ok = std::isfinite(r.x0) && std::isfinite(r.y0) && std::isfinite(r.x1) && std::isfinite(r.y1) && r.x1 > r.x0 && r.y1 > r.y0;
+    return r;
+}
 struct EditorZone {
     Rect bounds{};  // canvas bounds before the saved manual offset
     float aspect{}, anchor{};
@@ -1061,6 +1081,7 @@ void cancel_item_gestures(State &s) {
 }
 
 void clear_layout_input(State &s) {
+    menuptr_mix_cancel();
     reset_bow_drag(s);
     itembar_touch_cancel();
     s.held = 0, s.stick_on = false, s.run = false;
@@ -1317,7 +1338,7 @@ bool menu_touch_begin(State &s, Finger &f, const SDL_Event *e) {
     for (const Finger &other : s.f)
         if (&other != &f && other.kind == F_GAME_MENU) f.done = true;
     if (!f.done) {
-        if (target >= 0) menuptr_select_at(target, false, x, y);
+        if (target >= 0) menuptr_touch_select_at(target, false, x, y);
         else if (target == MENU_TOUCH_SLIDER) menuptr_slider_set(x, false);
         tap_due();
     }
@@ -1334,12 +1355,12 @@ void menu_touch_event(State &s, Finger &f, const SDL_Event *e, float x, float y)
         if (f.ctl == MENU_TOUCH_SLIDER) {
             if (host_input_menu_point(e->tfinger.x, e->tfinger.y, &gx, &gy)) menuptr_slider_set(gx, false);
         } else if (e->type == SDL_EVENT_FINGER_UP && !f.moved && target == f.ctl) {
-            if (target >= 0) menuptr_select_at(target, true, gx, gy);
+            if (target >= 0) menuptr_touch_select_at(target, true, gx, gy);
             else if (target == MENUPTR_PAGE_LEFT || target == MENUPTR_PAGE_RIGHT)
                 menuptr_page_turn(target == MENUPTR_PAGE_LEFT ? -1 : 1);
             else if (target == MENU_TOUCH_PANEL) host_input_press("A", 12);
         } else if (e->type == SDL_EVENT_FINGER_MOTION && target >= 0) {
-            menuptr_select_at(target, false, gx, gy);
+            menuptr_touch_select_at(target, false, gx, gy);
         }
     }
     f.x = x, f.y = y;
@@ -1386,6 +1407,7 @@ void editor_panel(const Layout &layout, float w, float h, Rect *panel, Rect btn[
 void edit_begin(State &s) {
     if (s.edit) { s.edit_request = false; return; }
     ++g_layout_generation;
+    menuptr_mix_cancel();
     reset_bow_drag(s);
     cancel_item_gestures(s);
     s.edit = true, s.edit_request = false, s.sel = -1, s.pinch = false;
@@ -1537,6 +1559,11 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 if (&g != f && g.kind == F_MENU && g.part) other = true;
             f->part = !other;  // (the menu's mouse: the first finger only)
             if (f->part) to_menu(e);
+            return true;
+        }
+        float gx, gy;
+        if (!s.typing && mix_pause_point(e->tfinger.x, e->tfinger.y, s.w, s.h, &gx, &gy) && menuptr_mix_pause_at(gx, gy)) {
+            f->kind = F_MENU, f->part = 0;  // Stop on DOWN; consume this whole finger without native A/B or a release tap.
             return true;
         }
         if (!g_visible && !s.auto_wait) {
@@ -1727,10 +1754,13 @@ extern "C" bool touch_event(const SDL_Event *e) {
         fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
         pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
     if (f->kind == F_ARTS && tap && !f->done && f->part >= 0 && f->part < 3) {
-        pulse(s, ART_BUTTONS[f->part], 120 * MS, 0, false, true),
-            s.art_row = f->ctl, s.art_flash = now + 250 * MS, tap_due();
-        fprintf(stderr, "[touch] Hunter Art tap: row %d slot %d buttons %llx\n", f->ctl + 1, f->part + 1,
-                (unsigned long long)ART_BUTTONS[f->part]);
+        uint64_t buttons = weapon_art_buttons(f->part);
+        if (buttons) {
+            pulse(s, buttons, 120 * MS, 0, false, true),
+                s.art_row = f->ctl, s.art_flash = now + 250 * MS, tap_due();
+            fprintf(stderr, "[touch] Hunter Art tap: row %d slot %d buttons %llx\n", f->ctl + 1, f->part + 1,
+                    (unsigned long long)buttons);
+        }
     }
     if (f->kind == F_BUTTON && f->ctl == C_LOCK && tap && !cancel && s.in_quest && !s.menu && !overlay_menu_open() &&
         config_live_lock_on()) {
@@ -1775,6 +1805,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     s.typing = typing;
     uint64_t now = SDL_GetTicksNS();
     bool menu = overlay_menu_open();
+    if (menu || typing || s.edit) menuptr_mix_cancel();
     uint32_t hunter = weapon_hunter();
     play_seen(hunter);
     bool quest = presence_in_quest();
@@ -1916,6 +1947,11 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     for (Pulse &p : s.pulse)
         if (p.until > now && now >= p.from) {
             touch_b |= p.buttons, *buttons |= p.buttons;
+            if (p.art && (p.buttons & ((1ull << 21) | (1ull << 22) | (1ull << 23)))) {
+                // Native art selection needs axes; its control-type routing keeps these out of camera input.
+                *rx += (p.buttons & (1ull << 22)) ? 32767 : 0;
+                *ry += (p.buttons & (1ull << 21)) ? 32767 : (p.buttons & (1ull << 23)) ? -32767 : 0;
+            }
         }
     if (s.ammo_pulse.until > now && now >= s.ammo_pulse.from)
         touch_b |= s.ammo_pulse.buttons, *buttons |= s.ammo_pulse.buttons;
@@ -1993,7 +2029,10 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
 }
 
 extern "C" bool touch_visible(void) { return g_visible; }
-extern "C" bool touch_drawn(void) { return g_visible || g_gear_only; }
+extern "C" bool touch_drawn(void) {
+    MenuGeom pause;
+    return g_visible || g_gear_only || menuptr_mix_pause_region(&pause);
+}
 
 extern "C" void touch_edit_begin(void) {
     std::lock_guard<std::mutex> l(g_lock);
@@ -2136,6 +2175,7 @@ extern "C" bool touch_lock_on(void) { return g_lock_shots.load(); }
 
 // The app goes to the background (Android): every finger is gone (their ups will not come)
 static void reset_touch_input(State &s) {
+    menuptr_mix_cancel();
     reset_bow_drag(s);
     itembar_touch_cancel();
     for (Finger &f : s.f) f.kind = F_NONE;
@@ -3037,6 +3077,17 @@ void text_center(ImDrawList *dl, ImFont *font, float size, ImVec2 c, ImU32 col, 
     dl->AddText(font, size, ImVec2(c.x - ts.x * .5f, c.y - ts.y * .5f), col, t);
 }
 
+void draw_mix_pause(ImDrawList *dl, ImFont *font, const MenuGeom &g, float w, float h) {
+    const Rect r = mix_pause_rect(g, w, h);
+    if (!r.ok) return;
+    plate(dl, r, (r.y1 - r.y0) * .055f, 1, false);
+    const char *label = settings_text(config_language(), "Pause combining");
+    float fs = (r.y1 - r.y0) * .5f, room = (r.x1 - r.x0) * .9f;
+    const float wide = font->CalcTextSizeA(fs, FLT_MAX, 0, label).x;
+    if (wide > room) fs *= room / wide;
+    text_center(dl, font, fs, ImVec2((r.x0 + r.x1) * .5f, (r.y0 + r.y1) * .5f), INK, label);
+}
+
 void dashed_rect(ImDrawList *dl, Rect r, ImU32 col, float t) {
     float seg = t * 5;
     for (float x = r.x0; x < r.x1; x += seg * 2) {
@@ -3165,13 +3216,17 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
 
 extern "C" void touch_draw(float w, float h) {
     icon_textures_frame();
-    if ((!g_visible && !g_gear_only) || overlay_menu_open()) return;
+    if (overlay_menu_open()) return;
+    MenuGeom pause;
+    bool pausing = menuptr_mix_pause_region(&pause);
+    if (!g_visible && !g_gear_only && !pausing) return;
     State s;
     {
         std::lock_guard<std::mutex> l(g_lock);
         s = g_s;
     }
     if (!s.loaded) return;
+    if (s.typing || s.edit) pausing = false;
     if (s.w > 0 && (s.w != w || s.h != h)) {  // (the fingers' pixels are the window's; the picture's may differ)
         float kx = w / s.w, ky = h / s.h;
         s.bx *= kx, s.kx *= kx, s.by *= ky, s.ky *= ky;
@@ -3188,7 +3243,8 @@ extern "C" void touch_draw(float w, float h) {
     float a = config_live_touch_opacity() * (idle > 5.0f ? .65f : 1.0f);  // (dimmer after a while untouched)
     ImDrawList *dl = ImGui::GetBackgroundDrawList();  // (under the port's menus and notices)
     if (!g_visible) {  // (hidden: the settings button alone, a little fainter)
-        control(dl, font, s.layout, C_SETTINGS, w, h, s, a * .75f);
+        if (g_gear_only) control(dl, font, s.layout, C_SETTINGS, w, h, s, a * .75f);
+        if (pausing) draw_mix_pause(dl, font, pause, w, h);
         return;
     }
     int ranged = ranged_layout_profile(control_profile(s));
@@ -3225,4 +3281,5 @@ extern "C" void touch_draw(float w, float h) {
         dl->AddCircle(pc, .022f * h, fade(GOLD, a), 20, .003f * h);
         padlock(dl, pc, .026f * h, s.lock, fade(s.lock ? GLOW : INK, a), fade(DEEP, a));
     }
+    if (pausing) draw_mix_pause(dl, font, pause, w, h);
 }

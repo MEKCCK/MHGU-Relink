@@ -107,6 +107,59 @@ static void world(void) {
     g_cam = camera; ST32(camera + QC_PLAYER, hunter);
 }
 
+static void assert_art_buttons(int slot, uint64_t expected, uint32_t options) {
+    unsigned char before[8];
+    uint32_t pointer = LD32(0x1a97f78u);
+    memcpy(before, G2H(options + 0x446au), sizeof before);
+    assert(weapon_art_buttons(slot) == expected);
+    assert(LD32(0x1a97f78u) == pointer);
+    assert(!memcmp(before, G2H(options + 0x446au), sizeof before));
+}
+
+static void hunter_art_controls(void) {
+    // Independent Npad expectations: type, shoulder swap, direction swap, then Art slot.
+    static const uint64_t expected[4][2][2][3] = {
+        {{{0x2000, 0x4000, 0x8000}, {0x200000, 0x400000, 0x800000}},
+         {{0x2000, 0x4000, 0x8000}, {0x200000, 0x400000, 0x800000}}},
+        {{{0x83, 0x100, 0x200}, {0x83, 0x100, 0x200}},
+         {{0x203, 0x40, 0x80}, {0x203, 0x40, 0x80}}},  // Type 2 slot 0: R-role + A + B.
+        {{{0x104, 0x101, 0x102}, {0x104, 0x101, 0x102}},
+         {{0x44, 0x41, 0x42}, {0x44, 0x41, 0x42}}},
+        {{{0x200000, 0x400000, 0x800000}, {0x2000, 0x4000, 0x8000}},
+         {{0x200000, 0x400000, 0x800000}, {0x2000, 0x4000, 0x8000}}},
+    };
+    const uint32_t options = 0x08034000u, global = 0x1a97f78u;
+    uint32_t original_pointer = LD32(global);
+    unsigned char original[8];
+    memcpy(original, G2H(options + 0x446au), sizeof original);
+    memset(G2H(options + 0x446au), 0xa5, sizeof original);
+    ST32(global, options);
+    for (int type = 0; type < 4; ++type)
+        for (int shoulders = 0; shoulders < 2; ++shoulders)
+            for (int directions = 0; directions < 2; ++directions) {
+                ST8(options + 0x446cu, type);
+                ST8(options + 0x446eu, shoulders ? 0xa7 : 0);
+                ST8(options + 0x446fu, directions ? 0x5c : 0);
+                for (int slot = -1; slot <= 3; ++slot)
+                    assert_art_buttons(slot, slot >= 0 && slot < 3 ? expected[type][shoulders][directions][slot] : 0,
+                                       options);
+            }
+    const unsigned invalid_types[] = {4, 0x7f, 0xff};
+    for (unsigned i = 0; i < sizeof invalid_types / sizeof *invalid_types; ++i) {
+        ST8(options + 0x446cu, invalid_types[i]);
+        for (int slot = 0; slot < 3; ++slot) assert_art_buttons(slot, 0, options);
+    }
+    ST8(options + 0x446cu, 2);
+    const uint32_t invalid_options[] = {0, 0x07fffffcu, 0x08000001u, 0xf0000000u, 0xfffffffcu};
+    for (unsigned i = 0; i < sizeof invalid_options / sizeof *invalid_options; ++i) {
+        ST32(global, invalid_options[i]);
+        for (int slot = 0; slot < 3; ++slot) assert_art_buttons(slot, 0, options);
+    }
+    memcpy(G2H(options + 0x446au), original, sizeof original);
+    ST32(global, original_pointer);
+    puts("PASS: Hunter Art production getter covers all 48 type/swap/slot combinations, invalid slots/types/options, and preserves settings.");
+}
+
 static void target_switch(void) {
     float target[3];
     assert(lock_target(0, 0, 0, target, true) && target[0] == 1000);
@@ -594,7 +647,7 @@ static void virtual_right_stick_camera_routing(void) {
 }
 
 int main(void) {
-    world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
+    hunter_art_controls(); world(); target_switch(); shots(); bow_lock_enable(0); bow_lock_enable(1);
     shot_left_stick(VT_HEAVY, 0); shot_left_stick(VT_LIGHT, 0); shot_left_stick(VT_BOW, 0); shot_left_stick(VT_BOW, 1);
     shot_identity_reset();
     actual_aim(); persistent_scope(); scope_left_stick(VT_HEAVY); scope_left_stick(VT_LIGHT); scope_left_stick(VT_BOW);

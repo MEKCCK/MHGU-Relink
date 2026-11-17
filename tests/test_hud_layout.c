@@ -9,10 +9,21 @@
 
 static void near(float a, float b) { assert(fabsf(a - b) < 0.001f); }
 
+// Synthetic, screenshot-derived positions, not captured guest matrices. The correct screenshot puts R 76.5
+// canvas units left of B and A 37 left of B; B=709 uses the renderer's existing button-endpoint comment.
+// The plus signs, panel endpoints and three row baselines complete the layout fixture.
+static const struct { const char *name; float x; } art_combo[] = {
+    {"R", 632.5f}, {"+", 652}, {"A", 672}, {"+", 691}, {"B", 709},
+    {"panel left", 726}, {"panel right", 842},
+};
+static const float art_combo_y[] = {587, 631, 679};
+enum { ART_COMBO_PIECES = sizeof art_combo / sizeof *art_combo,
+       ART_COMBO_ROWS = sizeof art_combo_y / sizeof *art_combo_y };
+
 static void touch_zones(void) {
     const struct { float x, y, z; int zone; } cases[] = {
-        {700, 561, 100, HUD_TOUCH_ARTS}, {900, 719, 99.51f, HUD_TOUCH_ARTS},
-        {800, 600, 100.49f, HUD_TOUCH_ARTS}, {699.9f, 600, 100, HUD_TOUCH_NONE},
+        {630, 561, 100, HUD_TOUCH_ARTS}, {900, 719, 99.51f, HUD_TOUCH_ARTS},
+        {800, 600, 100.49f, HUD_TOUCH_ARTS}, {629.9f, 600, 100, HUD_TOUCH_NONE},
         {900.1f, 600, 100, HUD_TOUCH_NONE}, {800, 560, 100, HUD_TOUCH_NONE},
         {800, 600, 99.5f, HUD_TOUCH_NONE}, {800, 600, 100.5f, HUD_TOUCH_NONE},
         {1170, 16, 100, HUD_TOUCH_TARGET}, {1230, 95, 100, HUD_TOUCH_TARGET},
@@ -83,8 +94,22 @@ static void production_quest_gate_and_offsets(void) {
             near(offset.x, expected == HUD_TOUCH_NONE ? 0 : dx[expected] * 0.75f);
             near(offset.y, expected == HUD_TOUCH_NONE ? 0 : dy[expected] * 0.9f);
         }
+        for (unsigned row = 0; row < ART_COMBO_ROWS; ++row) {
+            for (unsigned p = 0; p < ART_COMBO_PIECES; ++p) {
+                int expected = hunt_hud ? HUD_TOUCH_ARTS : HUD_TOUCH_NONE;
+                int zone = hud_touch_zone_for_frame(art_combo[p].x, art_combo_y[row], 100,
+                                                   hunt_hud, loading_candidate);
+                if (zone != expected) fprintf(stderr, "combo gate flags %u row %u %s: got %d, expected %d\n",
+                                              flags, row, art_combo[p].name, zone, expected);
+                assert(zone == expected);
+                HudTouchOffset offset = hud_touch_offset(zone, true, dx, dy, 0.75f, 0.9f);
+                assert(offset.active == hunt_hud && offset.moved == hunt_hud);
+                near(offset.x, hunt_hud ? 42 * 0.75f : 0);
+                near(offset.y, hunt_hud ? -28 * 0.9f : 0);
+            }
+        }
     }
-    puts("HUD production quest gate: 256 state combinations, panel/status exclusions and quest offsets OK");
+    puts("HUD production quest gate: 256 state combinations, complete synthetic R+A+B rows, panel/status exclusions and quest offsets OK");
 }
 
 static void reset_groups(void) {
@@ -107,6 +132,70 @@ static bool group_piece(float m[16], float x, float y, float z, bool menu, HudTo
     bool grouped = hud_test_grouped(s, sy, z, y, menu, false, false, offset);
     if (grouped) ui_group_add(m, z, x, y, 0);
     return grouped;
+}
+
+static void production_art_combo_groups(void) {
+    const float aspects[] = {16.0f / 9.0f, 2.2f, 21.0f / 9.0f, 32.0f / 9.0f, 16.0f / 10.0f};
+    const float hud_aspects[] = {16.0f / 9.0f, 21.0f / 9.0f, 32.0f / 9.0f, INFINITY};
+    const struct { float x, y; } placements[] = {{0, 0}, {42, -28}, {-33, 19}, {0, -17}, {11, 0}};
+    for (unsigned a = 0; a < sizeof aspects / sizeof *aspects; ++a) {
+        g_render_aspect = aspects[a];
+        float s = fminf(1.0f, (16.0f / 9.0f) / g_render_aspect);
+        float sy = fminf(1.0f, g_render_aspect / (16.0f / 9.0f));
+        for (unsigned h = 0; h < sizeof hud_aspects / sizeof *hud_aspects; ++h) {
+            g_ui_anchor_aspect = fminf(hud_aspects[h], g_render_aspect);
+            float base[ART_COMBO_ROWS][ART_COMBO_PIECES][2];
+            for (unsigned placement = 0; placement < sizeof placements / sizeof *placements; ++placement) {
+                reset_groups();
+                // Keep an unrelated native group queued: flushing it must not rewrite any combo piece.
+                float window[16] = {0};
+                bool queued = group_piece(window, 100, 80, 100, false, (HudTouchOffset){0});
+                assert(queued == (g_render_aspect != 16.0f / 9.0f));
+                volatile float dx[HUD_TOUCH_COUNT] = {113, placements[placement].x, -71, 89};
+                volatile float dy[HUD_TOUCH_COUNT] = {-97, placements[placement].y, 43, -61};
+                float matrices[ART_COMBO_ROWS][ART_COMBO_PIECES][16] = {{{0}}};
+                float resolved[ART_COMBO_ROWS][ART_COMBO_PIECES][2];
+                for (unsigned row = 0; row < ART_COMBO_ROWS; ++row) {
+                    for (unsigned p = 0; p < ART_COMBO_PIECES; ++p) {
+                        int zone = hud_touch_zone_for_frame(art_combo[p].x, art_combo_y[row], 100, true, false);
+                        if (zone != HUD_TOUCH_ARTS) fprintf(stderr, "combo row %u %s x %.1f: got zone %d\n",
+                                                          row, art_combo[p].name, art_combo[p].x, zone);
+                        assert(zone == HUD_TOUCH_ARTS);
+                        HudTouchOffset offset = hud_touch_offset(zone, true, dx, dy, s, sy);
+                        assert(offset.active);
+                        assert(offset.moved == (placements[placement].x != 0 || placements[placement].y != 0));
+                        near(offset.x, placements[placement].x * s);
+                        near(offset.y, placements[placement].y * sy);
+                        assert(!group_piece(matrices[row][p], art_combo[p].x, art_combo_y[row], 100, false, offset));
+                        resolved[row][p][0] = matrices[row][p][12];
+                        resolved[row][p][1] = matrices[row][p][13];
+                    }
+                }
+                assert(ui_group.n == (queued ? 1 : 0));
+                ui_group_end();
+                for (unsigned row = 0; row < ART_COMBO_ROWS; ++row) {
+                    for (unsigned p = 0; p < ART_COMBO_PIECES; ++p) {
+                        near(matrices[row][p][12], resolved[row][p][0]);
+                        near(matrices[row][p][13], resolved[row][p][1]);
+                        if (!placement) {
+                            base[row][p][0] = matrices[row][p][12];
+                            base[row][p][1] = matrices[row][p][13];
+                        }
+                        near(matrices[row][p][12] - base[row][p][0], placements[placement].x * s);
+                        near(matrices[row][p][13] - base[row][p][1], placements[placement].y * sy);
+                        near(matrices[row][p][12] - matrices[row][0][12], (art_combo[p].x - art_combo[0].x) * s);
+                        near(matrices[row][p][13], matrices[row][0][13]);
+                        near(matrices[row][p][13] - matrices[0][p][13], (art_combo_y[row] - art_combo_y[0]) * sy);
+                        if (p) assert(matrices[row][p - 1][12] < matrices[row][p][12]);
+                    }
+                    near(matrices[row][4][12] - matrices[row][0][12], 76.5f * s);
+                    near(matrices[row][4][12] - matrices[row][2][12], 37 * s);
+                    assert(matrices[row][4][12] < matrices[row][5][12]);
+                }
+            }
+        }
+    }
+    puts("HUD synthetic screenshot-derived complete R+A+B: 3 rows x 5 aspects x 4 HUD anchors x 5 manual offsets retain spacing and stay left of their panels through native group flush");
 }
 
 static void production_menu_groups(void) {
@@ -324,6 +413,7 @@ int main(void) {
     assert(!hud_menu_panel_allowed(640, 53, false, true));
     touch_zones();
     production_quest_gate_and_offsets();
+    production_art_combo_groups();
     production_menu_groups();
     movable_map_and_loading_gate();
     touch_offsets();

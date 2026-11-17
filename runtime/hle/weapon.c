@@ -9,6 +9,7 @@
 // Which weapon: the classes are uPlayerQuest00 .. 15, in the order of the game's weapon numbers (no 05; 15 the Prowler):
 // 04 the heavy bowgun, 06 the light one, 10 the bow. Checked on a Motorola g06 with a heavy bowgun: 0x194bdc4.
 #include "../hle.h"
+#include "input.h"
 #include "mousecam.h"
 
 #define G_SPLAYER     0x1a85b58u
@@ -73,6 +74,28 @@ int weapon_type(void) {
 int weapon_bow_type(void) {
     uint32_t gc = LD32(G_GAMECONTROL);
     return sane(gc) ? LD8(gc + 0x6c) == 1 : 0;
+}
+
+// Main 1.4.0 control options: read only; shoulder and direction swaps also apply to HUD taps.
+uint64_t weapon_art_buttons(int slot) {
+    if (slot < 0 || slot >= 3) return 0;
+    uint32_t opt = LD32(0x1a97f78u);
+    if (!sane(opt)) return 0;
+    unsigned type = LD8(opt + 0x446cu);
+    bool shoulders = LD8(opt + 0x446eu) != 0, directions = LD8(opt + 0x446fu) != 0;
+    const uint64_t dpad[] = {1ull << BTN_UP, 1ull << BTN_RIGHT, 1ull << BTN_DOWN};
+    const uint64_t stick[] = {1ull << 21, 1ull << 22, 1ull << 23};  // Npad right-stick Up / Right / Down
+    const uint64_t face[] = {1ull << BTN_X, 1ull << BTN_A, 1ull << BTN_B};
+    uint64_t zl = 1ull << (shoulders ? BTN_L : BTN_ZL);
+    switch (type) {
+    case 0: return directions ? stick[slot] : dpad[slot];
+    case 1:
+        return slot == 0 ? (1ull << (shoulders ? BTN_ZR : BTN_R)) | (1ull << BTN_A) | (1ull << BTN_B) :
+               slot == 1 ? zl : 1ull << (shoulders ? BTN_R : BTN_ZR);
+    case 2: return zl | face[slot];
+    case 3: return directions ? dpad[slot] : stick[slot];
+    default: return 0;
+    }
 }
 
 // 1 the weapon is out, 0 sheathed, -1 not known

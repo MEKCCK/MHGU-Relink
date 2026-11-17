@@ -3,7 +3,7 @@
 //
 // The game's menus have no pointer input (docs/GAME-ACTIONS.md, P1), but they move their selection with two cursor
 // classes, both updated with the menu word's pad bits (Up 0x10, Down 0x40, Left 0x80, Right 0x20):
-// - a list cursor (docs/research/title-menu.md): update 0x74ee98(cursor, pad bits), nonzero when it moved; +0xd the row
+// - a list cursor: update 0x74ee98(cursor, pad bits), nonzero when it moved; +0xd the row
 //   (u8, on the page: the real one, unlike the pause menu's own copy at +0xe4, which writing does not move), +0xe the
 //   rows a page has, +0x10 / +0x12 page / pages (u16), +0x14 the items in all; Left / Right turn its page. The
 //   recompiled code calls it from 408 places (a hunt's pause menu: 0x86f8ec, 13 items, 7 a page, greyed-out rows not
@@ -38,8 +38,11 @@
 
 #include "../config.h"
 #include "../hle.h"
+#include "input.h"
 #include "menuptr.h"
 #include "menuptr_table.h"
+
+extern float g_render_aspect;
 
 #define FN_CURSOR_UPDATE 0x74ee98u  // (cursor, pad bits) -> nonzero when it moved
 #define FN_GRID_UPDATE   0x7530d4u
@@ -79,6 +82,8 @@ static char g_learned_path[1200];
 #define CALL_MIX_CONFIRM   0x38d1b0u  // Combo List's Combine / Stop (the mix helper's caller: mix_update)
 #define CALL_MIX_LIST      0x38d468u
 #define FN_MIX_LIST_UPDATE 0x38d018u
+#define FN_MIX_POPUP_VISIBLE 0x7cf7e0u
+#define CALL_MIX_POPUP_VISIBLE 0x38d608u  // the update's vfunc call; two tail calls preserve this return address
 static const MenuGeom builtin[] = {
     {CALL_BISTRO, 868, 51, 364, 45, 0, 48, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_RANK, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
@@ -371,14 +376,18 @@ typedef struct {
 } Cursor;
 static Cursor g_cursors[MAX_CURSORS];
 static pthread_mutex_t g_cur_lock = PTHREAD_MUTEX_INITIALIZER;
+enum { MIX_START_RELEASE, MIX_HOLD, MIX_RESULT_RELEASE, MIX_RESULT_PRESS, MIX_EXIT_RELEASE, MIX_EXIT_PRESS };
 // The result waits for A without updating a cursor. Keep it alive from its own update, not an old menu timeout.
 static struct {
-    uint32_t box;
-    int state;
+    uint32_t box, helper;
+    int state, recipe;
     uint64_t seen_ns;
     Cursor cursor;
-    MenuGeom geometry;
+    MenuGeom geometry, pause_geometry;
     bool ready, confirm;
+    bool repeat, started;
+    int phase;
+    uint64_t repeat_ns;
 } g_mix_result;
 static int cursor_cells(uint32_t lr) {  // (its cells now; 0: not seen)
     int n = 0;
@@ -627,6 +636,7 @@ static void list_widget(Cpu *c) {
 // The same mix helper also opens other screens' prompts; only Combo List has the fixed popup above.
 #define FN_MIX_UPDATE   0x38b034u
 #define CALL_MIX_CURSOR 0x38b0fcu
+#define FN_MIX_HELD     0x38b6b4u  // helper's original menu-held getter
 static uint32_t g_mix_lr;
 static void mix_update(Cpu *c) {
     uint32_t saved = g_mix_lr;
@@ -767,11 +777,20 @@ static void mix_list_update(Cpu *c) {
     uint32_t box = c->r[0];
     fnhook_call_original(c, FN_MIX_LIST_UPDATE);
     int state = LD8(box + 0x80);
+    uint32_t helper = LD32(box + 4);
+    int recipe = LD16(box + 0x14 + LIST.page) * LD8(box + 0x14 + LIST.rows) + LD8(box + 0x14 + LIST.row);
+    // The native helper owns availability; failed combinations may still have materials left for another attempt.
+    bool can_repeat = helper && LD32(helper + 0x18) == UINT32_MAX;
+    pthread_mutex_lock(&g_cur_lock);
+    bool repeating = g_mix_result.repeat;
+    uint64_t repeat_ns = g_mix_result.repeat_ns;
+    pthread_mutex_unlock(&g_cur_lock);
+    // Read the game's sampled input, not host timing: a queued tap or physical A can outlive several host polls.
+    uint32_t held = repeating && helper ? call1(c, FN_MIX_HELD, helper) : 0x6000u;
     uint64_t now = plat_now_ns();
     MenuGeom geometry = {0};
     bool ready = false;
     if (state == 4) {
-        uint32_t helper = LD32(box + 4);
         float delay;
         if (helper) {
             memcpy(&delay, G2H(helper + 0x20), sizeof delay);
@@ -789,6 +808,36 @@ static void mix_list_update(Cpu *c) {
     pthread_mutex_lock(&g_cur_lock);
     bool changed = g_mix_result.box != box || g_mix_result.state != state ||
                    !g_mix_result.seen_ns || now - g_mix_result.seen_ns >= OPEN_NS;
+    if (g_mix_result.box != box || g_mix_result.helper != helper || g_mix_result.recipe != recipe ||
+        !g_mix_result.seen_ns || now - g_mix_result.seen_ns >= OPEN_NS || state < 1 || state > 4)
+        g_mix_result.repeat = false;
+    if (g_mix_result.repeat && repeat_ns == g_mix_result.repeat_ns) {
+        if (state >= 2) g_mix_result.started = true;
+        if (state == 1 && !can_repeat && g_mix_result.phase != MIX_EXIT_PRESS)
+            g_mix_result.phase = MIX_EXIT_RELEASE;
+        switch (g_mix_result.phase) {
+        case MIX_START_RELEASE:
+            if (state == 1 && !(held & 0x6000u) && LD8(box + 0x5c + LIST.row) == 0)
+                g_mix_result.phase = MIX_HOLD;
+            else if (state >= 2) g_mix_result.phase = MIX_HOLD;
+            break;
+        case MIX_HOLD:
+            if (state == 4 && LD8(helper + 0x15)) g_mix_result.phase = MIX_RESULT_RELEASE;
+            else if (state == 1 && g_mix_result.started) g_mix_result.repeat = false;
+            break;
+        case MIX_RESULT_RELEASE:
+            if (state == 4 && ready && !(held & 0x6000u)) g_mix_result.phase = MIX_RESULT_PRESS;
+            break;
+        case MIX_RESULT_PRESS:
+            if (state == 1) g_mix_result.phase = MIX_START_RELEASE, g_mix_result.started = false;
+            break;
+        case MIX_EXIT_RELEASE:
+            if (state == 1 && !(held & 0x6000u)) g_mix_result.phase = MIX_EXIT_PRESS;
+            break;
+        case MIX_EXIT_PRESS:
+            break;  // The original B returns to state 0; the guard above ends our input there.
+        }
+    }
     if (changed) {
         g_mix_result.confirm = false;
         g_mix_result.cursor = (Cursor){.lr = FN_MIX_LIST_UPDATE, .appeared_ns = now, .since = g_present_count,
@@ -806,6 +855,7 @@ static void mix_list_update(Cpu *c) {
         }
     }
     g_mix_result.box = box, g_mix_result.state = state, g_mix_result.seen_ns = now;
+    g_mix_result.helper = helper, g_mix_result.recipe = recipe;
     g_mix_result.ready = ready, g_mix_result.geometry = geometry, g_mix_result.cursor.seen_ns = now;
     pthread_mutex_unlock(&g_cur_lock);
     if (state >= 2 && state <= 4) atomic_store(&g_any_cursor_ns, now);
@@ -965,24 +1015,55 @@ void menuptr_row_centre(int cell, float *x, float *y) {
     *x = (x0 + x1) / 2, *y = (y0 + y1) / 2;
 }
 
-static void select_cell(int cell, bool pick_it);
+static void select_cell(int cell, bool pick_it, bool touch);
 void menuptr_select_at(int cell, bool pick, float gx, float gy) {
     atomic_store(&g_target_gx, gx), atomic_store(&g_target_gy, gy);
-    select_cell(cell, pick);
+    select_cell(cell, pick, false);
+}
+void menuptr_touch_select_at(int cell, bool pick, float gx, float gy) {
+    atomic_store(&g_target_gx, gx), atomic_store(&g_target_gy, gy);
+    select_cell(cell, pick, true);
 }
 void menuptr_select(int cell, bool pick) {  // (not by the pointer: the wheel)
     atomic_store(&g_target_gx, -1.0f), atomic_store(&g_target_gy, -1.0f);
-    select_cell(cell, pick);
+    select_cell(cell, pick, false);
 }
 void menuptr_nudged(void) { atomic_store(&g_nudge_ns, plat_now_ns()); }
-static void select_cell(int cell, bool pick_it) {
+static void select_cell(int cell, bool pick_it, bool touch) {
     Cursor c;
     if (cell < 0 || !pointer_menu(&c)) return;
+    MenuGeom pause_geometry;
+    bool can_pause = touch && pick_it && c.lr == CALL_MIX_CONFIRM && cell == 0 &&
+                     menuptr_geometry(&pause_geometry) && pause_geometry.lr == c.lr;
+    if (can_pause) {
+        float m[4], aspect = g_render_aspect > 0 ? g_render_aspect : 16.0f / 9.0f;
+        if (!menuptr_screen_map(m)) {
+            m[0] = aspect > 16.0f / 9.0f ? (16.0f / 9.0f) / aspect : 1, m[1] = 640 * (1 - m[0]);
+            m[2] = aspect < 16.0f / 9.0f ? aspect / (16.0f / 9.0f) : 1, m[3] = 360 * (1 - m[2]);
+        }
+        float x0, y0, x1, y1;
+        menuptr_row_rect(&pause_geometry, 0, 1, &x0, &y0, &x1, &y1);
+        // Freeze the visible row, since result animations can expire or replace the menu's live transform.
+        pause_geometry = (MenuGeom){.lr = CALL_MIX_CONFIRM, .x = m[0]*x0+m[1], .y = m[2]*y0+m[3],
+                                    .w = m[0]*(x1-x0), .h = m[2]*(y1-y0), .builtin = true, .cols = 1};
+        can_pause = isfinite(aspect) && isfinite(pause_geometry.x) && isfinite(pause_geometry.y) &&
+                    isfinite(pause_geometry.w) && isfinite(pause_geometry.h) && pause_geometry.w > 0 && pause_geometry.h > 0;
+    }
     pthread_mutex_lock(&g_cur_lock);
     Cursor *active = pick(PICK_POINTER);
     if (!active || active->lr != c.lr || active->appeared_ns != c.appeared_ns) {
         pthread_mutex_unlock(&g_cur_lock);
         return;
+    }
+    if (c.lr != CALL_MIX_CONFIRM || cell != 0) g_mix_result.repeat = false;
+    if (can_pause && g_mix_result.state == 1 &&
+        plat_now_ns() - g_mix_result.seen_ns < OPEN_NS) {
+        g_mix_result.repeat = true, g_mix_result.started = false, g_mix_result.phase = MIX_START_RELEASE;
+        g_mix_result.repeat_ns = plat_now_ns();
+        g_mix_result.pause_geometry = pause_geometry;
+        // A scoped hold supplies the initial press too; no queued A may survive cancellation.
+        atomic_store(&g_confirm, false);
+        pick_it = false;
     }
     if (c.lr == FN_MIX_LIST_UPDATE) {
         if (cell == 0 && pick_it) g_mix_result.confirm = true;
@@ -1004,6 +1085,7 @@ static void select_cell(int cell, bool pick_it) {
 }
 
 void menuptr_page_turn(int dir) {
+    menuptr_mix_cancel();
     Cursor c;
     if (!dir || !pointer_menu(&c) || c.pages < 2) return;
     atomic_store(&g_page_lr, c.lr);
@@ -1018,6 +1100,80 @@ bool menuptr_take_confirm(void) {
     g_mix_result.confirm = false;
     pthread_mutex_unlock(&g_cur_lock);
     return confirm || result;
+}
+
+void menuptr_mix_cancel(void) {
+    pthread_mutex_lock(&g_cur_lock);
+    g_mix_result.repeat = false;
+    pthread_mutex_unlock(&g_cur_lock);
+}
+
+static bool mix_active_locked(uint64_t now) {
+    if (!g_mix_result.seen_ns || now - g_mix_result.seen_ns >= OPEN_NS) g_mix_result.repeat = false;
+    // Results have no cursor during their animation. A newer foreground still cancels the hold immediately.
+    for (int i = 0; g_mix_result.repeat && i < MAX_CURSORS; ++i) {
+        const Cursor *c = &g_cursors[i];
+        if (!c->lr || c->lr == CALL_MIX_LIST || c->lr == CALL_MIX_CONFIRM || (!c->known && c->cells < 2)) continue;
+        if ((now - c->seen_ns < OPEN_NS || now - c->bar_ns < OPEN_NS) &&
+            (c->appeared_ns > g_mix_result.repeat_ns || c->moved_ns > g_mix_result.repeat_ns))
+            g_mix_result.repeat = false;
+    }
+    return g_mix_result.repeat;
+}
+
+static void mix_popup_visible(Cpu *c) {
+    pthread_mutex_lock(&g_cur_lock);
+    uint32_t box = g_mix_result.box;
+    if ((c->r[14] & ~1u) == CALL_MIX_POPUP_VISIBLE && c->r[1] == 1 &&
+        mix_active_locked(plat_now_ns()) && c->r[0] && c->r[0] == LD32(box + 0x0c) &&
+        LD8(box + 0x80) == 1 && LD32(box + 4) == g_mix_result.helper &&
+        LD16(box + 0x14 + LIST.page) * LD8(box + 0x14 + LIST.rows) + LD8(box + 0x14 + LIST.row) == g_mix_result.recipe)
+        c->r[1] = 0;  // Hide only the automatic confirmation bridge; native updates and result animations still run.
+    pthread_mutex_unlock(&g_cur_lock);
+    fnhook_call_original(c, FN_MIX_POPUP_VISIBLE);
+}
+
+bool menuptr_mix_pause_region(MenuGeom *out) {
+    if (!out) return false;
+    pthread_mutex_lock(&g_cur_lock);
+    bool active = mix_active_locked(plat_now_ns());
+    if (active) *out = g_mix_result.pause_geometry;
+    pthread_mutex_unlock(&g_cur_lock);
+    return active;
+}
+
+bool menuptr_mix_pause_at(float x, float y) {
+    pthread_mutex_lock(&g_cur_lock);
+    bool hit = false;
+    if (mix_active_locked(plat_now_ns())) {
+        float x0, y0, x1, y1;
+        // Picture coordinates retain the original visible target while its native cursor is absent.
+        menuptr_row_rect(&g_mix_result.pause_geometry, 0, 1, &x0, &y0, &x1, &y1);
+        hit = x >= x0 && x < x1 && y >= y0 && y < y1;
+        if (hit) g_mix_result.repeat = false;
+    }
+    pthread_mutex_unlock(&g_cur_lock);
+    return hit;
+}
+
+uint64_t menuptr_mix_buttons(bool cancel) {
+    pthread_mutex_lock(&g_cur_lock);
+    uint64_t now = plat_now_ns();
+    if (cancel) g_mix_result.repeat = false;
+    bool active = mix_active_locked(now);
+    if (active && g_mix_result.state == 1 && g_mix_result.phase < MIX_EXIT_RELEASE) {
+        Cursor *c = pick(PICK_POINTER);
+        // The popup has no cursor on its first returned frame (or when no further combination is possible).
+        if (c && c->lr == CALL_MIX_CONFIRM && c->row != 0) {
+            active = false;
+            if (atomic_load(&g_target_lr) != CALL_MIX_CONFIRM || atomic_load(&g_target) != 0 ||
+                now - g_mix_result.repeat_ns >= ASK_NS) g_mix_result.repeat = false;
+        }
+    }
+    uint64_t buttons = !active ? 0 : g_mix_result.phase == MIX_HOLD || g_mix_result.phase == MIX_RESULT_PRESS ?
+                       1ull << BTN_A : g_mix_result.phase == MIX_EXIT_PRESS ? 1ull << BTN_B : 0;
+    pthread_mutex_unlock(&g_cur_lock);
+    return buttons;
 }
 
 
@@ -1147,4 +1303,5 @@ void menuptr_init(void) {
     fnhook_set(FN_LIST_WIDGET, hle_register("menuptr:list_widget", list_widget));
     fnhook_set(FN_MIX_UPDATE, hle_register("menuptr:mix_update", mix_update));
     fnhook_set(FN_MIX_LIST_UPDATE, hle_register("menuptr:mix_list_update", mix_list_update));
+    fnhook_set(FN_MIX_POPUP_VISIBLE, hle_register("menuptr:mix_popup_visible", mix_popup_visible));
 }
