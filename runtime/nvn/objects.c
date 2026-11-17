@@ -347,6 +347,7 @@ static NvnTexture *texture_from_builder(uint64_t b) {
 _Thread_local bool g_nvn_making_screenshot;
 static pthread_mutex_t texture_objects_lock = PTHREAD_MUTEX_INITIALIZER;
 static NvnTexture *texture_objects;
+_Static_assert(sizeof(NvnTextureView) <= 40, "forge_textures.h copies the whole NvnTextureView");
 
 NVN(nvnTextureInitialize) {
     NvnTexture *t = texture_from_builder(A(1));

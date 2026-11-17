@@ -48,12 +48,14 @@ static bool menu_ptr_geometry(SDL_Window *window, float *left, float *top, float
     return false;
 }
 static bool real_pad_connected(void) { return false; }
+static int spy_art_rx, spy_art_ry;
+void touch_art_axes(int *rx, int *ry) { *rx = spy_art_rx; *ry = spy_art_ry; }
 uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
                      float *dx, float *dy) {
     assert(!pad_connected && !typing);
     *buttons |= spy.buttons;
     *lx += spy.left_x; *ly += spy.left_y;
-    *rx += spy.right_x; *ry += spy.right_y;
+    *rx += spy.right_x + spy_art_rx; *ry += spy.right_y + spy_art_ry;
     *dx = spy.dx; *dy = spy.dy;
     return spy.buttons;
 }
@@ -96,6 +98,7 @@ static void reset(void) {
     spy.now = now;
     spy.capture_succeeds = true;
     spy.capture = MOUSE_CAPTURE_CLICK;
+    spy_art_rx = spy_art_ry = 0;
     mouse_grab = mouse_captured = mouse_no_capture = mouse_released = false;
     mouse_dx = mouse_dy = test_vx = test_vy = 0;
     test_until = 0;
@@ -199,9 +202,26 @@ static void physical_mouse_paths(void) {
     }
     puts("PASS: physical mouse direct-camera and captured right-stick fallback retain manual-look marking and stop immediately on release");
 }
+static void touch_art_axes_are_not_look(void) {
+    reset();
+    spy.camera_active = true;
+    spy_art_rx = 32767; spy_art_ry = -32767;  // Hunter Art stick pulses, reported as their own axes
+    Input out = sample(0, 0, 0, 0, 0);
+    assert(out.rx == 32767 && out.ry == -32767 && !out.moved && !spy.lock_manual);
+
+    reset();
+    spy.camera_active = true;
+    spy.right_x = 13000; spy.right_y = 0;  // a native stick past the manual-look threshold remains manual
+    spy_art_rx = 32767; spy_art_ry = 0;
+    out = sample(0, 0, 0, 0, 0);
+    assert(out.rx == 45767 && !out.moved && spy.lock_manual);
+    puts("PASS: Hunter Art stick pulses are not manual camera input; a native stick past the same threshold still is");
+}
+
 int main(void) {
     touch_capture_transitions();
     touch_preserves_native_axes();
+    touch_art_axes_are_not_look();
     physical_mouse_paths();
     return 0;
 }

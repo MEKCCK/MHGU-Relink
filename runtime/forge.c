@@ -18,6 +18,7 @@
 // loaded (a relocation this port doesn't know) is dropped with a log line (runtime/loader.c); the others go on.
 #include <ctype.h>
 #include <math.h>
+#include <pthread.h>
 #include <dirent.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -1216,6 +1217,24 @@ HLE_FUNC("__aeabi_read_tp", f_read_tp) {
 static uint32_t nvn_device, nvn_queue;
 static bool nvn_started, nvn_ready;
 
+// Forge calls every plugin entry point on the presenting thread; here the ImGui ones run on the game's update thread
+// (runtime/overlay.cpp) while forge_onNvnRender stays on the presenting thread. Serialize all plugin calls so a plugin
+// written without locks for Forge's single thread cannot race its own state across the two.
+static pthread_mutex_t g_plugin_lock = PTHREAD_MUTEX_INITIALIZER;
+static void plugin_call(Cpu *c, uint32_t fn, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    if (!fn) return;
+    pthread_mutex_lock(&g_plugin_lock);
+    gcall(c, fn, a0, a1, a2, a3);
+    pthread_mutex_unlock(&g_plugin_lock);
+}
+
+static void plugin_call_regs(Cpu *c, uint32_t fn) {  // (the caller set r0 / s0: forge_onUpdate's dt)
+    if (!fn) return;
+    pthread_mutex_lock(&g_plugin_lock);
+    guest_call(c, fn);
+    pthread_mutex_unlock(&g_plugin_lock);
+}
+
 void forge_nvn_device(uint32_t device) { __atomic_store_n(&nvn_device, device, __ATOMIC_RELEASE); }
 
 bool forge_plugins_graphics_ready(void) {
@@ -1228,7 +1247,8 @@ bool forge_plugins_graphics_ready(void) {
 static void plugins_nvn(Cpu *c, int which, uint32_t a0, uint32_t a1, uint32_t a2) {
     Cpu saved = *c;
     for (int i = 0; i < nplugins; i++)
-        if (plugins[i].active && plugins[i].on_nvn[which]) gcall(c, plugins[i].on_nvn[which], a0, a1, a2, 0);
+        if (plugins[i].active && plugins[i].on_nvn[which])
+            plugin_call(c, plugins[i].on_nvn[which], a0, a1, a2, 0);
     *c = saved;
 }
 
@@ -1255,7 +1275,8 @@ void forge_nvn_present(Cpu *c, uint32_t queue, uint32_t window, int texture_inde
 
 void forge_plugins_imgui(Cpu *c, int which, uint32_t a0, uint32_t a1, uint32_t a2) {
     for (int i = 0; i < nplugins; i++)
-        if (plugins[i].active && plugins[i].on_imgui[which]) gcall(c, plugins[i].on_imgui[which], a0, a1, a2, 0);
+        if (plugins[i].active && plugins[i].on_imgui[which])
+            plugin_call(c, plugins[i].on_imgui[which], a0, a1, a2, 0);
 }
 
 bool forge_plugins_have(int which) {
@@ -1329,7 +1350,7 @@ static void app_run(Cpu *c) {
             flog(2, "Plugin app:/nativeNX/plugins/%s does not have a forge_onLoad function, skipping", p->name);
             continue;
         }
-        gcall(c, p->on_load, p->param, 0, 0, 0);
+        plugin_call(c, p->on_load, p->param, 0, 0, 0);
         ST8(p->param + 69, 0);  // (the name is a C string)
         uint32_t major = LD16(p->param), minor = LD16(p->param + 2), patch = LD16(p->param + 4);
         if (major > FORGE_MAJOR || (major == FORGE_MAJOR && minor > FORGE_MINOR)) {
@@ -1357,7 +1378,7 @@ static void app_run(Cpu *c) {
         }
         if (p->on_init) {
             flog(0, "Initializing plugin app:/nativeNX/plugins/%s", p->name);
-            gcall(c, p->on_init, 0, 0, 0, 0);
+            plugin_call(c, p->on_init, 0, 0, 0, 0);
         }
     }
     memcpy(c->r, args, sizeof args);
@@ -1374,7 +1395,7 @@ static void frame_update(Cpu *c) {
         if (!plugins[i].active || !plugins[i].on_update) continue;
         c->v.f[0] = dt;  // (plugins are softfp, as Forge: the float in r0; s0 too, for any built hard-float)
         memcpy(&c->r[0], &dt, 4);
-        guest_call(c, plugins[i].on_update);
+        plugin_call_regs(c, plugins[i].on_update);
     }
     input_frame();  // (Forge reads the input when it draws, after the updates: the plugins' view is the last frame's)
     overlay_frame(c);

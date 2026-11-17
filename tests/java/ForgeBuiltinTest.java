@@ -51,6 +51,11 @@ class ForgeBuiltinTest {
         Files.writeString(config, "partial");
         test.prepareForgeAssets();
         checkAssets(internal, assets);
+        // Same size, different bytes: a length-only freshness check would keep this file forever.
+        int configSize = Files.readString(assets.resolve("forge-v2.0.0/romfs/nativeNX/forge/config.ini")).length();
+        Files.writeString(config, "x".repeat(configSize));
+        test.prepareForgeAssets();
+        checkAssets(internal, assets);
         assert Files.readString(userConfig).equals("user settings\n");
         assert Files.readString(legacyConfig).equals("legacy private settings\n");
         assert Files.readString(legacyExtra).equals("keep old private files\n");
@@ -58,7 +63,7 @@ class ForgeBuiltinTest {
         assert Log.warnings == 0;
         new ForgeBuiltinTest(internal.resolve("missing-assets"), assets.resolve("absent")).prepareForgeAssets();
         assert Log.warnings == 5;
-        System.out.println("PASS: production Java copies all five Forge 2.0.0 resources, supports repeated/repaired preparation, preserves user/mod/legacy private config and tolerates missing assets");
+        System.out.println("PASS: production Java copies all five Forge 2.0.0 resources, repairs partial and same-size stale files, preserves user/mod/legacy private config and tolerates missing assets");
     }
     // PRODUCTION_METHODS
 }

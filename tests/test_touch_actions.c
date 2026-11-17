@@ -41,6 +41,7 @@ static int act_sw_sources(void *user, int btn, int dev, int *codes, int max) {
 void input_act_stage(const ActSnap *snapshot) { staged = *snapshot; }
 static bool real_pad_connected(void) { return false; }
 static bool chat_active(void) { return chatting; }
+static void touch_art_axes(int *rx, int *ry) { if (rx) *rx = 0; if (ry) *ry = 0; }
 static uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
                         float *dx, float *dy) {
     (void)pad_connected; (void)typing; (void)lx; (void)ly; (void)rx; (void)ry; (void)dx; (void)dy;

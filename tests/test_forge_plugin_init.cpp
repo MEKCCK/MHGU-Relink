@@ -9,6 +9,15 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+typedef int pthread_mutex_t;
+#define PTHREAD_MUTEX_INITIALIZER 0
+static int pthread_mutex_lock(pthread_mutex_t *) { return 0; }
+static int pthread_mutex_unlock(pthread_mutex_t *) { return 0; }
+#else
+#include <pthread.h>
+#endif
+
 struct Cpu { uint32_t r[16]; };
 struct Module {
     const char *name;

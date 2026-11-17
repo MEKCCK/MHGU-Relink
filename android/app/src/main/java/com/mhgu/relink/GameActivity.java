@@ -25,10 +25,13 @@ import android.widget.TextView;
 
 import org.libsdl.app.SDLActivity;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 
 /**
  * MHGU: la actividad de SDL que arranca el runtime (libmain.so, SDL_main en runtime/main.c).
@@ -453,12 +456,21 @@ public class GameActivity extends SDLActivity {
 
     private boolean copyAsset(String name, File to) {  // (false: it could not be copied)
         try (InputStream in = getAssets().open(name)) {
-            long size = in.available();
-            if (to.exists() && to.length() == size) return true;
+            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) data.write(buf, 0, n);
+            byte[] want = data.toByteArray();
+            if (to.exists() && to.length() == want.length) {  // (length alone cannot see same-size stale content)
+                byte[] have = new byte[want.length];
+                try (InputStream old = new FileInputStream(to)) {
+                    int off = 0;
+                    while (off < have.length && (n = old.read(have, off, have.length - off)) > 0) off += n;
+                    if (off == have.length && Arrays.equals(have, want)) return true;
+                }
+            }
             try (OutputStream out = new FileOutputStream(to)) {
-                byte[] buf = new byte[1 << 16];
-                int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                out.write(want);
             }
             return true;
         } catch (Exception e) {

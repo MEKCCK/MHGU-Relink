@@ -87,6 +87,7 @@ uint64_t weapon_art_buttons(int slot) {
     const uint64_t stick[] = {1ull << 21, 1ull << 22, 1ull << 23};  // Npad right-stick Up / Right / Down
     const uint64_t face[] = {1ull << BTN_X, 1ull << BTN_A, 1ull << BTN_B};
     uint64_t zl = 1ull << (shoulders ? BTN_L : BTN_ZL);
+    static bool warned;
     switch (type) {
     case 0: return directions ? stick[slot] : dpad[slot];
     case 1:
@@ -94,7 +95,9 @@ uint64_t weapon_art_buttons(int slot) {
                slot == 1 ? zl : 1ull << (shoulders ? BTN_R : BTN_ZR);
     case 2: return zl | face[slot];
     case 3: return directions ? dpad[slot] : stick[slot];
-    default: return 0;
+    default:
+        if (!warned) warned = true, LOG("[weapon] Hunter Art control type %u is not known\n", type);
+        return 0;
     }
 }
 

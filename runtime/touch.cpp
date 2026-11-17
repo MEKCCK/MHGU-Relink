@@ -989,6 +989,7 @@ struct State {
     uint64_t held;           // buttons held by fingers
     uint64_t last_ns;        // the last touch
     uint64_t cam_ns;         // the last camera drag
+    int art_rx, art_ry;      // axes the Hunter Art pulses added this call (not manual camera input)
     uint64_t tap_ns;         // the last short tap on the camera's part (a second one soon after centres it)
     uint64_t step_ns;        // when a drag may move a menu's cursor again
     float tap_x, tap_y;
@@ -1803,6 +1804,7 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     State &s = g_s;
     ensure_loaded(s);
     s.typing = typing;
+    s.art_rx = s.art_ry = 0;
     uint64_t now = SDL_GetTicksNS();
     bool menu = overlay_menu_open();
     if (menu || typing || s.edit) menuptr_mix_cancel();
@@ -1949,8 +1951,10 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
             touch_b |= p.buttons, *buttons |= p.buttons;
             if (p.art && (p.buttons & ((1ull << 21) | (1ull << 22) | (1ull << 23)))) {
                 // Native art selection needs axes; its control-type routing keeps these out of camera input.
-                *rx += (p.buttons & (1ull << 22)) ? 32767 : 0;
-                *ry += (p.buttons & (1ull << 21)) ? 32767 : (p.buttons & (1ull << 23)) ? -32767 : 0;
+                int ax = (p.buttons & (1ull << 22)) ? 32767 : 0;
+                int ay = (p.buttons & (1ull << 21)) ? 32767 : (p.buttons & (1ull << 23)) ? -32767 : 0;
+                *rx += ax, *ry += ay;
+                s.art_rx += ax, s.art_ry += ay;
             }
         }
     if (s.ammo_pulse.until > now && now >= s.ammo_pulse.from)
@@ -2029,6 +2033,11 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
 }
 
 extern "C" bool touch_visible(void) { return g_visible; }
+extern "C" void touch_art_axes(int *rx, int *ry) {
+    std::lock_guard<std::mutex> l(g_lock);
+    if (rx) *rx = g_s.art_rx;
+    if (ry) *ry = g_s.art_ry;
+}
 extern "C" bool touch_drawn(void) {
     MenuGeom pause;
     return g_visible || g_gear_only || menuptr_mix_pause_region(&pause);
@@ -2181,6 +2190,7 @@ static void reset_touch_input(State &s) {
     for (Finger &f : s.f) f.kind = F_NONE;
     for (Pulse &p : s.pulse) p.until = 0;
     s.stick_on = false, s.run = false, s.held = 0, s.cam_dx = s.cam_dy = 0, s.pinch = false;
+    s.art_rx = s.art_ry = 0;
     s.ammo_hold = s.ammo_ready = s.bar_since = 0;
     s.ammo_pulse = {};
     s.ammo_arrow_source = s.item_arrow_source = false;

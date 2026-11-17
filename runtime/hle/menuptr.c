@@ -42,8 +42,6 @@
 #include "menuptr.h"
 #include "menuptr_table.h"
 
-extern float g_render_aspect;
-
 #define FN_CURSOR_UPDATE 0x74ee98u  // (cursor, pad bits) -> nonzero when it moved
 #define FN_GRID_UPDATE   0x7530d4u
 #define FN_GRID_UPDATE2  0x7536e8u
@@ -387,7 +385,7 @@ static struct {
     bool ready, confirm;
     bool repeat, started;
     int phase;
-    uint64_t repeat_ns;
+    uint64_t repeat_ns, phase_ns;
 } g_mix_result;
 static int cursor_cells(uint32_t lr) {  // (its cells now; 0: not seen)
     int n = 0;
@@ -814,27 +812,31 @@ static void mix_list_update(Cpu *c) {
     if (g_mix_result.repeat && repeat_ns == g_mix_result.repeat_ns) {
         if (state >= 2) g_mix_result.started = true;
         if (state == 1 && !can_repeat && g_mix_result.phase != MIX_EXIT_PRESS)
-            g_mix_result.phase = MIX_EXIT_RELEASE;
+            g_mix_result.phase = MIX_EXIT_RELEASE, g_mix_result.phase_ns = now;
         switch (g_mix_result.phase) {
         case MIX_START_RELEASE:
             if (state == 1 && !(held & 0x6000u) && LD8(box + 0x5c + LIST.row) == 0)
-                g_mix_result.phase = MIX_HOLD;
-            else if (state >= 2) g_mix_result.phase = MIX_HOLD;
+                g_mix_result.phase = MIX_HOLD, g_mix_result.phase_ns = now;
+            else if (state >= 2) g_mix_result.phase = MIX_HOLD, g_mix_result.phase_ns = now;
             break;
         case MIX_HOLD:
-            if (state == 4 && LD8(helper + 0x15)) g_mix_result.phase = MIX_RESULT_RELEASE;
+            if (state == 4 && LD8(helper + 0x15)) g_mix_result.phase = MIX_RESULT_RELEASE, g_mix_result.phase_ns = now;
             else if (state == 1 && g_mix_result.started) g_mix_result.repeat = false;
             break;
         case MIX_RESULT_RELEASE:
-            if (state == 4 && ready && !(held & 0x6000u)) g_mix_result.phase = MIX_RESULT_PRESS;
+            if (state == 4 && ready && !(held & 0x6000u))
+                g_mix_result.phase = MIX_RESULT_PRESS, g_mix_result.phase_ns = now;
             break;
         case MIX_RESULT_PRESS:
-            if (state == 1) g_mix_result.phase = MIX_START_RELEASE, g_mix_result.started = false;
+            if (state == 1) g_mix_result.phase = MIX_START_RELEASE, g_mix_result.phase_ns = now, g_mix_result.started = false;
+            // A popup that ignores the injected A must not hold it forever (the game stopped, or its input is stuck).
+            else if (now - g_mix_result.phase_ns >= ASK_NS) g_mix_result.repeat = false;
             break;
         case MIX_EXIT_RELEASE:
-            if (state == 1 && !(held & 0x6000u)) g_mix_result.phase = MIX_EXIT_PRESS;
+            if (state == 1 && !(held & 0x6000u)) g_mix_result.phase = MIX_EXIT_PRESS, g_mix_result.phase_ns = now;
             break;
         case MIX_EXIT_PRESS:
+            if (now - g_mix_result.phase_ns >= ASK_NS) g_mix_result.repeat = false;
             break;  // The original B returns to state 0; the guard above ends our input there.
         }
     }
@@ -1059,7 +1061,7 @@ static void select_cell(int cell, bool pick_it, bool touch) {
     if (can_pause && g_mix_result.state == 1 &&
         plat_now_ns() - g_mix_result.seen_ns < OPEN_NS) {
         g_mix_result.repeat = true, g_mix_result.started = false, g_mix_result.phase = MIX_START_RELEASE;
-        g_mix_result.repeat_ns = plat_now_ns();
+        g_mix_result.repeat_ns = plat_now_ns(), g_mix_result.phase_ns = g_mix_result.repeat_ns;
         g_mix_result.pause_geometry = pause_geometry;
         // A scoped hold supplies the initial press too; no queued A may survive cancellation.
         atomic_store(&g_confirm, false);

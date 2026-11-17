@@ -1379,6 +1379,8 @@ void host_input_update(void) {
     lx += kx * k, ly += ky * k;
     float tdx = 0, tdy = 0;  // (the touch controls: buttons, the stick, and a drag that turns the camera as the mouse)
     uint64_t touch_b = touch_input(real_pad_connected(), typing, &b, &lx, &ly, &rx, &ry, &tdx, &tdy);  // (a real controller open hides them)
+    int art_rx = 0, art_ry = 0;
+    touch_art_axes(&art_rx, &art_ry);  // (Hunter Art stick pulses are game input, not the player turning the camera)
     // Touch look always uses camera angles, never the control-type-dependent right-stick fallback.
     if (tdx != 0 || tdy != 0) mousecam_add(tdx, tdy);
     bool mouse_moved = mouse_dx != 0 || mouse_dy != 0 || tdx != 0 || tdy != 0;  // manual look pauses lock-on
@@ -1489,7 +1491,8 @@ void host_input_update(void) {
     if (rstick && !rstick_was) touch_lock_toggle();
     rstick_was = rstick;
     if (rstick) b &= ~B(BTN_RSTICK);
-    b |= touch_lock_buttons(b, mouse_moved || (int64_t)rx * rx + (int64_t)ry * ry > 12000LL * 12000);  // (round: as the game's)
+    int64_t look_x = (int64_t)rx - art_rx, look_y = (int64_t)ry - art_ry;
+    b |= touch_lock_buttons(b, mouse_moved || look_x * look_x + look_y * look_y > 12000LL * 12000);  // (round: as the game's)
 
     // A controller can reach host settings without needing a keyboard.
     static bool settings_chord;

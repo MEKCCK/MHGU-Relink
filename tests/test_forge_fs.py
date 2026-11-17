@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,12 +26,30 @@ def main():
     fragment = function(source, 'static uint32_t gcall(')
     fragment += source[source.index('HLE_FUNC("forge_fs_openFile",'):source.index('// ------------------------------------------------------------------ nn::os wrappers')]
     assert fragment.count('HLE_FUNC(') == 4
+    assert re.findall(r'HLE_FUNC\("([^"]+)"', fragment) == [
+        'forge_fs_openFile', 'forge_fs_getFileSize', 'forge_fs_readFile', 'forge_fs_closeFile']
     before = hashlib.sha256(source_file.read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory(prefix='mhgu-forge-fs-') as directory:
         work = Path(directory)
         (work / 'forge_fs_production.inc').write_text(fragment, encoding='utf-8')
         exe = work / ('test-forge-fs.exe' if os.name == 'nt' else 'test-forge-fs')
         compiler = shutil.which('cl')
+        env = os.environ.copy()
+        if not compiler and os.name == 'nt':
+            vswhere = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+            if vswhere.is_file():
+                install = subprocess.check_output([str(vswhere), '-latest', '-products', '*',
+                    '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                    '-property', 'installationPath'], text=True).strip()
+                if install:
+                    vcvars = Path(install) / 'VC/Auxiliary/Build/vcvars64.bat'
+                    setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True,
+                                           text=True, timeout=60)
+                    setup.check_returncode()
+                    for line in setup.stdout.splitlines():
+                        key, sep, value = line.partition('=')
+                        if sep and key: env[key] = value
+                    compiler = 'cl'
         if compiler:
             command = [compiler, '/nologo', '/std:c++17', '/EHsc', '/W4', '/WX', '/utf-8',
                        '/D_CRT_SECURE_NO_WARNINGS', '/I' + str(work), str(ROOT / 'tests/test_forge_fs.cpp'), '/Fe:' + str(exe)]
@@ -40,7 +59,7 @@ def main():
             command = [compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I' + str(work),
                        str(ROOT / 'tests/test_forge_fs.cpp'), '-o', str(exe)]
         for step in [command, [str(exe)]]:
-            result = subprocess.run(step, cwd=work, capture_output=True, timeout=60)
+            result = subprocess.run(step, cwd=work, capture_output=True, timeout=60, env=env)
             print((result.stdout + result.stderr).decode('utf-8', errors='replace'), end='')
             result.check_returncode()
     assert hashlib.sha256(source_file.read_bytes()).hexdigest() == before, 'Production source changed during validation'

@@ -44,8 +44,8 @@ mouse_end = host.index("\n// The game's rumble", mouse_start)
 mods_start = host.index('static SDL_SpinLock mods_lock;')
 mods_end = host.index('static SDL_AtomicInt mods_free;', mods_start) + len('static SDL_AtomicInt mods_free;')
 camera_end = host.index('\n    mouse_update(&rx, &ry);', touch_start) + len('\n    mouse_update(&rx, &ry);')
-lock_start = host.index('    b |= touch_lock_buttons(b, mouse_moved', camera_end)
-lock_end = host.index('\n', lock_start)
+lock_start = host.index('    int64_t look_x = (int64_t)rx - art_rx, look_y = (int64_t)ry - art_ry;', camera_end)
+lock_end = host.index('\n', host.index('    b |= touch_lock_buttons(', lock_start))
 (output / 'host_touch_camera_under_test.h').write_text(
     mouse_state + '\n' + host[mods_start:mods_end] + '\n' + host[mouse_start:mouse_end] +
     '\nstatic bool host_touch_camera_sample(bool typing, uint64_t *buttons, int *left_x, int *left_y, int *right_x, int *right_y) {\n'

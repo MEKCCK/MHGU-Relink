@@ -10,6 +10,7 @@ static inline const char *settings_text(int language, const char *english) {
         if (zh && strcmp(zh, english)) return zh;
     }
     static const struct { const char *en, *es, *zh; } messages[] = {
+        {"Pause combining", "Pausar combinación", "暂停调和"},
         {"Touch button icons", "Iconos de botones táctiles", "触控按键图标"},
         {"Template details", "Detalles de la plantilla", "模板详情"},
         {"Default icon", "Icono predeterminado", "默认图标"},
