@@ -631,7 +631,8 @@ static bool lay_out(const uint32_t *text, int n, bool stacked, int box[4], float
     *scale = fw / iw < fh / ih ? fw / iw : fh / ih;
     return true;
 }
-static void put_label_ink(uint8_t *tile, const uint32_t *text, int n, uint8_t ink) {
+static void put_label_box(uint8_t *tile, const uint32_t *text, int n, uint8_t ink, float fx0, float fx1,
+                          float fy0, float fy1, float maxs) {
     // side by side, or for two symbols one above the other where that draws them bigger (two arrows across)
     int box[4];
     float s;
@@ -644,9 +645,9 @@ static void put_label_ink(uint8_t *tile, const uint32_t *text, int n, uint8_t in
     }
     int x0 = box[0], x1 = box[2], y0 = box[1], y1 = box[3];
     float iw = (float)(x1 - x0 + 1), ih = (float)(y1 - y0 + 1);
-    float fw = FACE_X1 - FACE_X0, fh = FACE_Y1 - FACE_Y0;
-    if (s > 0.62f) s = 0.62f;  // (one letter: not taller than the cap's face wants)
-    float ow = iw * s, oh = ih * s, ox = FACE_X0 + (fw - ow) / 2, oy = FACE_Y0 + (fh - oh) / 2;
+    float fw = fx1 - fx0, fh = fy1 - fy0;
+    if (s > maxs) s = maxs;
+    float ow = iw * s, oh = ih * s, ox = fx0 + (fw - ow) / 2, oy = fy0 + (fh - oh) / 2;
     for (int py = 0; py < CELL; py++)
         for (int px = 0; px < CELL; px++) {
             // the strip's area this pixel covers: its ink, averaged
@@ -669,12 +670,9 @@ static void put_label_ink(uint8_t *tile, const uint32_t *text, int n, uint8_t in
             if (d[3] < 255) d[3] = (uint8_t)((float)d[3] + (255.0f - (float)d[3]) * a);
         }
 }
-static void put_label(uint8_t *tile, const uint32_t *text, int n) {
-    put_label_ink(tile, text, n, 32);  // (the keycap's ink: near black)
-}
-// ------------------------------------------------------------------ controller prompt skins
-// Xbox / PlayStation prompts are drawn here, in the same 24 x 24 cells as the keyboard cap: white ink on the game's
-// transparent glyph box. Switch (0) keeps the game's own pictures.
+// ------------------------------------------------------------------ controller prompt skins and key caps
+// The game's controller glyphs are a white ring (or a capsule) around a white letter; Xbox / PlayStation prompts are
+// drawn in the same 24 x 24 cells. Keyboard caps use the same ring outline, with no white fill behind them.
 static float seg_dist(float x, float y, float ax, float ay, float bx, float by) {
     float dx = bx - ax, dy = by - ay, n = dx * dx + dy * dy;
     float t = n > 0 ? ((x - ax) * dx + (y - ay) * dy) / n : 0;
@@ -682,45 +680,84 @@ static float seg_dist(float x, float y, float ax, float ay, float bx, float by) 
     float px = ax + dx * t - x, py = ay + dy * t - y;
     return sqrtf(px * px + py * py);
 }
+static void white_px(uint8_t *d, float a) {
+    if (a <= 0) return;
+    if (a > 1) a = 1;
+    d[0] = d[1] = d[2] = 255;
+    if (d[3] < 255) d[3] = (uint8_t)((float)d[3] + (255.0f - (float)d[3]) * a);
+}
+static void ring_tile(uint8_t *tile, float cx, float cy, float radius, float thick) {
+    for (int py = 0; py < CELL; py++)
+        for (int px = 0; px < CELL; px++) {
+            int hit = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++) {
+                    float x = px + (sx + .5f) / 4, y = py + (sy + .5f) / 4;
+                    hit += fabsf(hypotf(x - cx, y - cy) - radius) <= thick * .5f;
+                }
+            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
+        }
+}
+// rounded box outline: half sizes and corner radius
+static void capsule_tile(uint8_t *tile, float x0, float y0, float x1, float y1, float radius, float thick) {
+    float cx = (x0 + x1) * .5f, cy = (y0 + y1) * .5f;
+    float hx = (x1 - x0) * .5f - radius, hy = (y1 - y0) * .5f - radius;
+    for (int py = 0; py < CELL; py++)
+        for (int px = 0; px < CELL; px++) {
+            int hit = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++) {
+                    float x = px + (sx + .5f) / 4, y = py + (sy + .5f) / 4;
+                    float qx = fabsf(x - cx) - hx, qy = fabsf(y - cy) - hy;
+                    float out = hypotf(fmaxf(qx, 0), fmaxf(qy, 0));
+                    float dist = out + fminf(fmaxf(qx, qy), 0) - radius;
+                    hit += fabsf(dist) <= thick * .5f;
+                }
+            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
+        }
+}
 static float ps_shape(int shape, float x, float y) {
     const float cx = CELL * .5f, cy = CELL * .5f;
-    if (shape == 0) {  // cross
-        return fminf(seg_dist(x, y, cx - 7, cy - 7, cx + 7, cy + 7), seg_dist(x, y, cx - 7, cy + 7, cx + 7, cy - 7)) <= 1.6f;
-    }
-    if (shape == 1) {  // circle
-        return fabsf(hypotf(x - cx, y - cy) - 7.0f) <= 1.25f;
-    }
-    if (shape == 2) {  // triangle
-        return fminf(seg_dist(x, y, cx, 4, 4, 19), fminf(seg_dist(x, y, 4, 19, 20, 19), seg_dist(x, y, 20, 19, cx, 4))) <= 1.2f;
-    }
-    return fminf(fabsf(fabsf(x - cx) - 6.5f), fabsf(fabsf(y - cy) - 6.5f)) <= 1.15f && fabsf(x - cx) <= 7.8f && fabsf(y - cy) <= 7.8f;  // square
+    if (shape == 0)  // cross
+        return fminf(seg_dist(x, y, cx - 6.4f, cy - 6.4f, cx + 6.4f, cy + 6.4f),
+                     seg_dist(x, y, cx - 6.4f, cy + 6.4f, cx + 6.4f, cy - 6.4f)) <= 1.5f;
+    if (shape == 1) return fabsf(hypotf(x - cx, y - cy) - 6.5f) <= 1.35f;  // circle
+    if (shape == 2)  // triangle
+        return fminf(seg_dist(x, y, cx, 4.8f, 5.8f, 18.3f),
+                     fminf(seg_dist(x, y, 5.8f, 18.3f, 18.3f, 18.3f), seg_dist(x, y, 18.3f, 18.3f, cx, 4.8f))) <= 1.35f;
+    return fminf(fabsf(fabsf(x - cx) - 6.3f), fabsf(fabsf(y - cy) - 6.3f)) <= 1.25f &&
+           fabsf(x - cx) <= 7.4f && fabsf(y - cy) <= 7.4f;  // square
 }
 static void shape_tile(uint8_t *tile, int shape) {
-    memset(tile, 0, CELL * CELL * 4);
     for (int py = 0; py < CELL; py++)
         for (int px = 0; px < CELL; px++) {
             int hit = 0;
             for (int sy = 0; sy < 4; sy++)
                 for (int sx = 0; sx < 4; sx++)
                     hit += ps_shape(shape, px + (sx + .5f) / 4, py + (sy + .5f) / 4) != 0;
-            if (!hit) continue;
-            uint8_t *d = tile + (py * CELL + px) * 4;
-            d[0] = d[1] = d[2] = 255, d[3] = (uint8_t)(255 * hit / 16);
+            if (hit) white_px(tile + (py * CELL + px) * 4, hit / 16.0f);
         }
 }
-static bool draw_text_tile(uint8_t *tile, const char *text) {
+static bool text_in(uint8_t *tile, const char *text, float x0, float x1, float y0, float y1, float maxs) {
     if (g_nletters <= 0) return false;  // (the game's font not read: keep its glyph)
     uint32_t t[3];
     int n = 0;
     for (const char *p = text; *p && n < 3; p++) t[n++] = (uint8_t)*p;
-    memset(tile, 0, CELL * CELL * 4);
-    put_label_ink(tile, t, n, 255);
+    put_label_box(tile, t, n, 255, x0, x1, y0, y1, maxs);
     return true;
 }
+static void keycap_tile(uint8_t *tile, const uint32_t *text, int n) {
+    memset(tile, 0, CELL * CELL * 4);
+    capsule_tile(tile, 1.0f, 3.5f, 23.0f, 20.5f, 3.0f, 1.6f);  // (no white fill: the game's own backgrounds show through)
+    put_label_box(tile, text, n, 255, 2.0f, 22.0f, 5.0f, 19.0f, .62f);
+}
+
 static bool draw_pad_tile(uint8_t *tile, const Cell *c, int skin) {
     if (!skin || c->btn2 >= 0) return false;
     int b = c->btn;
     if (b == BTN_A || b == BTN_B || b == BTN_X || b == BTN_Y) {
+        memset(tile, 0, CELL * CELL * 4);
+        ring_tile(tile, CELL * .5f, CELL * .5f, 9.9f, 1.9f);
         if (skin == 2) {  // PlayStation: circle east, cross south, triangle north, square west
             shape_tile(tile, b == BTN_A ? 1 : b == BTN_B ? 0 : b == BTN_X ? 2 : 3);
             return true;
@@ -729,15 +766,15 @@ static bool draw_pad_tile(uint8_t *tile, const Cell *c, int skin) {
         char letter = labels ? (char)("ABXY"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3])
                              : (char)("BAYX"[b == BTN_A ? 0 : b == BTN_B ? 1 : b == BTN_X ? 2 : 3]);
         char text[2] = {letter, 0};
-        return draw_text_tile(tile, text);
+        return text_in(tile, text, 5.5f, 18.5f, 4.5f, 19.5f, .72f);
     }
     const char *label = NULL;
-    if (skin == 1) {  // Xbox
-        label = b == BTN_L ? "LB" : b == BTN_R ? "RB" : b == BTN_ZL ? "LT" : b == BTN_ZR ? "RT" : NULL;
-    } else {  // PlayStation
-        label = b == BTN_L ? "L1" : b == BTN_R ? "R1" : b == BTN_ZL ? "L2" : b == BTN_ZR ? "R2" : NULL;
-    }
-    return label && draw_text_tile(tile, label);
+    if (skin == 1) label = b == BTN_L ? "LB" : b == BTN_R ? "RB" : b == BTN_ZL ? "LT" : b == BTN_ZR ? "RT" : NULL;
+    else label = b == BTN_L ? "L1" : b == BTN_R ? "R1" : b == BTN_ZL ? "L2" : b == BTN_ZR ? "R2" : NULL;
+    if (!label) return false;
+    memset(tile, 0, CELL * CELL * 4);
+    capsule_tile(tile, 1.0f, 5.5f, 23.0f, 18.5f, 4.0f, 1.8f);
+    return text_in(tile, label, 4.0f, 20.0f, 7.0f, 17.0f, .45f);
 }
 
 // ------------------------------------------------------------------ drawing a cell
@@ -750,8 +787,7 @@ static bool draw_tile(uint8_t *tile, const Cell *c, int code, int code2) {
         int na = k == SRC_KEY ? key_label(code, a) : 0, nb = k2 == SRC_KEY ? key_label(code2, b) : 0;
         if (na != 1 || nb != 1) return false;
         uint32_t t[2] = {a[0], b[0]};
-        memcpy(tile, prompt_icons[PROMPT_KEYCAP], CELL * CELL * 4);
-        put_label(tile, t, 2);
+        keycap_tile(tile, t, 2);
         return true;
     }
     int icon = k == SRC_LMB ? PROMPT_LMB : k == SRC_RMB ? PROMPT_RMB : k == SRC_MMB ? PROMPT_MMB
@@ -760,8 +796,7 @@ static bool draw_tile(uint8_t *tile, const Cell *c, int code, int code2) {
     uint32_t t[3];
     int n = key_label(code, t);
     if (!n) return false;
-    memcpy(tile, prompt_icons[PROMPT_KEYCAP], CELL * CELL * 4);
-    put_label(tile, t, n);
+    keycap_tile(tile, t, n);
     return true;
 }
 // The tile into a cell's box of a sheet's texels (sw a row): the box cleared, the tile fitted into its square (the
