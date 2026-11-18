@@ -33,9 +33,11 @@ report = {
     'source_root': str(project),
     'source_sha256_before': before,
     'logs': {},
-    'method': 'Compile the actual production hud_layout.h plus verbatim quest gate, grouping decision and CPU group functions from exec.c; only quest presence and renderer globals/logging are fixtures.',
+    'method': 'Compile production hud_layout.h plus verbatim quest gate, grouping, loading recorder, legacy loading branch and pass reset/finish wiring from exec.c; quest presence and renderer globals/logging are fixtures.',
     'cases': [
         'Existing menu, reticle, loading-row and panel regressions at 16:9, 2.2, 21:9, 32:9 and 16:10.',
+        'Wide loading tiles: full 579-unit phase sweep, former phase boundaries, independent row phases, reversed/interleaved draw order, all HUD anchors, exact raw shape matching and mixed reticles; only paired tiles move, only after two rows confirm.',
+        'Production loading recorder and pass finish/reset wiring: unconfirmed and single-row candidates preserve recent loading state, repeat finish and new pass release pointers, overflow cancels every tile correction; 16:9/16:10 retain the production legacy branch.',
         'Actual grouping eligibility and final group functions preserve independently layered menu body/text/right-border X in 21:9, 32:9 and Edges HUD placement, with 16:9 control, across all five render aspects; non-menu grouping and custom quest Arts offsets remain active.',
         'Quest-only target, Hunter Arts and entire item/ammo group classification, including boundaries.',
         'Synthetic screenshot-derived complete R+A+B and panel fixtures at three row baselines: Arts left boundary 630/629.9, all 256 quest gate states, and unchanged relative geometry through native group flush at five render aspects, four HUD anchors and five manual offsets.',
@@ -98,6 +100,49 @@ try:
         f'    {decision}\n'
         '    return grouped;\n'
         '}\n', encoding='utf-8')
+
+    def unique(pattern, label):
+        matches = re.findall(pattern, renderer, re.MULTILINE)
+        if len(matches) != 1:
+            raise RuntimeError(f'Expected one production {label}, found {len(matches)}')
+        return matches[0]
+
+    recorder = unique(r'^static void ui_loading_record\([^\n]+\) \{[\s\S]*?^\}', 'loading recorder')
+    legacy = unique(r'^[ \t]*if \(s >= 1\.0f && fabsf\(pos_z - 110\.0f\) < 0\.5f\) \{[\s\S]*?^                \}',
+                    'legacy loading branch')
+    reset = unique(r'^[ \t]*ui_loading_pass = false;\n[ \t]*ui_loading_rows = 0;\n[ \t]*hud_loading_reset\(&ui_loading_tiles\);',
+                   'loading pass reset')
+    finish = unique(r'^[ \t]*ui_group_end\(\);\n[ \t]*hud_loading_finish\(&ui_loading_tiles, [^;]+;',
+                    'loading pass finish after grouping')
+    canvas = unique(r'^[ \t]*anchor = hud_canvas_anchor\([^;]+;', 'canvas anchor decision')
+    capture = 'HudLoadingTile loading_tile = hud_loading_tile(m, s);'
+    record_call = 'ui_loading_record(loading_tile, (float *)sp.ptr);'
+    if renderer.count(capture) != 1 or renderer.count(record_call) != 1:
+        raise RuntimeError('Expected one production raw loading capture and transient-matrix recorder call')
+    cbuf_start = renderer.index(capture)
+    cbuf_copy = renderer.index('memcpy(sp.ptr, m, 64);', cbuf_start)
+    cbuf_record = renderer.index(record_call, cbuf_copy)
+    cbuf_return = renderer.index('return ubo_span(sp, size);', cbuf_record)
+    if not cbuf_start < renderer.index('m[0] *= s;', cbuf_start) < cbuf_copy < cbuf_record < cbuf_return:
+        raise RuntimeError('Loading capture must precede transforms; recording must use the final transient copy')
+    pass_start = renderer.index('void vk_end_pass(void) {')
+    if not pass_start < renderer.index(finish, pass_start) < renderer.index('vkCmdEndRenderPass', pass_start):
+        raise RuntimeError('Loading finish must precede render-pass submission')
+    loading_code = '\n'.join((recorder, legacy, reset, finish, canvas, capture, record_call))
+    report['production_loading_wiring_sha256'] = hashlib.sha256(loading_code.encode()).hexdigest()
+    (output / 'hud_loading_under_test.h').write_text(
+        'static HudLoadingPass ui_loading_tiles;\n'
+        'static unsigned ui_loading_rows;\n'
+        'static uint64_t ui_loading_seen_frame, g_present_count;\n'
+        + recorder + '\n'
+        'static void hud_test_loading_reset(void) {\n' + reset + '\n}\n'
+        'static void hud_test_loading_finish(void) {\n' + finish + '\n}\n'
+        'static int hud_test_canvas_anchor(float s, float pos_z, int anchor, bool menu_canvas,\n'
+        '    bool aiming, bool loading_strip) {\n' + canvas + '\n    return anchor;\n}\n'
+        'static bool hud_test_legacy_loading(float s, float pos_x, float pos_y, float pos_z,\n'
+        '    bool aiming, float *scale_y) {\n'
+        '    bool loading_strip = false;\n    float sy = *scale_y;\n' + legacy + '\n'
+        '    *scale_y = sy;\n    return loading_strip;\n}\n', encoding='utf-8')
     vcvars = os.environ.get('VCVARS64', r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
     setup = subprocess.run(f'call "{vcvars}" >nul && set', shell=True, capture_output=True,
                            text=True, timeout=60)

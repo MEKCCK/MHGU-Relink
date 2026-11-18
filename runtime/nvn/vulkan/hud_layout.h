@@ -101,3 +101,63 @@ static inline unsigned hud_loading_row(float x, float y) {
     return fabsf(y - 168.0f) < 0.3f ? 1u : fabsf(y - 433.0f) < 0.3f ? 2u
          : fabsf(y - 570.0f) < 0.3f ? 4u : 0u;
 }
+
+// A scrolling row has no fixed X phase; require matching neighbours in two rows before moving any tile.
+#define HUD_LOADING_MAX 64
+typedef struct HudLoadingTile {
+    float *m, x, shape[6];
+    unsigned row;
+    bool paired;
+} HudLoadingTile;
+
+typedef struct HudLoadingPass {
+    unsigned n, rows;
+    bool overflow;
+    HudLoadingTile p[HUD_LOADING_MAX];
+} HudLoadingPass;
+
+static inline HudLoadingTile hud_loading_tile(const float m[16], float scale) {
+    HudLoadingTile tile = {0};
+    if (!(scale < 1.0f) || !(fabsf(m[14] - 110.0f) < 0.5f) || !isfinite(m[12])) return tile;
+    tile.row = fabsf(m[13] - 168.0f) < 0.3f ? 1u : fabsf(m[13] - 433.0f) < 0.3f ? 2u
+             : fabsf(m[13] - 570.0f) < 0.3f ? 4u : 0u;
+    tile.x = m[12];
+    const unsigned columns[] = {0, 1, 4, 5, 8, 9};
+    for (unsigned i = 0; i < 6; i++) {
+        tile.shape[i] = m[columns[i]];
+        if (!isfinite(tile.shape[i])) tile.row = 0;
+    }
+    return tile;
+}
+
+static inline bool hud_loading_add(HudLoadingPass *pass, HudLoadingTile tile, float *m) {
+    if (!tile.row || pass->overflow) return false;
+    if (pass->n == HUD_LOADING_MAX) {
+        *pass = (HudLoadingPass){.overflow = true};
+        return false;
+    }
+    tile.m = m;
+    for (unsigned i = 0; i < pass->n; i++) {
+        HudLoadingTile *other = &pass->p[i];
+        if (other->row != tile.row || !(fabsf(fabsf(other->x - tile.x) - 579.0f) < 0.3f)) continue;
+        bool same = true;
+        for (unsigned k = 0; k < 6; k++) same &= other->shape[k] == tile.shape[k];
+        if (same) {
+            other->paired = tile.paired = true;
+            pass->rows |= tile.row;
+        }
+    }
+    pass->p[pass->n++] = tile;
+    return (pass->rows & (pass->rows - 1)) != 0;
+}
+
+static inline void hud_loading_reset(HudLoadingPass *pass) {
+    *pass = (HudLoadingPass){0};
+}
+
+static inline void hud_loading_finish(HudLoadingPass *pass, float scale) {
+    if (scale < 1.0f && !pass->overflow && (pass->rows & (pass->rows - 1)))
+        for (unsigned i = 0; i < pass->n; i++)
+            if (pass->p[i].paired) pass->p[i].m[12] = pass->p[i].x * scale;
+    hud_loading_reset(pass);  // The transient matrices are submitted when this pass ends.
+}

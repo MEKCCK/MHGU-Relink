@@ -6,6 +6,7 @@
 #include "../runtime/nvn/vulkan/hud_layout.h"
 #include "hud_hunt_gate_under_test.h"
 #include "hud_group_under_test.h"
+#include "hud_loading_under_test.h"
 
 static void near(float a, float b) { assert(fabsf(a - b) < 0.001f); }
 
@@ -368,6 +369,179 @@ static void touch_offsets(void) {
         }
 }
 
+// Synthetic geometry exercises the observed row/stride contract; no guest matrices were captured.
+static void loading_matrix(float m[16], float x, float y, unsigned shape) {
+    memset(m, 0, 16 * sizeof *m);
+    m[0] = 431.0f + shape; m[1] = 0.25f; m[4] = -0.5f;
+    m[5] = 137.0f + shape; m[8] = 0.125f; m[9] = -0.125f;
+    m[10] = m[15] = 1;
+    m[12] = x; m[13] = y; m[14] = 110;
+}
+
+static void loading_begin(float aspect, float anchor) {
+    g_render_aspect = aspect;
+    g_ui_anchor_aspect = anchor;
+    ui_group.n = 0;
+    hud_test_loading_reset();
+    assert(!ui_loading_pass && !ui_loading_rows && !ui_loading_tiles.n && !ui_loading_tiles.overflow);
+}
+
+static void loading_draw(const float raw[16], float final[16], bool aiming) {
+    float s = fminf(1.0f, (16.0f / 9.0f) / g_render_aspect);
+    float left = 640.0f * (1.0f - fminf(g_render_aspect, g_ui_anchor_aspect) / g_render_aspect);
+    int anchor = raw[12] <= 430 ? HUD_LEFT : raw[12] >= 650 ? HUD_RIGHT : HUD_CENTER;
+    anchor = hud_test_canvas_anchor(s, raw[14], anchor, false, aiming, false);
+    memcpy(final, raw, 16 * sizeof *raw);
+    final[12] = hud_map_x(raw[12], s, left, 1280.0f - left, anchor);
+    ui_loading_record(hud_loading_tile(raw, s), final);
+}
+
+static void loading_only_x_changed(const float raw[16], const float final[16], float x) {
+    for (unsigned i = 0; i < 16; i++) near(final[i], i == 12 ? x : raw[i]);
+}
+
+static void production_loading_phases(void) {
+    const float aspects[] = {2.2f, 21.0f / 9.0f, 32.0f / 9.0f};
+    const float ys[] = {168, 433, 570};
+    const float boundary[] = {-609.31f, -609.29f, -30.31f, -30.29f, -30.01f, -30, -29.99f, -29.71f, -29.69f, 548.99f, 549.01f};
+    const unsigned orders[][9] = {{0, 1, 2, 3, 4, 5, 6, 7, 8}, {8, 7, 6, 5, 4, 3, 2, 1, 0}, {0, 3, 6, 2, 5, 8, 1, 4, 7}};
+    for (unsigned a = 0; a < sizeof aspects / sizeof *aspects; a++) {
+        float s = (16.0f / 9.0f) / aspects[a];
+        const float anchors[] = {16.0f / 9.0f, 21.0f / 9.0f, 32.0f / 9.0f, aspects[a]};
+        for (unsigned h = 0; h < sizeof anchors / sizeof *anchors; h++) {
+            float previous = 0;
+            for (unsigned phase = 0; phase < 580 + sizeof boundary / sizeof *boundary; phase++) {
+                float x = phase < 580 ? (float)phase - 31 : boundary[phase - 580];
+                float raw[9][16], final[9][16];
+                loading_begin(aspects[a], anchors[h]);
+                g_present_count = 1000 + phase;
+                for (unsigned i = 0; i < 9; i++) {
+                    unsigned row = i / 3;
+                    loading_matrix(raw[i], x + row * 37.25f + (i % 3) * 579, ys[row], row);
+                }
+                for (unsigned i = 0; i < 9; i++) {
+                    unsigned k = orders[phase % 3][i];
+                    loading_draw(raw[k], final[k], (i & 1) != 0);
+                    near(final[k][12], 640 + (raw[k][12] - 640) * s);
+                }
+                assert(ui_loading_pass && ui_loading_rows == 7 && ui_loading_seen_frame == g_present_count);
+                hud_test_loading_finish();
+                for (unsigned i = 0; i < 9; i++) loading_only_x_changed(raw[i], final[i], raw[i][12] * s);
+                for (unsigned row = 0; row < 3; row++) near(final[row * 3 + 1][12] - final[row * 3][12], 579 * s);
+                if (phase && phase < 580) near(final[0][12] - previous, s);
+                previous = final[0][12];
+                assert(!ui_loading_tiles.n && !ui_loading_tiles.rows && !ui_loading_tiles.overflow);
+                final[0][12] = 12345;
+                hud_test_loading_finish();
+                near(final[0][12], 12345);
+            }
+        }
+    }
+}
+
+static void production_loading_rejection(void) {
+    const float ys[] = {168, 433, 570};
+    const unsigned columns[] = {0, 1, 4, 5, 8, 9};
+    const float s = (16.0f / 9.0f) / 2.2f;
+    // No pair, one paired row, duplicate X, wrong stride, mismatched shape, wrong Y/layer and nonfinite shape.
+    for (unsigned scenario = 0; scenario < 14; scenario++) {
+        float raw[4][16], final[4][16], baseline[4];
+        loading_begin(2.2f, 2.2f);
+        ui_loading_seen_frame = 77;
+        g_present_count = 200;
+        loading_matrix(raw[0], -42, ys[0], 0);
+        loading_matrix(raw[1], 537, ys[0], 0);
+        loading_matrix(raw[2], 81, ys[1], 1);
+        loading_matrix(raw[3], 660, ys[1], 1);
+        if (scenario == 0) raw[1][12] = 102, raw[3][12] = 330, raw[3][13] = ys[2];
+        else if (scenario == 1) raw[3][13] = ys[2];
+        else if (scenario == 2) raw[1][12] = raw[0][12], raw[3][12] = raw[2][12];
+        else if (scenario == 3) raw[3][12] -= 1;
+        else if (scenario == 4) raw[3][12] += 1;
+        else if (scenario < 11) raw[3][columns[scenario - 5]] += 0.01f;
+        else if (scenario == 11) raw[3][13] = 360;
+        else if (scenario == 12) raw[3][14] = 109;
+        else raw[3][5] = INFINITY;
+        for (unsigned i = 0; i < 4; i++) {
+            loading_draw(raw[i], final[i], false);
+            baseline[i] = final[i][12];
+        }
+        assert(!ui_loading_pass && !ui_loading_rows && ui_loading_seen_frame == 77);
+        assert(!hud_loading_candidate(ui_loading_rows, g_present_count, ui_loading_seen_frame));
+        hud_test_loading_finish();
+        for (unsigned i = 0; i < 4; i++) {
+            near(final[i][12], baseline[i]);
+            near(final[i][13], raw[i][13]);
+        }
+    }
+    // Mixed markers keep their own centred matrix even after two real rows confirm.
+    float raw[9][16], final[9][16];
+    loading_begin(2.2f, 2.2f);
+    ui_loading_seen_frame = 77;
+    g_present_count = 201;
+    for (unsigned i = 0; i < 4; i++) loading_matrix(raw[i], (i % 2) * 579.0f - 42 + (i / 2) * 81, ys[i / 2], i / 2);
+    for (unsigned i = 4; i < 9; i++) loading_matrix(raw[i], 200 + i * 13, ys[i % 3], 9);
+    // Same shape as the first row but not on its repeated columns.
+    loading_matrix(raw[8], 71, ys[0], 0);
+    for (unsigned i = 0; i < 9; i++) {
+        loading_draw(raw[i], final[i], true);
+        if (i < 3) assert(!ui_loading_pass && !ui_loading_rows && ui_loading_seen_frame == 77);
+    }
+    assert(ui_loading_pass && ui_loading_rows == 3 && ui_loading_seen_frame == 201);
+    assert(hud_test_canvas_anchor(s, 110, HUD_RIGHT, true, true, true) == HUD_CENTER);
+    hud_test_loading_finish();
+    for (unsigned i = 0; i < 9; i++)
+        loading_only_x_changed(raw[i], final[i], i < 4 ? raw[i][12] * s : 640 + (raw[i][12] - 640) * s);
+
+    // Evidence and matrix pointers from an unfinished pass must not reach a new pass.
+    loading_begin(2.2f, 2.2f);
+    for (unsigned i = 0; i < 4; i++) loading_draw(raw[i], final[i], false);
+    loading_begin(2.2f, 2.2f);
+    hud_test_loading_finish();
+    for (unsigned i = 0; i < 4; i++) near(final[i][12], 640 + (raw[i][12] - 640) * s);
+}
+
+static void production_loading_overflow_and_legacy(void) {
+    const float s = (16.0f / 9.0f) / 2.2f;
+    float raw[HUD_LOADING_MAX + 2][16], final[HUD_LOADING_MAX + 2][16];
+    loading_begin(2.2f, 2.2f);
+    for (unsigned i = 0; i < HUD_LOADING_MAX + 2; i++) {
+        loading_matrix(raw[i], (i % 2) * 579.0f - 42, i % 4 < 2 ? 168 : 433, i / 4);
+        loading_draw(raw[i], final[i], false);
+    }
+    assert(ui_loading_tiles.overflow && !ui_loading_tiles.n && !ui_loading_tiles.rows);
+    hud_test_loading_finish();
+    for (unsigned i = 0; i < HUD_LOADING_MAX + 2; i++)
+        loading_only_x_changed(raw[i], final[i], 640 + (raw[i][12] - 640) * s);
+    loading_begin(2.2f, 2.2f);
+    assert(!ui_loading_tiles.overflow);
+
+    const float aspects[] = {16.0f / 9.0f, 16.0f / 10.0f};
+    for (unsigned i = 0; i < sizeof aspects / sizeof *aspects; i++) {
+        loading_begin(aspects[i], aspects[i]);
+        float sy = fminf(1, aspects[i] / (16.0f / 9.0f));
+        loading_matrix(raw[0], -30, 168, 0);
+        loading_draw(raw[0], final[0], false);
+        assert(!ui_loading_tiles.n && !ui_loading_pass);
+        assert(hud_test_legacy_loading(1, -30, 168, 110, false, &sy));
+        assert(!ui_loading_pass && ui_loading_rows == 1);
+        assert(hud_test_legacy_loading(1, 549, 433, 110, false, &sy));
+        assert(ui_loading_pass && ui_loading_rows == 3);
+        near(sy, 1);
+        assert(hud_test_canvas_anchor(1, 110, HUD_RIGHT, false, false, true) == HUD_RIGHT);
+        loading_begin(aspects[i], aspects[i]);
+        sy = fminf(1, aspects[i] / (16.0f / 9.0f));
+        assert(!hud_test_legacy_loading(1, -30, 168, 110, true, &sy));
+        assert(!ui_loading_pass && !ui_loading_rows);
+        near(sy, fminf(1, aspects[i] / (16.0f / 9.0f)));
+    }
+    // The fixed phase and aiming gate are confined to the original non-wide branch.
+    loading_begin(2.2f, 2.2f);
+    float sy = 1;
+    assert(!hud_test_legacy_loading(s, -30, 168, 110, false, &sy));
+    assert(!ui_loading_pass && !ui_loading_rows);
+}
+
 int main(void) {
     const float aspects[] = {16.0f / 9.0f, 2.2f, 21.0f / 9.0f, 32.0f / 9.0f, 16.0f / 10.0f};
     for (unsigned i = 0; i < sizeof aspects / sizeof *aspects; i++) {
@@ -417,6 +591,9 @@ int main(void) {
     production_menu_groups();
     movable_map_and_loading_gate();
     touch_offsets();
+    production_loading_phases();
+    production_loading_rejection();
+    production_loading_overflow_and_legacy();
     puts("HUD layout regressions: OK");
     return 0;
 }
