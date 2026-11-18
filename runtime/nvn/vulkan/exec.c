@@ -1013,6 +1013,13 @@ static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static unsigned ui_loading_rows;  // the loading backdrop's rows seen in this pass (1: y 168, 2: 433, 4: 570)
 static uint64_t ui_loading_seen_frame;  // loading can draw in another render pass before its backdrop rows are encountered
+static HudLoadingPass ui_loading_tiles;
+static void ui_loading_record(HudLoadingTile tile, float *m) {
+    if (!hud_loading_add(&ui_loading_tiles, tile, m)) return;
+    ui_loading_rows = ui_loading_tiles.rows;
+    ui_loading_pass = true;
+    ui_loading_seen_frame = g_present_count;
+}
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
@@ -1445,6 +1452,7 @@ static bool pass_models, pass_want_depth, ms_want_depth;
 void vk_end_pass(void) {
     if (!in_pass) return;
     ui_group_end();
+    hud_loading_finish(&ui_loading_tiles, (16.0f / 9.0f) / g_render_aspect);
     if (ui_nrecent != ui_pass_recent) ui_results_last = ui_results_pass;
     vkCmdEndRenderPass(vk_cmd());
     in_pass = false;
@@ -1925,6 +1933,7 @@ static void begin_pass(void) {
     pass_w = minw; pass_h = minh;
     ui_loading_pass = false;
     ui_loading_rows = 0;
+    hud_loading_reset(&ui_loading_tiles);
     ui_title_pass = false;
     ui_frontend_pass = ui_frontend_frame == g_present_count;
     ui_stamp_pass = false;
@@ -3692,6 +3701,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
                 float s = g_render_aspect > 16.0f / 9.0f ? (16.0f / 9.0f) / g_render_aspect : 1.0f;
                 float sy = g_render_aspect < 16.0f / 9.0f ? g_render_aspect / (16.0f / 9.0f) : 1.0f;
+                HudLoadingTile loading_tile = hud_loading_tile(m, s);
                 // Layer 110 is the loading screen's scrolling backdrop: strips at y 168 / 433 / 570 that must stay one picture.
                 // The generic rule anchored each strip to a different edge and flattened it, leaving gaps between them.
                 // They keep their height (as on a stretched 16:9 canvas), so nothing moves vertically.
@@ -3699,7 +3709,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // lock-on markers use layer 110 too, and kept the stretched canvas's height: a round reticle came out 11%
                 // taller than wide at 16:10. Those mark points of the 3D picture, so they scale about the centre below.)
                 bool loading_strip = false;
-                if (fabsf(pos_z - 110.0f) < 0.5f) {
+                if (s >= 1.0f && fabsf(pos_z - 110.0f) < 0.5f) {
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
                     unsigned row = aiming ? 0 : hud_loading_row(pos_x, pos_y);
@@ -3916,7 +3926,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         anchor = horizontal, vanchor = vertical;
                         status_edge = false;
                     }
-                    anchor = hud_canvas_anchor(pos_z, anchor, menu_canvas, aiming, loading_strip || ui_loading_pass);
+                    // Wide layer 110 starts centred; only confirmed paired tiles move at the end of this pass.
+                    anchor = hud_canvas_anchor(pos_z, anchor, menu_canvas, aiming, s >= 1.0f && (loading_strip || ui_loading_pass));
                     if (aiming && pos_z > 96.5f && pos_z < 98.5f) vanchor = V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
@@ -3997,6 +4008,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
+                ui_loading_record(loading_tile, (float *)sp.ptr);
                 if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
                 {   // (where the piece ends up: read at the frame's end, once its group has its anchor - runtime/menulearn.c)
                     void menulearn_piece_final(const float *m);
