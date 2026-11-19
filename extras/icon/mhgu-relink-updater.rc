@@ -1,3 +1,4 @@
-// The updater's icon on Windows (Makefile: windres, linked into mhgu-relink-updater.exe): fan-made pixel art (a Palico,
-// used with permission), so it's easy to tell from the game's. SDL takes the window's icon from the exe's first one.
+// The updater's icon on Windows (Makefile: windres, linked into mhgu-relink-updater.exe): the same Hunter Arts emblem
+// panel as the game's (mhgu-relink-updater.ico, from mhgu-relink.svg). SDL takes the window's icon from the exe's first
+// one.
 1 ICON "mhgu-relink-updater.ico"

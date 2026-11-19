@@ -691,8 +691,9 @@ static int act(int st, int action) {
     return st == ST_FAILED;
 }
 
-// The window's icon: a Palico, the game's is a greatsword. Windows takes it from the exe (extras/icon/mhgu-relink-updater.rc),
-// Linux from extras/icon/mhgu-relink-updater-128.png, built in here (the path is relative to the repo, where make runs).
+// The window's icon: the same Hunter Arts emblem panel as the game's. Windows takes it from the exe
+// (extras/icon/mhgu-relink-updater.rc), Linux from extras/icon/mhgu-relink-updater-128.png, built in here (the path is
+// relative to the repo, where make runs).
 #ifndef _WIN32
 __asm__(".pushsection .rodata\n.globl mhgu_updater_icon_png\nmhgu_updater_icon_png:\n"
         ".incbin \"extras/icon/mhgu-relink-updater-128.png\"\n"
