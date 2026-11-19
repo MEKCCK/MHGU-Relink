@@ -1,4 +1,4 @@
-MHGU Relink 0.2.6 · 2026-11-19
+MHGU Relink 0.2.7 · 2026-11-20
 
 2026-11-19: Item bar swipes and invisible button padding
 A swipe that starts only inside a button's invisible extra hit area (widened for thumbs) now drives the item bar or the Hunter Arts panel instead of pressing the button. Visible button areas keep their original priority.

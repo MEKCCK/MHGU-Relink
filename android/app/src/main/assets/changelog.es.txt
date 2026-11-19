@@ -1,4 +1,4 @@
-MHGU Relink 0.2.6 · 2026-11-19
+MHGU Relink 0.2.7 · 2026-11-20
 
 2026-11-19: Deslizamientos del objeto y área invisible de los botones
 Un deslizamiento que empiece solo dentro del área táctil invisible de un botón (ampliada para los pulgares) mueve ahora la barra de objetos o el panel de Artes de caza en lugar de pulsar el botón. Las zonas visibles de los botones conservan su prioridad original.
