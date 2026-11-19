@@ -1,3 +1,87 @@
+MHGU Relink 0.2.6 · 2026-11-19
+
+2026-11-19: Deslizamientos del objeto y área invisible de los botones
+Un deslizamiento que empiece solo dentro del área táctil invisible de un botón (ampliada para los pulgares) mueve ahora la barra de objetos o el panel de Artes de caza en lugar de pulsar el botón. Las zonas visibles de los botones conservan su prioridad original.
+
+2026-11-19: Toques en la tercera fila de Artes de caza
+Las piezas de Artes por fotograma ya no están limitadas a 32 y las filas se agrupan por las coordenadas del juego. La tercera fila sigue siendo tocable en paneles densos y las zonas táctiles permanecen sincronizadas con la imagen.
+
+2026-11-19: Envío manteniendo A en la caja de recompensas
+Se restaura el gancho de inicialización perdido en 0.2.5. En la pantalla de resultados, mantener A envía las recompensas a la caja de objetos una a una y se detiene al soltar; un solo toque sigue enviando una pieza, con los botones nativos del juego.
+
+2026-11-19: Paquete de textos de las misiones de aldea
+Se repone la comprobación por fotograma que libera el paquete de textos de la misión de aldea al salir del hub o de la cantina. Empezar una misión de aldea desde allí arrastraba el paquete a la misión: los gatos aparecían como modelos blancos translúcidos, el terreno se oscurecía y el juego se cerraba al cambiar de zona (informe del 2026-11-13, solo en chino).
+
+2026-11-19: Identificador de compatibilidad de la librería del juego
+Actualizado a 3bfb26af6be3424a: hay que regenerar libmhgugame.so / mhgugame.dll para esta versión con tools/build_game.py / build_game_windows.py. Las librerías antiguas se rechazan de forma explícita al iniciar.
+
+MHGU Relink 0.2.5 · 2026-11-18
+
+2026-11-18: Forge integrado 2.0.0
+Nuevas interfaces de retrollamadas y texturas NVN, recursos validados por contenido y conservación de los recursos antiguos de 1.5.1.
+
+2026-11-18: Carrera automática y enfundado (Android)
+No se inyecta R hasta que termina la animación de enfundado, corrigiendo la R automática durante el enfundado especial del estilo Adepto y los enfundados. Un nuevo chequeo de enfundado completo lee un byte de estado que el juego solo borra al terminar la animación. Mantener Y (la tecla de objetos) con el arma ya enfundada ya no bloquea la carrera; escenas sin cazador, como la aldea y el hub, vuelven a funcionar.
+
+2026-11-18: Cámara con el stick derecho
+Se corrige que el stick derecho no moviera la cámara tras mostrarse (la vía nativa de cámara se saltaba por error). Está oculto por defecto y no recibe toques mientras lo está; al mostrarse, mueve la cámara como el stick derecho nativo.
+
+2026-11-18: Iconos de botones del mando
+La página de controles de Android añade iconos de botones del mando (Switch / Xbox / PlayStation). Switch usa los del juego; los de Xbox y PlayStation se redibujan dentro del juego (letras y formas de los botones frontales, LB/RB/LT/RT, L1/R1/L2/R2), y los iconos de mando y teclado comparten un estilo de letras negras sobre blanco para ganar contraste. El ajuste "Button icons" del menú sigue controlando sus propios iconos.
+
+2026-11-18: Menú de ajustes reorganizado
+Se agrupa por uso: Pantalla; Imagen y sonido; Controles; Red; Varios; y Opciones de menú (audio, chat de voz, imagen, HDR, mandos, teclado y ratón, diseño táctil, cámara, hub, multijugador cruzado, apariencia, general, partidas guardadas y aplicación). Los botones Más y Menos y la tecla de confirmación pasan a Opciones de menú; la importación y exportación de partidas de Android pasa a Partidas guardadas.
+
+2026-11-18: Terminología china unificada
+Se unifica la traducción al chino: el hub siempre es 集会所, la vida de los monstruos es 体力, con términos coherentes para objetos, evasiones, códigos de trampa, modo de bajas prestaciones, pestañas, recubrimientos y rango de cazador; se corrige el orden de los marcadores en los avisos de archivos ausentes, la contraseña de RyuLdn, el texto del multijugador cruzado y una etiqueta de trucos residual en la pantalla de importación de Android.
+
+2026-11-18: Fijación táctil de Artes
+El breve eje inyectado al tocar un Arte de tipo stick derecho ya no se interpreta como cámara manual, de modo que el seguimiento de la fijación no se interrumpe; el stick derecho físico sigue pausando el seguimiento como corresponde.
+
+2026-11-18: Serialización de retrollamadas de plugins Forge
+forge_onNvnRender se ejecuta en el hilo de presentación y el resto de retrollamadas en el de actualización, con un único bloqueo que evita carreras entre hilos en plugins de Forge 2; los nombres de exportación del adaptador de archivos también entran en las aserciones de regresión.
+
+2026-11-18: Recursos Forge validados por contenido
+Corrección de la validación de recursos de Forge 2.0.0 integrado en Android: los archivos dañados con la misma longitud también se reescriben; se añade "pausar síntesis" al español y se limita el tamaño de las copias de vistas de textura de Forge.
+
+2026-11-18: Síntesis continua con un toque
+Tocar "Sintetizar" una vez en pantalla sintetiza de forma continua; tocar de nuevo la posición original de Sintetizar lo pausa en cualquier momento, y la síntesis iniciada termina con normalidad. El aviso de Sintetizar/Detener no reaparece durante la racha y se conserva la animación de resultado nativa. La confirmación del primer resultado de una receta nueva se encadena sola. Sin pausa manual, la síntesis se detiene y cierra el aviso si faltan materiales o el objeto está lleno, volviendo a la lista de recetas. Cancelar, detener, navegar, cambiar de menú, editar el diseño o pasar a segundo plano cancela al instante la entrada automática, conservando los botones nativos y las cantidades.
+
+2026-11-18: Toques táctiles de Artes
+Envía las entradas que el juego espera según el tipo de controles 1-4 y el intercambio de hombros/direcciones vigente; los Artes de tipo stick derecho añaden su breve eje. Se reconocen los iconos de las ranuras de Artes X/A/B. Se conservan los botones nativos, combos, stick y cámara de cada tipo, sin reescribir los ajustes de controles del juego.
+
+2026-11-18: Canal independiente para el deslizamiento táctil
+El deslizamiento usa siempre el canal de cámara propio: ya no se convierte en entrada de Arte del stick derecho según el tipo de controles ni lo borran los cambios de captura del ratón. Tocar un Arte y deslizar la cámara a la vez pueden coexistir.
+
+2026-11-18: Aviso de combos de Artes
+El aviso completo R+A+B se mueve junto a su barra de Artes, corrigiendo el desplazamiento de su primera mitad junto a la barra de objetos. Las ranuras se identifican con los ajustes de controles vigentes, para no confundir el A/B del combo de la primera ranura con otros Artes.
+
+2026-11-18: Pantalla de carga ultrapanorámica
+Las tiras del fondo en movimiento se comprimen en horizontal sobre una base 16:9; las tres filas ya no se descuadran ni dejan huecos. Los mosaicos contiguos solo se mueven tras confirmar el emparejamiento. La mira y las marcas de fijación de la capa 110 en misiones no cambian.
+
+MHGU Relink 0.2.4 · 2026-11-17
+
+2026-11-17: Sincronía con MHGURecomp 0.17.5
+29 commits del repositorio original: sonido envolvente 5.1, envío con A en la caja de recompensas, correcciones del hilo de interfaz en Android y de cámara, menús, red y HUD 16:10.
+
+2026-11-17: Proporciones de pantalla ultrapanorámica
+Nuevos preajustes de proporción (16:10, 16:9, 21:9, 64:27, 43:18, 24:10, 32:10, 32:9 y personalizado), posición del HUD para 16:9/21:9/32:9/Bordes, sincronía de la proporción de cámara en tiempo real, menú panorámico completo y mapeo de dibujo libre de Forge.
+
+2026-11-17: Ajustes panorámicos en Android
+Los mismos preajustes de proporción y posición del HUD, pensados para móviles 21:9 / 21:10.
+
+2026-11-17: Hunter Search en lista propia
+El hub en Rust lista las redes de Hunter Search aparte de los hubs normales, con el nuevo -list-search-max (6 por defecto) y un ajuste web, para que Hunter Search no desplace las plazas para unirse a un hub.
+
+2026-11-17: R al cruzar el borde para la carrera automática
+Ahora usa el gesto de cruzar el borde: con el arma enfundada, deslizar el stick más allá de 1.60 veces su radio mantiene la R nativa; empujar de vuelta dentro de 1.45 la suelta. Lo controla el interruptor [Touch] AutoR.
+
+2026-11-17: Asa del mapa en el editor
+El asa del mapa se reduce a 260x260 y se puede editar dentro y fuera de misiones; los textos de ayuda en pantallas estrechas ya no se desbordan y cierran el juego.
+
+2026-11-17: Limpieza
+Se retira el código y las pruebas restantes del giroscopio.
+
 MHGU Relink 0.2.3 · 2026-11-15
 
 2026-11-15: Restaurar el mapa fijo

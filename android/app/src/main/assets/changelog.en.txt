@@ -1,3 +1,87 @@
+MHGU Relink 0.2.6 · 2026-11-19
+
+2026-11-19: Item bar swipes and invisible button padding
+A swipe that starts only inside a button's invisible extra hit area (widened for thumbs) now drives the item bar or the Hunter Arts panel instead of pressing the button. Visible button areas keep their original priority.
+
+2026-11-19: Hunter Arts third-row taps
+Per-frame Arts pieces are no longer capped at 32, and rows are grouped by the game's coordinates. The third row stays tappable on densely drawn panels, and touch areas stay in sync with the display.
+
+2026-11-19: Reward box Hold A send
+Restore the initialization hook that was lost in 0.2.5. On the results screen, holding A sends rewards into the item box one by one and stops when released; a single tap still sends one item, using the game's native buttons.
+
+2026-11-19: Village quest text package
+Restore the per-frame check that releases the village quest text package when leaving the hub or the canteen. Starting a village quest from there carried the package into the quest, leaving Palicoes as translucent white models, darkening the terrain and crashing on area change (reported 2026-11-13, Chinese only).
+
+2026-11-19: Game code library compatibility ID
+Updated to 3bfb26af6be3424a: regenerate libmhgugame.so / mhgugame.dll for this version with tools/build_game.py / build_game_windows.py. Outdated libraries are explicitly rejected at startup.
+
+MHGU Relink 0.2.5 · 2026-11-18
+
+2026-11-18: Built-in Forge 2.0.0
+New NVN callback and texture interfaces, resources validated by content, and the old 1.5.1 assets are kept.
+
+2026-11-18: Auto-run no longer misreads sheathing (Android)
+R is not injected until the sheathing animation ends, fixing auto R during Adept-style special sheathes and sheathing moves. A new "fully sheathed" check reads a state byte the game clears only after the animation ends. Holding Y (the item button) while fully sheathed no longer blocks running; scenes without a hunter object, such as the village and hub, work again.
+
+2026-11-18: Right-stick camera
+Fix the right stick not turning the camera once shown (the native camera path was skipped by mistake). It is hidden by default and accepts no touches while hidden; once shown, it turns the camera like the native right stick.
+
+2026-11-18: Controller button prompts
+The Android controls page adds controller button prompts (Switch / Xbox / PlayStation). Switch uses the game's original prompts; Xbox and PlayStation prompts are redrawn in-game (face button letters and shapes, LB/RB/LT/RT, L1/R1/L2/R2), and controller and keyboard prompts share a black-on-white style for contrast. The settings menu's "Button icons" still controls its own icons.
+
+2026-11-18: Settings menu regrouped
+Regrouped by purpose: Display; Video and audio; Controls; Network; Miscellaneous; and Menu options (audio, voice chat, video, HDR, controllers, keyboard and mouse, touch layout, camera, hub, crossplay, appearance, general, saves, app). The Plus and Minus buttons and the confirm key move to Menu options; Android save import/export moves to Save data.
+
+2026-11-18: Unified Chinese terms
+Chinese translations unified: the hub is consistently 集会所/集会所服务器, monster health is 体力/体力倍率, with consistent terms for items, dodges, cheat codes, low-spec mode, tabs, coatings, Hunter Rank and more; fixed the placeholder order of missing-file prompts, the RyuLdn passcode text, crossplay wording and a leftover "cheats" label in the Android import screen.
+
+2026-11-18: Hunter Art touch lock-on
+The short axis input injected by right-stick-type Art taps is no longer treated as manual camera input, so lock-on following is not interrupted; the physical right stick still pauses following as intended.
+
+2026-11-18: Forge plugin callback serialization
+forge_onNvnRender runs on the presentation thread and all other callbacks on the update thread, with one lock avoiding cross-thread races in Forge 2 plugins; file adapter export names are covered by regression assertions too.
+
+2026-11-18: Forge assets validated by content
+Fix the Android built-in Forge 2.0.0 asset validation: files damaged without changing length are now rewritten; add the Spanish "pause synthesis" string and constrain Forge texture-view copy sizes.
+
+2026-11-18: Continuous synthesis with one tap
+Tapping "Synthesize" once on touch keeps synthesizing continuously; tapping the original Synthesize position pauses at any time, and a started synthesis finishes normally. The Synthesize/Stop dialog no longer reappears during the run, and the native result animation is kept. A new recipe's first result dialog chains automatically. Without a manual pause, synthesis stops and closes the dialog when materials run out or the item count is full, returning to the recipe list. Cancel, stop, navigation, menu changes, layout editing or backgrounding immediately cancel the automatic input, preserving native buttons and item counts.
+
+2026-11-18: Hunter Art touch taps
+Send the inputs the game expects for the current Controls type 1-4 and shoulder/direction swap settings; right-stick-type Arts add their short axis input. X/A/B Art slot icons are recognized. Native buttons, combos, stick and camera controls of every type are preserved; the game's control settings are not rewritten.
+
+2026-11-18: Independent touch swipe channel
+Swipes always use the dedicated camera channel: they no longer become right-stick Art input depending on the Controls type, and mouse-capture state changes no longer clear them. Art taps and simultaneous swipe camera control can coexist.
+
+2026-11-18: Hunter Art combo prompt
+The full R+A+B prompt moves together with its Arts bar, fixing the misplaced first half near the item bar. Slots are identified with the current control settings, so the A/B in the first slot's combo are no longer mistaken for other Arts.
+
+2026-11-18: Ultrawide loading screen
+The scrolling backdrop strips are compressed horizontally against a 16:9 base; the three rows no longer misalign or expose gaps. Adjacent tiles move only after a paired match is confirmed. The quest crosshair and lock-on markers on layer 110 are unaffected.
+
+MHGU Relink 0.2.4 · 2026-11-17
+
+2026-11-17: Upstream sync, MHGURecomp 0.17.5
+29 upstream commits: 5.1 surround sound, reward-box Hold A, Android UI thread fixes, and camera, menu, network and 16:10 HUD fixes.
+
+2026-11-17: Ultrawide aspect presets
+New aspect ratio presets (16:10, 16:9, 21:9, 64:27, 43:18, 24:10, 32:10, 32:9 and custom), HUD placement for 16:9/21:9/32:9/Edges, real-time camera ratio sync, a full widescreen menu layout and Forge free-draw mapping.
+
+2026-11-17: Android widescreen settings
+The same aspect presets and HUD placement, suited to 21:9 / 21:10 ultrawide phones.
+
+2026-11-17: Hunter Search in its own list
+The Rust hub lists Hunter Search networks separately from normal hubs, with a new -list-search-max (default 6) and a web setting, so Hunter Search no longer crowds out Join Hub slots.
+
+2026-11-17: Auto-run edge-crossing R
+Auto-run now uses the edge-crossing gesture: while sheathed, sliding past 1.60x the stick radius holds native R; pushing back within 1.45x stops it. Controlled by the [Touch] AutoR switch.
+
+2026-11-17: Layout editor map handle
+The map handle shrinks to 260x260 and is editable inside and outside quests; narrow-screen hint text no longer overflows and crashes.
+
+2026-11-17: Cleanup
+Remove leftover gyroscope code and tests.
+
 MHGU Relink 0.2.3 · 2026-11-15
 
 2026-11-15: Restore the fixed map
