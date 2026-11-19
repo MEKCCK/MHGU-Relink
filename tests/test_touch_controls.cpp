@@ -1619,9 +1619,22 @@ static void button_drag_exclusions() {
     }
     puts("PASS: fixed/floating movement owners and secondary movement-area touches across common-layout weapon/scene contexts never control the camera, steal ownership or promote after owner release");
     button_drag_fixture(0); const ImVec2 p=hud(TZ_ITEM,640,620);
+    const float r=place(g_s.layout,C_LIGHT,(float)screen_w,(float)screen_h).r;
+    const ImVec2 button(p.x+1.1f*r,p.y); // Only the button's extra hit area reaches the swipe origin.
+    g_s.layout.x[C_LIGHT]=(screen_w-button.x)/screen_h;
+    g_s.layout.y[C_LIGHT]=1-button.y/screen_h;
+    assert(zone_rect(zones(),TZ_ITEM,(float)screen_w,(float)screen_h).in(button.x,button.y));
     event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y); event(SDL_EVENT_FINGER_MOTION,1,p.x+100,p.y);
-    Input v=update(); assert(v.b==B(BTN_L) && touch_item_pending==1); camera_delta(v,0,0);
-    event(SDL_EVENT_FINGER_CANCELED,1,p.x+200,p.y); camera_delta(update(),0,0);
+    Input v=update(); assert(v.b==B(BTN_L) && item_steps==std::vector<int>{1}); no_stick_camera(v);
+    event(SDL_EVENT_FINGER_DOWN,2,p.x,p.y-160); event(SDL_EVENT_FINGER_MOTION,2,p.x+70,p.y-200);
+    camera_delta(update(),70,-40);
+    event(SDL_EVENT_FINGER_UP,1,p.x+200,p.y);
+    v=update(); assert(!v.b); no_stick_camera(v);
+    event(SDL_EVENT_FINGER_CANCELED,2,p.x+70,p.y-200);
+    event(SDL_EVENT_FINGER_DOWN,1,button.x,button.y);
+    event(SDL_EVENT_FINGER_MOTION,1,button.x+50,button.y);
+    v=update(); assert(v.b==B(BTN_X)); camera_delta(v,50,0);
+    event(SDL_EVENT_FINGER_CANCELED,1,button.x+50,button.y);
     button_drag_fixture(2); strcpy(cfg.touch_weapon_combo[profile][0],"Up+A");
     at(SDL_EVENT_FINGER_DOWN,C_COMBO); at(SDL_EVENT_FINGER_MOTION,C_COMBO,1,2,-1);
     v=update(); assert(v.b==(DPAD_UP|B(BTN_A)) && v.dx>0 && v.dy<0 && !v.rx && !v.ry);

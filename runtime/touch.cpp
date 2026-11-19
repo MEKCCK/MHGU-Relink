@@ -1601,6 +1601,11 @@ extern "C" bool touch_event(const SDL_Event *e) {
                          (s.stick_on && (hypotf(x-s.bx, y-s.by) < stick.r*1.22f ||
                                         hypotf(x-s.kx, y-s.ky) < stick.r*KNOB*1.25f)));
         int core_part = 0;
+        if (c >= 0 && !s.menu && item.in(x, y) &&
+            (DEFS[c].buttons || c == C_ATTACK || c == C_CORNER || is_combo(c)) &&
+            hit(s.layout, x, y, s.w, s.h, &core_part, 1.0f, classic && !floating_stick_enabled(s),
+                s.menu, s.in_quest, false, control_profile(s), true) < 0)
+            c = -1;  // Let item swipes start through invisible game-button padding.
         if (classic && c == C_STICK) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = c;
