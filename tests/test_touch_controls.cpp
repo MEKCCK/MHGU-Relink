@@ -2330,6 +2330,75 @@ static void hunter_art_cancel_context() {
     }
     puts("PASS: menus, typing, quest exit, expired HUD, editor, reset and template replacement cancel held or released Art taps with controls shown or hidden, and returning to gameplay cannot revive those presses");
 }
+static void hunter_art_button_padding() {
+    fresh(1280,576); cfg.touch_hud=1;
+    std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0); cfg.touch_show[TB_GUARD]=1;
+    // Recorded layout: the third Art label reaches R's invisible padding above its visible disc.
+    g_s.layout.x[C_R]=(screen_w-1214.f)/screen_h; g_s.layout.y[C_R]=(screen_h-191.f)/screen_h;
+    g_s.layout.scale[C_R]=56.f/(DEFS[C_R].r*screen_h);
+    art_inputs[0]=B(BTN_ZL)|B(BTN_X); art_inputs[1]=B(BTN_ZL)|B(BTN_A); art_inputs[2]=B(BTN_ZL)|B(BTN_B);
+    for(int row=0;row<3;++row) {
+        const float gy=587.f+48.f*row;
+        for(const ImVec2 origin:{ImVec2(709,0),ImVec2(726,0),ImVec2(842,8)}) {
+            const float cx=1280.f-(1280.f-(origin.x+311.f))*squeeze();
+            touch_hud_piece(TZ_ARTS,origin.x,gy+origin.y,cx,41.f+48.f*row+origin.y,0,0);
+        }
+        hud_art_slot(gy,row);
+    }
+    touch_hud_frame(); update();
+    const ImVec2 p(1214,126);
+    const Geo r=place(g_s.layout,C_R,(float)screen_w,(float)screen_h);
+    const Zones z=zones(); float rows[3][2];
+    assert(arts_rows(z,(float)screen_w,(float)screen_h,rows)==3 &&
+           zone_rect(z,TZ_ARTS,(float)screen_w,(float)screen_h).in(p.x,p.y));
+    assert(hypotf(p.x-r.c.x,p.y-r.c.y)>r.r && hypotf(p.x-r.c.x,p.y-r.c.y)<r.r*1.22f);
+    event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+    assert(finger(g_s,1)->kind==F_ARTS && finger(g_s,1)->ctl==2 && finger(g_s,1)->part==2);
+    assert(!update().touch_b);
+    event(SDL_EVENT_FINGER_UP,1,p.x,p.y); assert(update().touch_b==(B(BTN_ZL)|B(BTN_B)));
+    touch_reset(); assert(!update().touch_b);
+    // R's visible face and its padding outside the live Art HUD keep their original ownership.
+    for(float y:{134.f,136.f,191.f}) {
+        event(SDL_EVENT_FINGER_DOWN,1,p.x,y);
+        assert(finger(g_s,1)->kind==F_BUTTON && finger(g_s,1)->ctl==C_R && update().touch_b==B(BTN_R));
+        event(SDL_EVENT_FINGER_CANCELED,1,p.x,y); assert(!update().touch_b);
+    }
+    event(SDL_EVENT_FINGER_DOWN,1,p.x,p.y);
+    event(SDL_EVENT_FINGER_MOTION,1,p.x-36,p.y-27);
+    assert(finger(g_s,1)->kind==F_CAMERA);
+    const Input drag=update();
+    assert(!drag.b && !drag.touch_b && !drag.lx && !drag.ly && !drag.rx && !drag.ry && drag.dx<0 && drag.dy<0);
+    event(SDL_EVENT_FINGER_UP,1,p.x-36,p.y-27); assert(!update().touch_b);
+    puts("PASS: recorded 1280x576 third Art label wins over R's invisible padding and taps Type 3 ZL+B; R's face and other padding stay usable, and dragging the label turns the camera without an Art");
+}
+static void hunter_art_dense_rows() {
+    const uint64_t type2[] = {B(BTN_R)|B(BTN_A)|B(BTN_B), B(BTN_ZL), B(BTN_ZR)};
+    const float tap_y[] = {587.f, 638.f, 674.f};
+    for(bool reverse:{false,true}) {
+        fresh(1584,720);
+        std::fill(std::begin(cfg.touch_show),std::end(cfg.touch_show),0);
+        std::copy(std::begin(type2),std::end(type2),art_inputs);
+        const float sx=squeeze();
+        // Use the recording's scale and third-row tap with synthetic draw counts above the old capacity.
+        for(int i=0;i<3;++i) {
+            const int row=reverse ? 2-i : i;
+            const float y=587.f+49.f*row;
+            for(int piece=0;piece<17;++piece) {
+                const float x=710.f+49.f*(piece%4), py=y+4.f*(piece%3);
+                touch_hud_piece(TZ_ARTS,x,py,640.f+(x-640.f)*sx,py,0,0);
+            }
+            hud_art_slot(y,row);
+        }
+        touch_hud_frame(); update();
+        for(int row=0;row<3;++row) {
+            event(SDL_EVENT_FINGER_DOWN,1,1098,tap_y[row]);
+            event(SDL_EVENT_FINGER_UP,1,1098,tap_y[row]);
+            assert(update().touch_b==type2[row]);
+            touch_reset();
+        }
+    }
+    puts("PASS: dense Hunter Art draw sequences in either order keep all three Type 2 tap targets, including ZR at the recorded third-row point");
+}
 static void hunter_art_control_types() {
     // Independently specified native masks; the production option reader is covered by test_ranged_input.c.
     const uint64_t native[4][2][3]={
@@ -3715,6 +3784,8 @@ static const HunterArtCase hunter_art_cases[]={
     {"template-offsets",hunter_art_template_offsets},
     {"hidden-controls",hunter_art_hidden_controls},
     {"cancel-context",hunter_art_cancel_context},
+    {"button-padding",hunter_art_button_padding},
+    {"dense-rows",hunter_art_dense_rows},
     {"control-types",hunter_art_control_types},
 };
 static void run_hunter_art_cases(const char *selected) {
@@ -3764,7 +3835,8 @@ int main(int argc,char **argv) {
     bow_charge_drag(); bow_drag_sources(); bow_drag_lifecycle(); bow_drag_manual_aim();
     editor_hud_scenes(); editor_hud_dragging(); editor_hud_feedback(); map_editable_scenes(); map_fixed_storage(); editor_toolbar_dragging(); hunter_art_zone_lifetime();
     hunter_art_sparse_slots(); hunter_art_unknown_slots(); hunter_art_no_marker_input(); hunter_art_template_offsets();
-    hunter_art_hidden_controls(); hunter_art_cancel_context(); hunter_art_control_types(); editor_hud_priority_and_multitouch();
+    hunter_art_hidden_controls(); hunter_art_cancel_context(); hunter_art_button_padding(); hunter_art_dense_rows();
+    hunter_art_control_types(); editor_hud_priority_and_multitouch();
     ammo_repeat(); arrow_gesture_ownership(); ammo_visibility_and_editor(); arrow_gesture_lifecycle(); arrow_release_pending_and_overlap(); item_gesture_lifecycle();
     target_switch(1280,720); target_switch(2520,1080); target_switch(3840,1080); dedicated_lock_button(); persistent_target_lock();
     game_menu_taps(); game_menu_button_coexist(); game_menu_stick_coexist(); game_menu_gesture_lifecycle(); game_menu_pages_and_slider();
