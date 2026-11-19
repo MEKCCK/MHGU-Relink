@@ -709,16 +709,17 @@ bool separate_seam(const Layout &l, float w, float h, ImVec2 *at, float *size) {
 
 // the control under a finger (a little larger than its art: a thumb is wider), and the attack pill's part
 int hit(const Layout &l, float x, float y, float w, float h, int *part, float slop, bool stick, bool menu,
-        bool in_quest, bool editing, int profile = -1) {
+        bool in_quest, bool editing, int profile = -1, bool core = false) {
     int best = -1;
     float bd = 1e30f;
+    float round_slop = core ? slop : slop - .07f;
     int ranged = profile >= 0 ? ranged_layout_profile(profile) : -1;
     for (int i = 0; i < C_COUNT; i++) {
         if (!(editing ? in_editor(i, in_quest, profile) : in_mode(i, menu, in_quest, ranged)) ||
             (i == C_STICK && !stick)) continue;
         Geo g = place(l, i, w, h);
-        float d = i == C_ATTACK || i == C_MPILL ? pill_distance(g, x, y) / (g.r * (slop - .07f))
-                : i == C_CORNER ? band_distance(g, x, y, nullptr) / (g.r * BAND_T * (slop - .07f))
+        float d = i == C_ATTACK || i == C_MPILL ? pill_distance(g, x, y) / (g.r * round_slop)
+                : i == C_CORNER ? band_distance(g, x, y, nullptr) / (g.r * BAND_T * round_slop)
                 : is_tab(i) ? std::max(fabsf(x - g.c.x) / (g.r * TAB_W * slop), fabsf(y - g.c.y) / (g.r * TAB_H * slop))
                                 : hypotf(x - g.c.x, y - g.c.y) / (g.r * slop);
         if (d < 1 && d < bd) bd = d, best = i;
@@ -740,21 +741,29 @@ int hit(const Layout &l, float x, float y, float w, float h, int *part, float sl
 }
 
 // ------------------------------------------------------------------ the moved HUD parts (render thread -> others)
+struct ArtRow {
+    float game_y0, game_y1, canvas_y0, canvas_y1;
+};
 struct Zones {
     int n[TZ_COUNT];
-    float gy[TZ_COUNT][32], cx[TZ_COUNT][32], cy[TZ_COUNT][32];  // the game's y; where on the canvas
+    float cx[TZ_COUNT][32], cy[TZ_COUNT][32];  // where on the canvas
     uint64_t ns[TZ_COUNT];
+    int art_count;
+    ArtRow art_rows[3];
     unsigned art_slot_mask;
     float art_slot_y[3];  // native direction or X / A / B icons identify slots even when empty rows are absent
     uint64_t art_slot_ns;
 };
 std::mutex g_zone_lock;
 Zones g_zones, g_build;  // (g_build: the render thread's alone)
+struct ArtPiece { float game_y, x, y; };
+std::vector<ArtPiece> g_build_arts;
 bool g_build_menu;       // (render thread) a menu window of the game's in this frame
 std::atomic<uint64_t> g_menu_ns;  // when one was last drawn
 // how far each part's art reaches past its pieces' positions, in the game's units (left, top, right, bottom)
 const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}, {0, 0, 0, 0}};
 const float ZONE_SLOP = 10.0f;
+constexpr float ART_ROW_GAP = 22.0f;
 
 // The parts are gone (a menu over the hunt, a cutscene) once no frame has drawn them for three frames' time (at
 // least 250 ms, at most 1.5 s: a slow frame now and then must not take them away under a finger)
@@ -907,24 +916,8 @@ Rect zone_rect(const Zones &z, int k, float w, float h) {
 }
 // the Hunter Arts' rows (their pieces grouped by the game's y), top to bottom: screen y ranges
 int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] = nullptr) {
-    int k = TZ_ARTS, n = z.n[k], idx[32];
-    if (!n || stale(z, k)) return 0;
-    for (int i = 0; i < n; i++) idx[i] = i;
-    std::sort(idx, idx + n, [&](int a, int b) { return z.gy[k][a] < z.gy[k][b]; });
-    int nr = 0;
-    float game_y0[3], game_y1[3];
-    float last = -1e9f;
-    for (int j = 0; j < n; j++) {
-        int i = idx[j];
-        if (z.gy[k][i] - last > 22.0f) {
-            if (nr == 3) break;
-            game_y0[nr] = game_y1[nr] = z.gy[k][i];
-            rows[nr][0] = rows[nr][1] = z.cy[k][i], nr++;
-        }
-        game_y1[nr - 1] = z.gy[k][i];
-        rows[nr - 1][0] = std::min(rows[nr - 1][0], z.cy[k][i]), rows[nr - 1][1] = std::max(rows[nr - 1][1], z.cy[k][i]);
-        last = z.gy[k][i];
-    }
+    int k = TZ_ARTS, nr = z.art_count;
+    if (!nr || stale(z, k)) return 0;
     if (slots) {
         std::fill(slots, slots + 3, -1);
         if (SDL_GetTicksNS() - z.art_slot_ns <= stale_limit()) {
@@ -934,8 +927,9 @@ int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] =
                 float best = 1e30f;
                 for (int i = 0; i < nr; i++) {
                     float y = z.art_slot_y[slot];
-                    float d = y < game_y0[i] ? game_y0[i] - y : y > game_y1[i] ? y - game_y1[i] : 0;
-                    if (d <= 22.0f && d < best) best = d, row = i;
+                    const ArtRow &r = z.art_rows[i];
+                    float d = y < r.game_y0 ? r.game_y0 - y : y > r.game_y1 ? y - r.game_y1 : 0;
+                    if (d <= ART_ROW_GAP && d < best) best = d, row = i;
                 }
                 if (row >= 0) slots[row] = slots[row] == -1 ? slot : -2;
             }
@@ -950,8 +944,11 @@ int arts_rows(const Zones &z, float w, float h, float rows[3][2], int slots[3] =
         if (!complete) for (int i = 0; i < nr; i++) slots[i] = i;
     }
     Pic p = picture(w, h);
-    for (int i = 0; i < nr; i++)
-        rows[i][0] = p.y0 + (rows[i][0] - MARGIN[k][1] - 4) * p.h / 720.0f, rows[i][1] = p.y0 + (rows[i][1] + MARGIN[k][3] + 4) * p.h / 720.0f;
+    for (int i = 0; i < nr; i++) {
+        const ArtRow &r = z.art_rows[i];
+        rows[i][0] = p.y0 + (r.canvas_y0 - MARGIN[k][1] - 4) * p.h / 720.0f;
+        rows[i][1] = p.y0 + (r.canvas_y1 + MARGIN[k][3] + 4) * p.h / 720.0f;
+    }
     return nr;
 }
 Zones zones(void) {
@@ -1603,6 +1600,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
                         ((!floating_stick_enabled(s) && hypotf(x-stick.c.x, y-stick.c.y) < stick.r*1.22f) ||
                          (s.stick_on && (hypotf(x-s.bx, y-s.by) < stick.r*1.22f ||
                                         hypotf(x-s.kx, y-s.ky) < stick.r*KNOB*1.25f)));
+        int core_part = 0;
+        if (c >= 0 && !s.menu && item.in(x, y) &&
+            (DEFS[c].buttons || c == C_ATTACK || c == C_CORNER || is_combo(c)) &&
+            hit(s.layout, x, y, s.w, s.h, &core_part, 1.0f, classic && !floating_stick_enabled(s),
+                s.menu, s.in_quest, false, control_profile(s), true) < 0)
+            c = -1;  // Let item swipes start through invisible game-button padding.
         if (classic && c == C_STICK) {
             f->kind = s.stick_on ? F_MENU : F_STICK;
             f->ctl = c;
@@ -1615,6 +1618,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
             bool held = false;
             for (const Finger &g : s.f) if (g.kind == F_RSTICK) held = true;
             f->kind = held ? F_MENU : F_RSTICK, f->ctl = c;
+        } else if (c >= 0 && !is_ammo(c) && !arrow && !on_stick && !item.in(x, y) && !target.in(x, y) && arts.in(x, y) &&
+                   hit(s.layout, x, y, s.w, s.h, &core_part, 1.0f, classic && !floating_stick_enabled(s),
+                       s.menu, s.in_quest, false, control_profile(s), true) < 0 && art_touch_begin(s, *f, z, x, y)) {
+            return true; // A live Art panel owns invisible button padding; visible controls keep priority.
         } else if (c >= 0) {
             f->kind = F_BUTTON, f->ctl = c, f->part = part;
             if (c == C_DPAD_TOGGLE) {
@@ -2213,6 +2220,7 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
                                  float offset_x, float offset_y) {
     (void)game_x;
     if (zone < 0 || zone >= TZ_COUNT) return;
+    if (zone == TZ_ARTS && !(std::isfinite(game_y) && std::isfinite(canvas_x) && std::isfinite(canvas_y))) return;
     EditorZone &z = g_build_editor[zone];
     float x = canvas_x - offset_x, y = canvas_y - offset_y;
     if (!z.bounds.ok || z.aspect != g_render_aspect || z.anchor != g_ui_anchor_aspect || z.moved != (g_touch_hud != 0)) {
@@ -2221,9 +2229,13 @@ extern "C" void touch_hud_piece(int zone, float game_x, float game_y, float canv
         z.bounds.x0 = std::min(z.bounds.x0, x), z.bounds.x1 = std::max(z.bounds.x1, x);
         z.bounds.y0 = std::min(z.bounds.y0, y), z.bounds.y1 = std::max(z.bounds.y1, y);
     }
+    if (zone == TZ_ARTS) {
+        g_build_arts.push_back({game_y, canvas_x, canvas_y});
+        return;
+    }
     if (g_build.n[zone] >= 32) return;
     int i = g_build.n[zone]++;
-    g_build.gy[zone][i] = game_y, g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
+    g_build.cx[zone][i] = canvas_x, g_build.cy[zone][i] = canvas_y;
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
@@ -2234,9 +2246,32 @@ extern "C" void touch_hud_art_slot(float game_y, int slot) {
     g_build.art_slot_y[slot] = game_y;
 }
 
+static void finish_art_frame(void) {
+    if (g_build_arts.empty()) return;
+    // Compact the whole frame so the number of pieces in the first rows cannot hide the last row.
+    std::sort(g_build_arts.begin(), g_build_arts.end(), [](const ArtPiece &a, const ArtPiece &b) { return a.game_y < b.game_y; });
+    float *x = g_build.cx[TZ_ARTS], *y = g_build.cy[TZ_ARTS];
+    x[0] = x[1] = g_build_arts.front().x, y[0] = y[1] = g_build_arts.front().y;
+    g_build.n[TZ_ARTS] = 2;  // the two corners of the whole panel, for zone_rect
+    int &n = g_build.art_count;
+    n = 0;
+    for (const ArtPiece &p : g_build_arts) {
+        x[0] = std::min(x[0], p.x), x[1] = std::max(x[1], p.x);
+        y[0] = std::min(y[0], p.y), y[1] = std::max(y[1], p.y);
+        if (!n || p.game_y - g_build.art_rows[n - 1].game_y1 > ART_ROW_GAP) {
+            if (n < 3) g_build.art_rows[n++] = {p.game_y, p.game_y, p.y, p.y};
+        } else {
+            ArtRow &r = g_build.art_rows[n - 1];
+            r.game_y1 = p.game_y;
+            r.canvas_y0 = std::min(r.canvas_y0, p.y), r.canvas_y1 = std::max(r.canvas_y1, p.y);
+        }
+    }
+}
+
 extern "C" void touch_hud_frame(void) {
     if (g_build_menu) g_menu_ns = SDL_GetTicksNS();
     g_build_menu = false;
+    finish_art_frame();
     // Each part keeps its last observed frame until it ages out. An item-only frame must not erase a ready art
     // or refresh an absent target; a frame now and then without a part must not turn its tap into a camera drag.
     bool any = false;
@@ -2252,8 +2287,8 @@ extern "C" void touch_hud_frame(void) {
         uint64_t now = SDL_GetTicksNS();
         frames++, with += any;
         if (now - since > 2000 * MS) {
-            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %d target %d)\n", with, frames, g_build.n[0],
-                    g_build.n[1], g_build.n[2]);
+            fprintf(stderr, "[touch] hud parts in %d of %d frames (item %d arts %zu target %d)\n", with, frames, g_build.n[TZ_ITEM],
+                    g_build_arts.size(), g_build.n[TZ_TARGET]);
             since = now, frames = with = 0;
         }
     }
@@ -2264,11 +2299,14 @@ extern "C" void touch_hud_frame(void) {
             memcpy(g_zones.art_slot_y, g_build.art_slot_y, sizeof g_zones.art_slot_y);
             g_zones.art_slot_ns = t;
         }
+        if (g_build.n[TZ_ARTS]) {
+            g_zones.art_count = g_build.art_count;
+            std::copy_n(g_build.art_rows, g_build.art_count, g_zones.art_rows);
+        }
         for (int k = 0; k < TZ_COUNT; k++) {
             int n = g_build.n[k];
             if (!n) continue;
             g_zones.n[k] = n;
-            memcpy(g_zones.gy[k], g_build.gy[k], n * sizeof(float));
             memcpy(g_zones.cx[k], g_build.cx[k], n * sizeof(float));
             memcpy(g_zones.cy[k], g_build.cy[k], n * sizeof(float));
             g_zones.ns[k] = t;
@@ -2276,6 +2314,7 @@ extern "C" void touch_hud_frame(void) {
             if (g_build_editor[k].bounds.ok) g_editor_zones[k] = g_build_editor[k];
         }
     }
+    g_build_arts.clear();
     memset(g_build.n, 0, sizeof g_build.n);
     g_build.art_slot_mask = 0;
     for (EditorZone &z : g_build_editor) z = {};
