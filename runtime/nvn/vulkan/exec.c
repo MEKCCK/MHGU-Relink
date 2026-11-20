@@ -3955,8 +3955,14 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             if (arts_top_now < 1e9f) arts_top = arts_top_now;
                             arts_top_now = 1e9f, arts_frame = g_present_count;
                         }
-                        if (pos_y < arts_top_now) arts_top_now = pos_y;
-                        new_pos_y = (pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
+                        // The game keeps the panel's unused rows below its 720-line canvas (y 731 / 781 after the item
+                        // box: three slots built, two of them empty). Moving the panel as a whole brought those two
+                        // empty slots into view beside the one Art equipped; they keep their place off the canvas.
+                        if (!hud_art_row_on_canvas(pos_y)) new_pos_y = 720.0f + (pos_y - 720.0f) * sy;
+                        else {
+                            if (pos_y < arts_top_now) arts_top_now = pos_y;
+                            new_pos_y = (pos_y - fminf(arts_top, arts_top_now) + ARTS_TOP) * sy;
+                        }
                     }
                     else if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
@@ -3966,7 +3972,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     new_pos_y += offset.y;
                     ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
                     if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
-                    if (arts_part) {
+                    if (arts_part && hud_art_row_on_canvas(pos_y)) {  // (rows below the canvas are not on the screen)
                         touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                         ui_art_piece = true, ui_art_game_y = pos_y;
                     }

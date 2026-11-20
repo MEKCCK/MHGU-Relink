@@ -22,6 +22,8 @@ static inline bool hud_loading_candidate(unsigned rows, uint64_t frame, uint64_t
     return rows != 0 || (seen_frame && frame >= seen_frame && frame - seen_frame <= 2);
 }
 
+static inline bool hud_art_row_on_canvas(float game_y) { return game_y >= 0.0f && game_y <= 720.0f; }
+
 // The entire item group includes the bowgun's ammo list above y 500.
 static inline int hud_touch_zone_for_frame(float x, float y, float z, bool hunt_hud, bool loading_candidate) {
     if (!hunt_hud) return HUD_TOUCH_NONE;

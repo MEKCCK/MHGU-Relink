@@ -542,6 +542,28 @@ static void production_loading_overflow_and_legacy(void) {
     assert(!ui_loading_pass && !ui_loading_rows);
 }
 
+static void art_rows_off_canvas(void) {
+    // The item box leaves the game with three Hunter Arts slots built, two empty and laid out below its 720-line
+    // canvas (measured: y 664..696 on it, 731..746 and 781..796 below it). Moving the panel to the top right must
+    // carry only the rows the game had on the canvas: the others stay below it, where the game put them.
+    assert(hud_art_row_on_canvas(0) && hud_art_row_on_canvas(696) && hud_art_row_on_canvas(720));
+    assert(!hud_art_row_on_canvas(720.5f) && !hud_art_row_on_canvas(731) && !hud_art_row_on_canvas(781));
+    assert(!hud_art_row_on_canvas(-1));
+    const float rows[] = {664, 681, 696, 731, 746, 781, 796};
+    const float systems[] = {1.0f, 0.9f};  // (16:9, and 16:10's flatter canvas)
+    for (unsigned i = 0; i < sizeof systems / sizeof *systems; i++) {
+        float sy = systems[i], arts_top = 664;  // (the topmost row on the canvas: the panel's first line)
+        for (unsigned k = 0; k < sizeof rows / sizeof *rows; k++) {
+            float y = rows[k];
+            float moved = hud_art_row_on_canvas(y) ? (y - arts_top + 41.0f) * sy  // (exec.c: ARTS_TOP)
+                                                   : 720.0f + (y - 720.0f) * sy;
+            if (hud_art_row_on_canvas(y)) assert(moved >= 0.0f && moved <= 720.0f);
+            else assert(moved > 720.0f);  // (still off the canvas: never a slot beside the equipped Arts)
+        }
+        near((696.0f - arts_top + 41.0f) * sy, sy == 1.0f ? 73.0f : 65.7f);
+    }
+}
+
 int main(void) {
     const float aspects[] = {16.0f / 9.0f, 2.2f, 21.0f / 9.0f, 32.0f / 9.0f, 16.0f / 10.0f};
     for (unsigned i = 0; i < sizeof aspects / sizeof *aspects; i++) {
@@ -594,6 +616,7 @@ int main(void) {
     production_loading_phases();
     production_loading_rejection();
     production_loading_overflow_and_legacy();
+    art_rows_off_canvas();
     puts("HUD layout regressions: OK");
     return 0;
 }
