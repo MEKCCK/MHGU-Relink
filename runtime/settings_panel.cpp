@@ -2302,21 +2302,23 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
         header(r, "graphics.header", tr("Graphics"));
         add_choice(
-            r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > 2 ? 0 : c.low_end, {tr("Off"), tr("On"), tr("Toaster")},
+            r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > 3 ? 0 : c.low_end,
+            {tr("Off"), tr("On"), tr("Toaster"), tr("Brick")},
             [](int v) {  // (it brings the resolution, the frame rate and the switches along; all can then be changed)
                 Config &d = s.draft;
                 int was = d.low_end;
                 d.low_end = v;
                 if (v) {
-                    int scale = v == LOW_END_TOASTER ? TOASTER_SCALE : LOW_END_SCALE;
-                    if (was == LOW_END_TOASTER && d.render_scale == TOASTER_SCALE) d.render_scale = scale;  // (back to On)
+                    int scale = v >= LOW_END_BRICK ? BRICK_SCALE : v == LOW_END_TOASTER ? TOASTER_SCALE : LOW_END_SCALE;
+                    int was_scale = was >= LOW_END_BRICK ? BRICK_SCALE : was == LOW_END_TOASTER ? TOASTER_SCALE : 0;
+                    if (was_scale && d.render_scale == was_scale) d.render_scale = scale;  // (a step up or down)
                     d.render_scale = std::min(d.render_scale, scale);
                     d.fps = std::min(d.fps, LOW_END_FPS);
                     d.shadows = 0;
                     d.draw_grass = 0;
                     d.bloom = 0;
-                    if (v == LOW_END_TOASTER) d.reverb = 0;
-                    else if (was == LOW_END_TOASTER) d.reverb = 1;
+                    if (v >= LOW_END_TOASTER) d.reverb = 0;
+                    else if (was >= LOW_END_TOASTER) d.reverb = 1;
                 } else {
                     if (d.render_scale <= LOW_END_SCALE) d.render_scale = 100;
                     if (d.fps == LOW_END_FPS) d.fps = 60;

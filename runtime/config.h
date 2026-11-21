@@ -201,6 +201,9 @@ enum { XP_OFF, XP_RYU, XP_ROOM, XP_MIXED };
 #define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
 #define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
 #define TOASTER_HUD_LINES 540  // Toaster: the HUD's picture at most this tall (config.c, fsr.c's output)
+#define LOW_END_BRICK 3     // LowEnd = Brick: the weakest phones and the battery above all (15%, 30 FPS, 360 lines)
+#define BRICK_SCALE 15      // what the menu's Brick sets: RenderScale (and LOW_END_FPS)
+#define BRICK_HUD_LINES 360 // Brick: the HUD's picture at most this tall (config.c, fsr.c's output)
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { HDR_GAMMA_OFF, HDR_GAMMA_22, HDR_GAMMA_24 };
 enum { HDR_TONEMAP_VANILLA, HDR_TONEMAP_NONE, HDR_TONEMAP_RENODRT };

@@ -1024,7 +1024,7 @@ const ConfigSetting g_settings[] = {
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
-    {"Display", "RenderScale", SET_INT, F(render_scale), 0, 25, 100, NULL, NULL, true, ERR_SIZE},
+    {"Display", "RenderScale", SET_INT, F(render_scale), 0, 10, 100, NULL, NULL, true, ERR_SIZE},
     {"Display", "HUDSize", SET_INT, F(hud_size), 0, 60, 100, NULL, NULL, false, ERR_SIZE},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
@@ -1068,7 +1068,7 @@ const ConfigSetting g_settings[] = {
     {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
-    {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
+    {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2,Brick|ladrillo|3", NULL, true,
      ERR_MISC},
     ON_OFF("Performance", "ShadowsOn", shadows, false),
     ON_OFF("Performance", "GrassOn", draw_grass, false),
@@ -1742,7 +1742,7 @@ void config_load(void) {
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
     // (test runs, the device's own settings left as they are: MHGU_LOWEND=0|1|2 (Toaster), MHGU_SCALE=<percent>,
     // MHGU_SHADOWS=0|1, MHGU_BLOOM=0|1, MHGU_FPS_LIMIT=<fps>; not saved)
-    if ((e = getenv("MHGU_LOWEND"))) g_config.low_end = atoi(e) < 0 ? 0 : atoi(e) > 2 ? 2 : atoi(e);
+    if ((e = getenv("MHGU_LOWEND"))) g_config.low_end = atoi(e) < 0 ? 0 : atoi(e) > 3 ? 3 : atoi(e);
     if ((e = getenv("MHGU_BLOOM"))) g_config.bloom = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_FPS_LIMIT")) && atoi(e) >= 30 && atoi(e) <= 240) g_config.fps = atoi(e), config_live_test(&g_config);
     if ((e = getenv("MHGU_SCALE")) && atoi(e) >= 10 && atoi(e) <= 100) g_config.render_scale = atoi(e);
@@ -1798,7 +1798,8 @@ void config_load(void) {
             // 720 lines or twice the 3D's, whichever is more. At a 2712x1220 screen's whole size it drew 9 times the
             // pixels of the 3D at 33%, and a phone with an Adreno 710 was slower with LowEnd than without)
             // (Toaster: at most TOASTER_HUD_LINES, for the HUD, the game's last draw and the window's copy)
-            int ow, oh, cap = g_config.low_end == LOW_END_TOASTER ? TOASTER_HUD_LINES : h * 2 > 720 ? h * 2 : 720;
+            int ow, oh, cap = g_config.low_end >= LOW_END_BRICK ? BRICK_HUD_LINES
+                           : g_config.low_end == LOW_END_TOASTER ? TOASTER_HUD_LINES : h * 2 > 720 ? h * 2 : 720;
             if (th > cap) fit_aspect(tw * cap / th, cap, aspect, &ow, &oh);
             else fit_aspect(tw, th, aspect, &ow, &oh);
             g_fsr_output[0] = (uint32_t)ow, g_fsr_output[1] = (uint32_t)oh;
