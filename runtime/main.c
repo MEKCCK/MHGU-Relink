@@ -87,6 +87,7 @@ static void boot(const char *root) {
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     grass_init();  // (the field grass draw can be skipped: runtime/hle/grass.c)
+    effects_init();  // (the game's particles can be left out: runtime/hle/effects.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
     rewardbox_init();  // (quest rewards: Send to the Item Box in one go: runtime/hle/rewardbox.c)
     urgentcredit_init();  // (Urgent quests count for all who clear them: runtime/hle/urgentcredit.c)

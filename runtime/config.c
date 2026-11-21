@@ -104,6 +104,7 @@
     .low_end = 0,                                                                                   \
     .shadows = 1,                                                                                   \
     .draw_grass = 1,                                                                               \
+    .effects = 1,                                                                                  \
     .full_textures = 0,                                                                            \
     .bloom = 1,                                                                                     \
     .adreno_fix = 0,                                                                                \
@@ -1073,6 +1074,7 @@ const ConfigSetting g_settings[] = {
      ERR_MISC},
     ON_OFF("Performance", "ShadowsOn", shadows, false),
     ON_OFF("Performance", "GrassOn", draw_grass, false),
+    ON_OFF("Performance", "Effects", effects, false),
     ON_OFF("Graphics", "FullTextures", full_textures, true),
     ON_OFF("Performance", "BloomOn", bloom, false),
     {"Performance", "AdrenoFix", SET_CHOICE, F(adreno_fix), 0, 0, 0, "Auto,Off", NULL, true, ERR_MISC},

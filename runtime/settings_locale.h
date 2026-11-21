@@ -415,6 +415,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Toaster", "Tostadora", "极限省电"},
         {"Brick", "Ladrillo", "最低配"},
         {"Full-size textures", "Texturas completas", "完整纹理"},
+        {"Effects", "Efectos", "粒子特效"},
+        {"Leaves out the game's particles: the hits' sparks, the blood, the fire and the breath, the dust, the rain and the snow, and the flashes of the monsters' and the Hunter Arts' attacks. It runs faster where there are many. A monster's attack often warns through its effect: with this off the warning is gone too.", "Quita las partículas del juego: las chispas de los golpes, la sangre, el fuego y el aliento, el polvo, la lluvia y la nieve, y los destellos de los ataques de los monstruos y de las Artes de cazador. Corre más rápido donde hay muchas. El ataque de un monstruo suele avisar con su efecto: con esto apagado, el aviso también desaparece.", "不绘制游戏的粒子：命中火花、血、火焰与吐息、尘土、雨雪，以及怪物与狩技攻击的特效闪光。特效多的地方更快。怪物的攻击常靠特效预警，关掉后这部分提示也会一起消失。"},
         {"On a phone with little memory, keep the 3D textures at their full size anyway: sharper up close, and it takes much more memory, so the game may be closed. It needs a restart.", "En un celular con poca memoria, mantiene las texturas 3D a su tamaño completo de todos modos: más nítidas de cerca, pero ocupa mucha más memoria, así que el juego puede cerrarse. Necesita reiniciar.", "内存较小的手机上仍保留 3D 纹理的完整尺寸：贴近看更清晰，但占用内存大得多，游戏可能被系统关闭。需重启。"},
         {"On (FSR)", "Sí (FSR)", "开 (FSR)"},
         {"Adreno fix", "Corrección de Adreno", "Adreno 修正"},

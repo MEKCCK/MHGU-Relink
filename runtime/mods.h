@@ -30,6 +30,7 @@ const char *mods_exefs_file(const char *name, char *path, size_t n, bool (*skip)
 void forge_init(void);  // Forge plugins from the mods' RomFS (runtime/forge.c): before the game starts
 void hpscale_init(void);  // large monster HP by the number of hunters (runtime/hle/hpscale.c)
 void grass_init(void);    // [Performance] GrassOn: the field grass draw can be skipped (runtime/hle/grass.c)
+void effects_init(void);  // [Performance] Effects: the game's particles are not drawn (runtime/hle/effects.c)
 bool hpscale_village_from_hub(uint32_t quest);  // a Village quest started from the Hub or the Pub (hpscale.c)
 void villagehub_init(void);  // Village quests at the Hub / Pub counter (runtime/hle/villagehub.c)
 void rewardbox_init(void);  // the quest rewards screen: sending the rewards to the item box faster (runtime/hle/rewardbox.c)

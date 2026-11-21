@@ -169,6 +169,7 @@ typedef struct {
     // (every field's default is in config.c's CONFIG_DEFAULT_VALUES, by position: a new field needs one there)
     int shadows;              // [Performance] Shadows: 0 none drawn (nvn/vulkan/exec.c shadow_skipped)
     int draw_grass;           // [Performance] GrassOn: 0 the scenery grass draw is skipped (hle/grass.c)
+    int effects;              // [Performance] Effects: 0 the game's particles are not drawn (hle/effects.c)
     int full_textures;        // [Graphics] FullTextures: on a phone under 5 GB, keep the 3D textures' largest level anyway
                               // (nvn/vulkan/textures.c; at the player's risk: the app may be closed for memory)
     int adreno_fix;           // [Performance] AdrenoFix: 0 Auto, 1 Off (nvn/vulkan/device.c msaa_floor)
@@ -363,6 +364,7 @@ int config_live_show_stats(void);       // [Performance] ShowStats
 int config_live_pause_background(void); // [Application] PauseInBackground
 int config_live_shadows(void);          // [Performance] Shadows
 int config_live_hud_size(void);         // [Display] HUDSize: the hunt HUD's size, percent (60..100)
+int config_live_effects(void);          // [Performance] Effects: 0 no particles drawn
 int config_grass_draw(void);            // [Performance] GrassOn
 int config_live_bloom(void);            // [Performance] Bloom
 int config_live_reverb(void);           // [Audio] Reverb

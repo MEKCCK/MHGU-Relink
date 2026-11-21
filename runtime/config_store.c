@@ -30,7 +30,7 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch_combo[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS], live_touch_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS],
                      live_touch_cam, live_touch_opacity, live_lock_on = {1}, live_persistent_lock_on,
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1},
-                     live_shadows = {1}, live_bloom = {1}, live_reverb = {1}, live_hud_size = {100},
+                     live_shadows = {1}, live_bloom = {1}, live_reverb = {1}, live_hud_size = {100}, live_effects = {1},
                      live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako, live_ldn_direct, live_bonus,
                      audio_output, live_hold_send = {1};
 static SDL_AtomicInt live_kerning, live_bold;
@@ -134,6 +134,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->pause_background != saved.pause_background) SDL_SetAtomicInt(&live_pause_bg, c->pause_background);
     if (all || c->shadows != saved.shadows) SDL_SetAtomicInt(&live_shadows, c->shadows);
     if (all || c->hud_size != saved.hud_size) SDL_SetAtomicInt(&live_hud_size, c->hud_size);
+    if (all || c->effects != saved.effects) SDL_SetAtomicInt(&live_effects, c->effects);
     if (all || c->draw_grass != saved.draw_grass) SDL_SetAtomicInt(&grass_switch, c->draw_grass);
     if (all || c->bloom != saved.bloom) SDL_SetAtomicInt(&live_bloom, c->bloom);
     if (all || c->reverb != saved.reverb) SDL_SetAtomicInt(&live_reverb, c->reverb);
@@ -339,6 +340,7 @@ int config_live_show_stats(void) { return SDL_GetAtomicInt(&live_show_stats); }
 int config_live_pause_background(void) { return SDL_GetAtomicInt(&live_pause_bg); }
 int config_live_shadows(void) { return SDL_GetAtomicInt(&live_shadows); }
 int config_live_hud_size(void) { return SDL_GetAtomicInt(&live_hud_size); }
+int config_live_effects(void) { return SDL_GetAtomicInt(&live_effects); }
 int config_grass_draw(void) { return SDL_GetAtomicInt(&grass_switch); }
 int config_live_bloom(void) { return SDL_GetAtomicInt(&live_bloom); }
 int config_live_reverb(void) { return SDL_GetAtomicInt(&live_reverb); }
