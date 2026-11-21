@@ -461,8 +461,6 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_h);
     SAME(render_scale);
     SAME(hud_size);
-    SAME(stats_x);
-    SAME(stats_y);
     SAME(low_end);
     SAME(effects);
     SAME(upscale_filter);
@@ -2285,17 +2283,6 @@ std::vector<Row> main_rows() {
                        [](int v) { s.draft.hud_size = sizes[v]; }, ini("HUDSize"));
             if (sizes[pick] != c.hud_size) r.back().value = std::to_string(c.hud_size) + "%";
             r.back().help = tr("The whole hunting HUD, smaller toward its corners: the clock, the bars, the item bar, the Hunter Arts, the map and the target camera. It applies at once.");
-        }
-        {   // where the frame rate and temperature plate sits ([Performance] StatsX / StatsY); it can also be dragged
-            add_number(r, "statsx", tr("Frame rate panel, across (%)"),
-                       []() { return s.draft.stats_x * 100.0; },
-                       [](double v) { s.draft.stats_x = (float)(v / 100.0); }, 0, 100, 5, true,
-                       ini("StatsX"));
-            add_number(r, "statsy", tr("Frame rate panel, down (%)"),
-                       []() { return s.draft.stats_y * 100.0; },
-                       [](double v) { s.draft.stats_y = (float)(v / 100.0); }, 0, 100, 5, true,
-                       ini("StatsY"));
-            r[r.size() - 2].help = tr("Where the frame rate and temperature plate sits. It can also be dragged while playing, and where it is left is saved.");
         }
         break;
     case 1:
