@@ -158,6 +158,7 @@ typedef struct {
     float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)
     float touch_opacity;      // [Touch] Opacity: of the controls, 0.2 .. 1
     int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (25..100)
+    int hud_size;             // [Display] HUDSize: the whole hunt HUD's size, percent (60..100; 100 leaves it as it is)
     int touch_vibration;      // [Touch] Vibration: a short tick when a touch control is pressed (runtime/haptics.c)
     int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
     int show_stats;           // [Performance] ShowStats: the frame rate and the phone's temperature on screen (perfstats)
@@ -356,6 +357,7 @@ int config_live_phone_rumble(void);     // [Controls] PhoneRumble
 int config_live_show_stats(void);       // [Performance] ShowStats
 int config_live_pause_background(void); // [Application] PauseInBackground
 int config_live_shadows(void);          // [Performance] Shadows
+int config_live_hud_size(void);         // [Display] HUDSize: the hunt HUD's size, percent (60..100)
 int config_grass_draw(void);            // [Performance] GrassOn
 int config_live_bloom(void);            // [Performance] Bloom
 int config_live_reverb(void);           // [Audio] Reverb

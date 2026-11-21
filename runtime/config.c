@@ -58,6 +58,7 @@
     .ui_anchor = UI_CENTER,                                                                         \
     .fill_screen = 1,                                                                               \
     .render_scale = 100,                                                                            \
+    .hud_size = 100,                                                                                \
     /* [Anti-aliasing] */                                                                           \
     .msaa = 1,                                                                                      \
     .fxaa = CONFIG_DEFAULT_FXAA,                                                                    \
@@ -1024,6 +1025,7 @@ const ConfigSetting g_settings[] = {
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
     {"Display", "RenderScale", SET_INT, F(render_scale), 0, 25, 100, NULL, NULL, true, ERR_SIZE},
+    {"Display", "HUDSize", SET_INT, F(hud_size), 0, 60, 100, NULL, NULL, false, ERR_SIZE},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,

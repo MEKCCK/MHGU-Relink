@@ -459,6 +459,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_w);
     SAME(render_h);
     SAME(render_scale);
+    SAME(hud_size);
     SAME(low_end);
     SAME(shadows);
     SAME(draw_grass);
@@ -2264,6 +2265,18 @@ std::vector<Row> main_rows() {
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
+        {   // the whole hunting HUD smaller, every part toward its corner (nvn/vulkan/exec.c); 100 leaves it as it is
+            static const int sizes[] = {100, 95, 90, 85, 80, 75, 70, 65, 60};
+            int pick = 0;
+            for (int i = 1; i < 9; i++) {
+                int d = sizes[i] - c.hud_size, b = sizes[pick] - c.hud_size;
+                if (d * d < b * b) pick = i;
+            }
+            add_choice(r, "hudsize", tr("HUD size"), pick, {"100%", "95%", "90%", "85%", "80%", "75%", "70%", "65%", "60%"},
+                       [](int v) { s.draft.hud_size = sizes[v]; }, ini("HUDSize"));
+            if (sizes[pick] != c.hud_size) r.back().value = std::to_string(c.hud_size) + "%";
+            r.back().help = tr("The whole hunting HUD, smaller toward its corners: the clock, the bars, the item bar, the Hunter Arts, the map and the target camera. It applies at once.");
+        }
         break;
     case 1:
         header(r, "audio.header", tr("Audio"));

@@ -3682,7 +3682,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         menulearn_piece((const float *)G2H((uint32_t)r.addr));
     }
     if (screen_pass && !st.ds[0] &&
-        (fabsf(g_render_aspect - 16.0f / 9.0f) > 0.01f || touch_visible())) {  // (touch controls: their HUD parts at 16:9 too)
+        (fabsf(g_render_aspect - 16.0f / 9.0f) > 0.01f || touch_visible() ||
+         config_live_hud_size() != 100)) {  // (touch controls: their HUD parts at 16:9 too; [Display] HUDSize too)
         if (size >= 64) {
             float m[16];
             memcpy(m, G2H((uint32_t)r.addr), 64);
@@ -3751,6 +3752,14 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool hunt_hud = presence_in_quest() && !ui_menu_pass && !ui_results_pass && !ui_results_last && !ui_loading_pass && !loading_candidate &&
                                 !ui_title_pass && !ui_meownster_pass;
                 int touch_zone = hud_touch_zone_for_frame(pos_x, pos_y, pos_z, hunt_hud, loading_candidate);
+                // [Display] HUDSize: the hunt HUD smaller, every part toward its own corner (hud_layout.h). Read once a
+                // frame, so every piece of a part shrinks by the same factor; 100 leaves the HUD exactly as it was.
+                int hud_part = -1;
+                float hud_g = 1.0f;
+                if (hunt_hud) {
+                    int hs = config_live_hud_size();
+                    if (hs > 0 && hs < 100) hud_g = (float)hs / 100.0f;
+                }
                 bool item_bar_part = false, arts_part = false, target_part = false, map_part = false;
                 bool grouped = false;
                 int vgroup = 1;
@@ -3858,7 +3867,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             anchor = ANCHOR_RIGHT;
                             vanchor = V_BOTTOM;
                             // the item bar is drawn through a scissor sized for the original layout; it cut the moved bar
-                            ui_relax_scissor = s < 1.0f || sy < 1.0f || (g_touch_hud && hunt_hud);
+                            ui_relax_scissor = s < 1.0f || sy < 1.0f || (g_touch_hud && hunt_hud) || hud_g != 1.0f;
                             // Touch controls on the screen (runtime/touch.cpp): the bar goes to the bottom middle, out of
                             // the right thumb's buttons, where a tap on it uses the item and a swipe turns it
                             item_bar_part = hunt_hud && pos_y >= 500.0f;
@@ -3967,6 +3976,21 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     else if (vanchor == V_TOP) new_pos_y = pos_y * sy;
                     else if (vanchor == V_BOTTOM) new_pos_y = 720.0f - (720.0f - pos_y) * sy;
                     else new_pos_y = 360.0f + (pos_y - 360.0f) * sy;
+                    if (hud_g != 1.0f) {  // ([Display] HUDSize: the piece pinned to its part's corner, its place scaled)
+                        int part = map_part ? HUD_SIZE_PART_MAP : target_part ? HUD_SIZE_PART_TARGET
+                                 : arts_part ? HUD_SIZE_PART_ARTS : item_bar_part ? HUD_SIZE_PART_ITEM
+                                 : fabsf(pos_z - 103.0f) < 0.5f ? HUD_SIZE_PART_STATUS : -1;
+                        // (the Hunter Arts' rows below the 720 line stay where the game keeps them: off the canvas)
+                        if (part >= 0 && !(part == HUD_SIZE_PART_ARTS && !hud_art_row_on_canvas(pos_y))) {
+                            float ax, ay;
+                            hud_size_anchor(part, (part == HUD_SIZE_PART_ITEM && item_bar_move) ||
+                                                      (part == HUD_SIZE_PART_ARTS && arts_move),
+                                            anchor_left, anchor_right, &ax, &ay);
+                            new_pos_x = hud_size_place(new_pos_x, ax, hud_g);
+                            new_pos_y = hud_size_place(new_pos_y, ay, hud_g);
+                            hud_part = part;
+                        }
+                    }
                     HudTouchOffset offset = hud_touch_offset(touch_zone, touch_visible(), g_touch_zone_dx, g_touch_zone_dy, s, sy);
                     new_pos_x += offset.x;
                     new_pos_y += offset.y;
@@ -3999,16 +4023,17 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             st.scissor[0][1], st.scissor[0][2], st.scissor[0][3]);
                 }
 
+                float hk = hud_part >= 0 ? hud_g : 1.0f;  // ([Display] HUDSize: the piece's own size shrinks with it)
                 if (backdrop_fill) {
-                    float k = 1.0f / s;
+                    float k = 1.0f / (s * hk);
                     m[1] *= k; m[5] *= k; m[9] *= k;
                 } else if (backdrop_tall) {
-                    float k = 1.0f / sy;
+                    float k = 1.0f / (sy * hk);
                     m[0] *= k; m[4] *= k; m[8] *= k;
                 } else {
-                    m[0] *= s; m[4] *= s; m[8] *= s;
+                    m[0] *= s * hk; m[4] *= s * hk; m[8] *= s * hk;
                 }
-                if (!backdrop_tall) { m[1] *= sy; m[5] *= sy; m[9] *= sy; }
+                if (!backdrop_tall) { m[1] *= sy * hk; m[5] *= sy * hk; m[9] *= sy * hk; }
                 m[12] = new_pos_x;
                 m[13] = new_pos_y;
 

@@ -24,6 +24,25 @@ static inline bool hud_loading_candidate(unsigned rows, uint64_t frame, uint64_t
 
 static inline bool hud_art_row_on_canvas(float game_y) { return game_y >= 0.0f && game_y <= 720.0f; }
 
+// [Display] HUDSize: the whole hunt HUD smaller, every part toward the corner it is laid out from (nvn/vulkan/exec.c).
+// A part stays pinned at that corner of the game's 1280x720 canvas and its pieces shrink toward it. With the touch
+// controls' MoveHUD the item bar, the Hunter Arts and the target camera are moved first, and their corner follows.
+enum { HUD_SIZE_PART_STATUS, HUD_SIZE_PART_ITEM, HUD_SIZE_PART_ARTS, HUD_SIZE_PART_TARGET, HUD_SIZE_PART_MAP };
+
+static inline void hud_size_anchor(int part, bool moved, float anchor_left, float anchor_right, float *x, float *y) {
+    switch (part) {
+    case HUD_SIZE_PART_ITEM: *x = moved ? 640.0f : anchor_right, *y = 720.0f; break;
+    case HUD_SIZE_PART_ARTS: *x = moved ? 1280.0f : anchor_right, *y = moved ? 0.0f : 720.0f; break;
+    case HUD_SIZE_PART_TARGET: *x = 1280.0f, *y = 0.0f; break;
+    case HUD_SIZE_PART_MAP: *x = anchor_right, *y = 0.0f; break;
+    default: *x = anchor_left, *y = 0.0f; break;  // the status HUD: the clock, the bars, the gauges, the party
+    }
+}
+
+// A place after the HUD size: pinned to the part's corner, its distance from it scaled by that size (0.6 .. 1.0).
+// A manual offset is added after this, so a part moved to the left edge stays that far from it, only smaller.
+static inline float hud_size_place(float v, float corner, float size) { return corner + (v - corner) * size; }
+
 // The entire item group includes the bowgun's ammo list above y 500.
 static inline int hud_touch_zone_for_frame(float x, float y, float z, bool hunt_hud, bool loading_candidate) {
     if (!hunt_hud) return HUD_TOUCH_NONE;
