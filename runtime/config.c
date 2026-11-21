@@ -1790,6 +1790,15 @@ void config_load(void) {
     } else if (render_auto) {
         // RenderScale: a smaller 3D picture (phones), stretched to the screen; not with FSR (FSRQuality sets that)
         int s = g_config.fsr ? 100 : g_config.render_scale;
+#ifndef __ANDROID__  // (a PC screen is not a phone's: Low-end mode asks for lines, not a percentage of a 4K panel)
+        if (g_config.low_end) {
+            int lines = g_config.low_end >= LOW_END_BRICK ? 360 : g_config.low_end == LOW_END_TOASTER ? 540 : 720;
+            int low = g_config.low_end >= LOW_END_BRICK ? 15 : g_config.low_end == LOW_END_TOASTER ? 25 : 33;
+            int pct = (int)((float)lines * 100.0f / (float)th + 0.5f);
+            pct = pct < low ? low : pct > 100 ? 100 : pct;
+            if (pct < s) s = pct;
+        }
+#endif
         int least = 32000 / tw + 1 > 18000 / th + 1 ? 32000 / tw + 1 : 18000 / th + 1;  // (320x180)
         if (s < 100 && s < least) {
             s = least < 100 ? least : 100;
