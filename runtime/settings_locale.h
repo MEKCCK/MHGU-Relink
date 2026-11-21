@@ -414,6 +414,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Reverb", "Reverberación", "混响"},
         {"Toaster", "Tostadora", "极限省电"},
         {"Brick", "Ladrillo", "最低配"},
+        {"Full-size textures", "Texturas completas", "完整纹理"},
+        {"On a phone with little memory, keep the 3D textures at their full size anyway: sharper up close, and it takes much more memory, so the game may be closed. It needs a restart.", "En un celular con poca memoria, mantiene las texturas 3D a su tamaño completo de todos modos: más nítidas de cerca, pero ocupa mucha más memoria, así que el juego puede cerrarse. Necesita reiniciar.", "内存较小的手机上仍保留 3D 纹理的完整尺寸：贴近看更清晰，但占用内存大得多，游戏可能被系统关闭。需重启。"},
         {"On (FSR)", "Sí (FSR)", "开 (FSR)"},
         {"Adreno fix", "Corrección de Adreno", "Adreno 修正"},
         {"The size of the 3D picture, in percent of the screen's. Lower is faster and softer.", "El tamaño de la imagen 3D, en porcentaje de la pantalla. Más bajo es más rápido y menos nítido.", "3D 画面尺寸，按屏幕的百分比。越低越快、越模糊。"},

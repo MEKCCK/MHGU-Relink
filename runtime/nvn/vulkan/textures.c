@@ -244,6 +244,25 @@ static bool low_memory_textures(void) {
     return on;
 }
 
+// A phone below 3.5 GB: the decoded 3D textures lose their largest two levels (a sixteenth of the memory left), and the
+// menus, which have no mipmaps, stay sharp all the same. (Windows: never - a PC's memory is shared with everything else.)
+static bool very_low_memory_textures(void) {
+    static int on = -1;
+    if (on < 0) {
+#ifdef _WIN32
+        on = 0;
+#else
+        uint64_t ram = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+        on = ram < 7ull << 29;  // 3.5 GB
+        if (on) LOG("[vk] %llu MB of memory: 3D textures without their largest two levels\n", (unsigned long long)(ram >> 20));
+#endif
+    }
+    return on;
+}
+
+// [Graphics] FullTextures is offered (in the settings menu) only on a phone where the textures would be cut anyway.
+bool vk_low_memory_device(void) { return low_memory_textures(); }
+
 // ---- resolution scaling (config.c: g_rscale above 1)
 // The game renders at g_render_size; its screen-sized render targets are made g_rscale times larger here, and exec.c
 // maps the guest's pixel units onto them (viewports, scissors, copies, the shaders' texel coordinates and FragCoord
@@ -331,10 +350,15 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                 b->bcn_tb = bcn == BCN_BC4U || bcn == BCN_BC4S ? 1 : 2;
             }
             if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
-                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && (low_memory_textures() || g_config.low_end))
-                b->mip_skip = g_config.low_end && levels >= 5 && (tw >= 512 || th >= 512) ? 2
-                            : g_config.low_end == LOW_END_TOASTER && levels >= 5 ? 2  // (Toaster: the 256s too)
-                                                                                 : 1;
+                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 &&
+                (low_memory_textures() || very_low_memory_textures() || g_config.low_end)) {
+                // A phone's memory or Low-end mode: the largest level goes. Two levels where the picture is big enough
+                // (or Toaster / Brick, which also cut the 256s) and there are levels to spare. FullTextures keeps the one
+                // the memory would drop; it never overrides Low-end mode.
+                bool very = very_low_memory_textures() && !g_config.full_textures;
+                bool big = tw >= 512 || th >= 512;
+                b->mip_skip = (g_config.low_end || very) ? (levels >= 5 && ((g_config.low_end && big) || very || g_config.low_end >= LOW_END_TOASTER) ? 2 : 1) : 0;
+            }
             static int nlog;
             if (nlog++ < 4) LOG("[vk] BC format %d not supported by the GPU: decoded on the CPU\n", mf.vf);
         } else if (astc && fi && fi->bpb == 16) {  // decoded on the CPU into an RGBA8 image of the same colour space

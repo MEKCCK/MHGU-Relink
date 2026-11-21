@@ -3,6 +3,7 @@
 #include "android_files.h"
 #include "binding_view.h"
 #include "config.h"
+extern "C" bool vk_low_memory_device(void);  // (nvn/vulkan/textures.c)
 #include "menu_confirm.h"
 #include "settings_locale.h"
 #include "settings_icons.h"
@@ -461,6 +462,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_scale);
     SAME(hud_size);
     SAME(low_end);
+    SAME(full_textures);
     SAME(shadows);
     SAME(draw_grass);
     SAME(bloom);
@@ -2329,7 +2331,11 @@ std::vector<Row> main_rows() {
                 }
             },
             ini("LowEnd"));
-        r.back().help = tr("For weak phones: turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change all of them. Toaster: everything for speed and the battery before looks: 25%, 30 FPS, no reverb, and a lighter HUD and textures still.");
+        r.back().help = tr("For weak phones: turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change all of them. Toaster: everything for speed and the battery before looks: 25%, 30 FPS, no reverb, and a lighter HUD and textures still. Brick: the same lower still, 15% and a 360-line HUD, for the weakest phones and the longest hunts on the battery.");
+        if (vk_low_memory_device()) {  // (only where the textures are cut anyway: a phone under 5 GB)
+            add_bool(r, "fulltextures", tr("Full-size textures"), &c.full_textures, ini("FullTextures"));
+            r.back().help = tr("On a phone with little memory, keep the 3D textures at their full size anyway: sharper up close, and it takes much more memory, so the game may be closed. It needs a restart.");
+        }
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};

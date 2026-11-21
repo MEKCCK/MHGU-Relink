@@ -169,6 +169,8 @@ typedef struct {
     // (every field's default is in config.c's CONFIG_DEFAULT_VALUES, by position: a new field needs one there)
     int shadows;              // [Performance] Shadows: 0 none drawn (nvn/vulkan/exec.c shadow_skipped)
     int draw_grass;           // [Performance] GrassOn: 0 the scenery grass draw is skipped (hle/grass.c)
+    int full_textures;        // [Graphics] FullTextures: on a phone under 5 GB, keep the 3D textures' largest level anyway
+                              // (nvn/vulkan/textures.c; at the player's risk: the app may be closed for memory)
     int adreno_fix;           // [Performance] AdrenoFix: 0 Auto, 1 Off (nvn/vulkan/device.c msaa_floor)
     int bloom;                // [Performance] Bloom: 0 the bloom and depth of field chain is left out (nvn/vulkan/exec.c lowend_skipped)
     int reverb;               // [Audio] Reverb: 0 the game's reverb effects let the sound through dry (services/audio.c)
