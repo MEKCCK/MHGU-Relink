@@ -72,6 +72,7 @@
     .fsr_animsurf = 1,                                                                              \
     .fsr_upscaler = FSR_UP_3,                                                                       \
     /* [Graphics] */                                                                                \
+    .stats_x = 0.62f, .stats_y = 0.01f,                                                            \
     .draw_distance = 1.0f,                                                                          \
     .smooth_gradients = 0,                                                                          \
     .fix_kerning = 1,                                                                               \
@@ -1046,6 +1047,8 @@ const ConfigSetting g_settings[] = {
     {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
+    {"Performance", "StatsX", SET_FLOAT, F(stats_x), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_MISC},
+    {"Performance", "StatsY", SET_FLOAT, F(stats_y), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_MISC},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FixKerning", fix_kerning, false),
     ON_OFF("Graphics", "BoldText", bold_text, false),

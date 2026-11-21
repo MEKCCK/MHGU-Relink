@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- multijugador (Local Play por IP / hubs) -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Ajustes -> Comprobar actualizaciones: the APK the player chose to download is installed from the notifications -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />

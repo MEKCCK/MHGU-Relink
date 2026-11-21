@@ -33,6 +33,9 @@ extern "C" volatile uint64_t g_present_count;  // (runtime/ui.c)
 
 namespace {
 
+float g_rect[4];  // (the plate's last drawn rectangle, image pixels: the drag's hit test)
+bool g_drag;
+float g_grab[2];
 #ifdef __ANDROID__
 std::atomic<int> g_temp{INT_MIN};    // the battery's temperature, tenths of a degree C (INT_MIN: not known)
 std::atomic<int> g_thermal{-1};      // PowerManager.THERMAL_STATUS_*: 0 none .. 6 shutdown (-1: not known)
@@ -194,8 +197,13 @@ extern "C" void perfstats_draw(float w, float h) {
         fs *= k, padx *= k, pady *= k, tw *= k;
     }
     float pw = tw + 2 * padx, ph = fs + 2 * pady + 2 * line * 1.7f;
-    float x0 = pw <= hi - lo ? std::clamp(.62f * w - pw * .5f, lo, hi - pw) : (lo + hi - pw) * .5f;
-    ImVec2 p0(x0, .01f * h), p1(x0 + pw, .01f * h + ph);
+    // where it was dragged to ([Performance] StatsX / StatsY, 0..1 of the screen), kept on it; the default is the gap
+    // at the top between the health bar's end and the target camera's icons
+    float x0 = g_config.stats_x * w - pw * .5f, y0 = g_config.stats_y * h;
+    x0 = std::clamp(x0, 0.0f, w > pw ? w - pw : 0.0f);
+    y0 = std::clamp(y0, 0.0f, h > ph ? h - ph : 0.0f);
+    ImVec2 p0(x0, y0), p1(x0 + pw, y0 + ph);
+    g_rect[0] = x0, g_rect[1] = y0, g_rect[2] = p0.x + pw, g_rect[3] = p0.y + ph;
     ImDrawList *dl = ImGui::GetBackgroundDrawList();  // (under the port's menus and notices, as the touch controls)
     dl->AddRectFilled(p0, p1, WINE);
     dl->AddRect(p0, p1, IM_COL32(0, 0, 0, 255), 0, 0, line);
@@ -209,4 +217,41 @@ extern "C" void perfstats_draw(float w, float h) {
         dl->AddText(font, fs, ImVec2(x, y), runs[i].col, runs[i].text);
         x += font->CalcTextSizeA(fs, FLT_MAX, 0, runs[i].text).x;
     }
+}
+
+// [Performance] StatsX / StatsY: the plate is dragged where it is wanted (a press on it, the drag, the release), and
+// where it is left is saved. The settings' ShowStats row says so. Screen image pixels on both sides: the window's
+// logical size is scaled by the pixel density, as ImGui's display size is.
+extern "C" bool perfstats_drag_event(const SDL_Event *e) {
+    SDL_Window *win;
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: win = SDL_GetWindowFromID(e->button.windowID); break;
+    case SDL_EVENT_MOUSE_MOTION: win = SDL_GetWindowFromID(e->motion.windowID); break;
+    default: return false;
+    }
+    if (!perfstats_visible() || !win || !g_rect[2]) return false;
+    int lw = 0, lh = 0, pw = 0, ph = 0;
+    SDL_GetWindowSize(win, &lw, &lh);
+    SDL_GetWindowSizeInPixels(win, &pw, &ph);
+    if (lw <= 0 || lh <= 0 || pw <= 0 || ph <= 0) return false;
+    float kx = (float)pw / (float)lw, ky = (float)ph / (float)lh;
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        if (e->button.button != SDL_BUTTON_LEFT) return false;
+        float x = e->button.x * kx, y = e->button.y * ky;
+        if (x < g_rect[0] || x > g_rect[2] || y < g_rect[1] || y > g_rect[3]) return false;
+        g_drag = true, g_grab[0] = x - g_rect[0], g_grab[1] = y - g_rect[1];
+        return true;
+    }
+    if (!g_drag) return false;
+    if (e->type == SDL_EVENT_MOUSE_MOTION) {
+        float x0 = e->motion.x * kx - g_grab[0], y0 = e->motion.y * ky - g_grab[1];
+        float w = g_rect[2] - g_rect[0], h = g_rect[3] - g_rect[1];
+        g_config.stats_x = std::clamp((x0 + w * .5f) / (float)pw, 0.0f, 1.0f);
+        g_config.stats_y = std::clamp(y0 / (float)ph, 0.0f, 1.0f);
+        return true;
+    }
+    g_drag = false;
+    char err[200];
+    if (!config_save(&g_config, err, sizeof err)) LOG("[stats] the plate's place was not saved: %s\n", err);
+    return true;
 }

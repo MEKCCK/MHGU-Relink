@@ -2732,6 +2732,9 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Sends the game's log to the app you choose, for whoever is helping you with a problem.");
         action(r, "log.graphics", tr("Record graphics diagnostic"), []() { vk_trace_request(); });
         r.back().help = tr("Close Settings to record rendering state for six game frames, then use Share log. Recording stops automatically.");
+#ifdef __ANDROID__  // (phones: the APK is got from the project's releases; a PC updates with its own updater)
+        action(r, "checkupdates", tr("Check for updates"), []() { ui_request_check_updates(); });
+#endif
         action(r, "changelog", tr("Changelog"), []() { ui_request_changelog(); });
         r.back().help = tr("Read the changes in this version.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });

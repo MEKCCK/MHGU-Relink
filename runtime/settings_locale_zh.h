@@ -430,6 +430,7 @@ static inline const char *settings_text_zh(int language, const char *english) {
          "适用于性能较弱的手机：关闭泛光、景深和阴影，使用更轻量的纹理，并在较小的 3D 画面上保持 HUD 清晰。此模式也会设置 3D 分辨率和帧率，均可自行调整。“极限省电”会优先考虑速度和续航：3D 分辨率 25%、30 FPS、关闭混响，并进一步简化 HUD 和纹理；“最低配”再低一档：15%、30 FPS、HUD 最多 360 行。"},
         {"The size of the 3D picture, in percent of the screen's. Lower is faster and softer.",
          "3D 画面的尺寸占屏幕的比例。比例越低，运行越快，但画面越模糊。"},
+        {"Check for updates", "检查更新"},
         {"HUD size", "HUD 大小"},
         {"The whole hunting HUD, smaller toward its corners: the clock, the bars, the item bar, the Hunter Arts, the map and the target camera. It applies at once.",
          "整个狩猎 HUD 向各自角落缩小：时钟、状态条、道具栏、狩技、地图和目标相机。立即生效。"},

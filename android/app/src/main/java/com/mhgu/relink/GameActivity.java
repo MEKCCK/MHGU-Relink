@@ -284,6 +284,15 @@ public class GameActivity extends SDLActivity {
                 .putExtra(EXTRA_LANGUAGE, language).putExtra(LicensesActivity.EXTRA_CHANGELOG, true));
     }
 
+    /** Ajustes -> Comprobar actualizaciones: the newest release on GitHub, offered, never forced. */
+    public static void checkUpdates() {
+        SDLActivity activity = mSingleton;
+        if (activity instanceof GameActivity) {
+            final GameActivity g = (GameActivity) activity;
+            g.runOnUiThread(() -> UpdateChecker.check(g));
+        }
+    }
+
     /** Ajustes -> Importar partida. */
     public static void showSaveImport(int language) {
         SDLActivity activity = mSingleton;

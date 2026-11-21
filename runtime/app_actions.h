@@ -7,6 +7,7 @@ void ui_capture_launch_args(int argc, char **argv);
 bool ui_request_touch_icon(void);  // false while an image request/result is pending, or if unsupported
 int ui_take_touch_icon(char hash[65]);  // 0 pending, 1 imported SHA-256, -1 cancelled, -2 failed
 #ifdef __ANDROID__
+void ui_request_check_updates(void);  // (Android: the app asks GitHub for a newer release)
 void ui_request_licenses(void);     // The licenses' and the game folder's screens, opened on the host thread too
 void ui_request_changelog(void);
 void ui_request_game_folder(void);
