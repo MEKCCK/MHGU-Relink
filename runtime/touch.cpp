@@ -28,6 +28,8 @@
 // Shown while no controller is connected ([Touch] Controls = Auto), always (On) or never (Off).
 #include <SDL3/SDL.h>
 
+#include "perfstats.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cfloat>
@@ -1425,6 +1427,8 @@ void edit_end(State &s, bool keep, bool = true) {
     install_common_layout(s, layout);
 }
 const int ZONE_SEL = 100;  // (s.sel / a finger's ctl: a HUD part, ZONE_SEL + its TZ_*)
+const int STATS_SEL = ZONE_SEL + TZ_COUNT;  // ([Performance] ShowStats: the frame rate and temperature plate)
+float stats_grab[2];  // (where on the plate the finger took it)
 
 void clamp_place(State &s, int i) {
     float wmax = s.w / s.h;
@@ -1470,6 +1474,14 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             f->kind = F_EDIT;
             return;
         }
+        if (perfstats_visible()) {  // the frame rate plate: dragged like the HUD's parts, its place saved on the lift
+            float x0, y0, x1, y1;
+            if (perfstats_panel_rect(&x0, &y0, &x1, &y1) && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+                stats_grab[0] = x - x0, stats_grab[1] = y - y0;
+                f->kind = F_EDIT, f->ctl = STATS_SEL, s.sel = STATS_SEL;
+                return;
+            }
+        }
         int c = hit(s.layout, x, y, s.w, s.h, nullptr, 1.0f, true, false, s.in_quest, true, control_profile(s));
         if (c < 0 && control_profile(s) >= 0) {  // Visible buttons stay editable; HUD handles beat only their enlarged touch areas.
             for (int k = 0; k < TZ_COUNT && c < 0; k++)
@@ -1494,6 +1506,12 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
             return;
         }
         if (f->kind != F_EDIT) return;
+        if (f->ctl == STATS_SEL) {
+            float x0, y0, x1, y1;
+            if (perfstats_panel_rect(&x0, &y0, &x1, &y1))
+                perfstats_set_pos(x - stats_grab[0] + (x1 - x0) * .5f, y - stats_grab[1] + (y1 - y0) * .5f, s.w, s.h);
+            return;
+        }
         if (s.pinch) {
             Finger *a = nullptr, *b = nullptr;
             for (Finger &g : s.f)
@@ -1514,7 +1532,10 @@ void edit_event(State &s, const SDL_Event *e, float x, float y) {
         }
         return;
     }
-    if (f->kind == F_EDIT) s.pinch = false;
+    if (f->kind == F_EDIT) {
+        s.pinch = false;
+        if (f->ctl == STATS_SEL) perfstats_save_pos();
+    }
     f->kind = F_NONE;
 }
 
@@ -3167,6 +3188,16 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         dashed_rect(dl, r, sel ? GLOW : IM_COL32(222, 186, 96, 200), (sel ? .006f : .004f) * h);
         text_center(dl, font, .026f * h, ImVec2((r.x0 + r.x1) * .5f, k == TZ_ITEM ? r.y0 - .022f * h : r.y1 + .022f * h),
                     INK, T(ZONE_HINT[k]), w);
+    }
+    if (perfstats_visible()) {  // the frame rate plate, moved like the HUD's parts
+        float x0, y0, x1, y1;
+        if (perfstats_panel_rect(&x0, &y0, &x1, &y1)) {
+            Rect r = {x0, y0, x1, y1, true};
+            bool sel = s.sel == STATS_SEL;
+            dashed_rect(dl, r, sel ? GLOW : IM_COL32(222, 186, 96, 200), (sel ? .006f : .004f) * h);
+            text_center(dl, font, .026f * h, ImVec2((r.x0 + r.x1) * .5f, r.y1 + .022f * h), INK,
+                        T("Frame rate panel - drag to move"), w);
+        }
     }
     for (int i = 0; i < C_LAID; i++) {
         if (!in_editor(i, s.in_quest, control_profile(s))) continue;  // (the controls no longer there stay in the file's order only)

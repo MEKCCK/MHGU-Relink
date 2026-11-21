@@ -217,7 +217,6 @@ bool overlay_event(const SDL_Event *e) {
         set_open(!g_forge_open);
         return true;
     }
-    if (perfstats_drag_event(e)) return true;  // ([Performance] ShowStats: the plate dragged where it is wanted)
     if (!g_open) return false;
     SDL_Window *w = ui_window();
     float density = w ? SDL_GetWindowPixelDensity(w) : 1.0f;  // (ImGui works in the image's pixels)

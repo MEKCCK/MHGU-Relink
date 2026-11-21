@@ -219,39 +219,21 @@ extern "C" void perfstats_draw(float w, float h) {
     }
 }
 
-// [Performance] StatsX / StatsY: the plate is dragged where it is wanted (a press on it, the drag, the release), and
-// where it is left is saved. The settings' ShowStats row says so. Screen image pixels on both sides: the window's
-// logical size is scaled by the pixel density, as ImGui's display size is.
-extern "C" bool perfstats_drag_event(const SDL_Event *e) {
-    SDL_Window *win;
-    switch (e->type) {
-    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: win = SDL_GetWindowFromID(e->button.windowID); break;
-    case SDL_EVENT_MOUSE_MOTION: win = SDL_GetWindowFromID(e->motion.windowID); break;
-    default: return false;
-    }
-    if (!perfstats_visible() || !win || !g_rect[2]) return false;
-    int lw = 0, lh = 0, pw = 0, ph = 0;
-    SDL_GetWindowSize(win, &lw, &lh);
-    SDL_GetWindowSizeInPixels(win, &pw, &ph);
-    if (lw <= 0 || lh <= 0 || pw <= 0 || ph <= 0) return false;
-    float kx = (float)pw / (float)lw, ky = (float)ph / (float)lh;
-    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-        if (e->button.button != SDL_BUTTON_LEFT) return false;
-        float x = e->button.x * kx, y = e->button.y * ky;
-        if (x < g_rect[0] || x > g_rect[2] || y < g_rect[1] || y > g_rect[3]) return false;
-        g_drag = true, g_grab[0] = x - g_rect[0], g_grab[1] = y - g_rect[1];
-        return true;
-    }
-    if (!g_drag) return false;
-    if (e->type == SDL_EVENT_MOUSE_MOTION) {
-        float x0 = e->motion.x * kx - g_grab[0], y0 = e->motion.y * ky - g_grab[1];
-        float w = g_rect[2] - g_rect[0], h = g_rect[3] - g_rect[1];
-        g_config.stats_x = std::clamp((x0 + w * .5f) / (float)pw, 0.0f, 1.0f);
-        g_config.stats_y = std::clamp(y0 / (float)ph, 0.0f, 1.0f);
-        return true;
-    }
-    g_drag = false;
+// Where the plate sits, for the touch layout editor (runtime/touch.cpp): the last drawn rectangle in screen pixels,
+// and its place as a 0..1 centre of the screen.
+extern "C" bool perfstats_panel_rect(float *x0, float *y0, float *x1, float *y1) {
+    if (!g_rect[2]) return false;
+    *x0 = g_rect[0], *y0 = g_rect[1], *x1 = g_rect[2], *y1 = g_rect[3];
+    return true;
+}
+
+extern "C" void perfstats_set_pos(float cx, float cy, float w, float h) {
+    if (w <= 0 || h <= 0) return;
+    g_config.stats_x = std::clamp(cx / w, 0.0f, 1.0f);
+    g_config.stats_y = std::clamp(cy / h, 0.0f, 1.0f);
+}
+
+extern "C" void perfstats_save_pos(void) {
     char err[200];
     if (!config_save(&g_config, err, sizeof err)) LOG("[stats] the plate's place was not saved: %s\n", err);
-    return true;
 }
