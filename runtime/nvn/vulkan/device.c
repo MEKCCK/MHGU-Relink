@@ -471,12 +471,31 @@ void vk_set_msaa(uint32_t n) {
 // ================================================================== swapchain
 static int swapchain_vsync = -1;
 static int configured_msaa = -1;
+// A cap that is a whole fraction of the screen's refresh rate (30 on 60 or 120 Hz, 48 on 144): FIFO, so a picture
+// still waiting for its slot is not replaced by the next one. With MAILBOX one frame shows for one vsync and the next
+// for two - the swing that reads as "30 fps but stuttering" (1% low far below the cap).
+static bool whole_fraction_cap(void) {
+    int fps = (int)(config_live_fps() + 0.5f);
+    if (fps <= 0) return false;
+    const SDL_DisplayMode *m = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+    if (!m || m->refresh_rate <= 0) return false;
+    float r = m->refresh_rate;
+    int n = (int)(r / (float)fps + 0.5f);
+    return n >= 2 && fabsf(r / (float)n - (float)fps) < 0.5f;
+}
+
 static VkPresentModeKHR present_mode(void) {
     swapchain_vsync = config_live_vsync();
     // MAILBOX by default: no tearing, and the game paces itself (its own 30 fps vsync waits); with FIFO the game's frames
     // also queued behind the display's, dropping to ~26 fps on the R9. FIFO where there is no mailbox.
     const char *e = getenv("MHGU_VK_PRESENT"), *v = getenv("MHGU_VSYNC");
     if (!e && v) e = atoi(v) ? "fifo" : "immediate";
+    if (!e && swapchain_vsync && whole_fraction_cap()) {
+        e = "fifo";
+        const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+        LOG("[vk] a %d FPS cap over a %.1f Hz screen: FIFO, so no frame waits a vsync longer than the others\n",
+            (int)(config_live_fps() + 0.5f), dm ? dm->refresh_rate : 0.0f);
+    }
     if (!e) e = swapchain_vsync ? "mailbox" : "immediate";  // (mhgurecomp.ini VSync)
     VkPresentModeKHR want = !strcmp(e, "fifo") ? VK_PRESENT_MODE_FIFO_KHR
                           : !strcmp(e, "immediate") ? VK_PRESENT_MODE_IMMEDIATE_KHR : VK_PRESENT_MODE_MAILBOX_KHR;
