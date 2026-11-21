@@ -463,6 +463,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(hud_size);
     SAME(low_end);
     SAME(effects);
+    SAME(upscale_filter);
     SAME(full_textures);
     SAME(shadows);
     SAME(draw_grass);
@@ -2262,6 +2263,9 @@ std::vector<Row> main_rows() {
                 r.back().value = std::to_string(c.render_scale) + "%";
             r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
         }
+        add_choice(r, "upscalefilter", tr("Upscale filter"), c.upscale_filter ? 1 : 0, {tr("Smooth"), tr("Sharp (nearest)")},
+                   [](int v) { c.upscale_filter = v; }, ini("UpscaleFilter"));
+        r.back().help = tr("How a 3D picture below 100% is scaled up to the screen: Smooth blends its pixels; Sharp keeps each one a crisp block, as in the MH4U port. Not used while FSR runs.");
         aspect_rows(r);  // (phones with 21:9 / 21:10 screens use the same presets)
         add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
         number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));

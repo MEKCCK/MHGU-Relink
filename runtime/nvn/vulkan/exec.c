@@ -5512,7 +5512,8 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     bool hdr = vk_hdr_presented_bt2020();
     VkPipeline p = present_pipeline(hdr);
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
-    VkDescriptorImageInfo ii = {vk_default_sampler(true), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
+    // [Graphics] UpscaleFilter Sharp: each pixel a crisp block when the picture is scaled (nearest); Smooth blends them
+    VkDescriptorImageInfo ii = {vk_default_sampler(config_live_upscale_filter() ? false : true), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
     vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);
