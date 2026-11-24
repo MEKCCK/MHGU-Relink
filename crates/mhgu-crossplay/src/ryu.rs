@@ -101,7 +101,7 @@ pub struct RyuPeerHooks {
     pub data: PeerDataHook,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Server {
     host: String,
     port: u16,
@@ -168,16 +168,26 @@ fn with_cfg<R>(f: impl FnOnce(&mut Config) -> R) -> R {
 
 /// [Multiplayer] RyuServers, RyuHost and RyuPassphrase (as saved now).
 pub fn set_config(servers: &str, host: &str, pass: &str) {
-    with_cfg(|c| {
-        c.servers = servers
-            .split([',', ';'])
-            .filter_map(parse_server)
-            .take(MAX_SERVERS)
-            .collect();
+    let servers: Vec<Server> = servers.split([',', ';']).filter_map(parse_server).take(MAX_SERVERS).collect();
+    let changed = with_cfg(|c| {
+        let changed = c.servers != servers;
+        c.servers = servers;
         c.loaded = true;
         c.host = host.trim().to_string();
         c.pass = pass.to_string();
-    })
+        changed
+    });
+    if changed {
+        // A saved server list applies from the next scan: no stale lobbies of the previous
+        // servers, no cooldowns they earned (both are indexed by the old list), and the next
+        // scan waits for the new servers like the first one ever did.
+        let mut s = SCAN.lock().unwrap();
+        s.ok_at = None;
+        s.generation += 1;  // a worker still running on the old servers drops its results
+        s.infos.clear();
+        s.server_of.clear();
+        s.down_until.clear();
+    }
 }
 
 /// The server this game runs itself, when it does ("" when not).
@@ -1013,6 +1023,7 @@ struct ScanState {
     running: bool,
     started: Option<Instant>,
     ok_at: Option<Instant>,
+    generation: u64,  // bumped when the saved servers change: in-flight results are stale
     filter: [u8; 0x60],
     infos: Vec<Vec<u8>>,
     server_of: Vec<usize>,
@@ -1022,6 +1033,7 @@ static SCAN: Mutex<ScanState> = Mutex::new(ScanState {
     running: false,
     started: None,
     ok_at: None,
+    generation: 0,
     filter: [0; 0x60],
     infos: Vec::new(),
     server_of: Vec::new(),
@@ -1030,9 +1042,9 @@ static SCAN: Mutex<ScanState> = Mutex::new(ScanState {
 static SCAN_CV: Condvar = Condvar::new();
 
 fn scan_worker() {
-    let (filter, servers, down_until) = {
+    let (filter, servers, down_until, generation) = {
         let s = SCAN.lock().unwrap();
-        (s.filter, with_cfg(|c| c.servers.clone()), s.down_until.clone())
+        (s.filter, with_cfg(|c| c.servers.clone()), s.down_until.clone(), s.generation)
     };
     let mut stage = Vec::new();
     let mut server_of = Vec::new();
@@ -1061,10 +1073,12 @@ fn scan_worker() {
         c.close();
     }
     let mut s = SCAN.lock().unwrap();
-    s.infos = stage;
-    s.server_of = server_of;
-    s.down_until = down;
-    s.ok_at = Some(Instant::now());
+    if s.generation == generation {
+        s.infos = stage;
+        s.server_of = server_of;
+        s.down_until = down;
+        s.ok_at = Some(Instant::now());
+    }
     s.running = false;
     SCAN_CV.notify_all();
 }
