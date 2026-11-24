@@ -110,6 +110,19 @@ static inline float hud_map_x(float x, float scale, float left, float right, int
          : 640.0f + (x - 640.0f) * scale;
 }
 
+typedef struct HudCinematicBar {
+    bool matched, relax_scissor;
+    float horizontal_scale;
+} HudCinematicBar;
+
+static inline HudCinematicBar hud_cinematic_bar(const float m[16], float scale) {
+    bool matched = isfinite(m[0]) && fabsf(m[14] - 100.0f) < 0.5f && fabsf(m[12] - 640.0f) < 0.5f &&
+                   (fabsf(m[13]) < 1.0f || fabsf(m[13] - 720.0f) < 1.0f) && fabsf(m[0]) >= 1100.0f &&
+                   fabsf(m[5]) <= 128.0f && fabsf(m[1]) < 1.0f && fabsf(m[4]) < 1.0f;
+    bool wide = matched && scale < 1.0f;
+    return (HudCinematicBar){matched, wide, wide ? 1.0f : scale};
+}
+
 static inline int hud_canvas_anchor(float z, int anchor, bool menu, bool aiming, bool loading) {
     if (fabsf(z - 110.0f) < 0.5f && !loading) return HUD_CENTER;
     if (aiming && z > 96.5f && z < 98.5f) return HUD_CENTER;

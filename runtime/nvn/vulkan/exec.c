@@ -3702,6 +3702,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
                 float s = g_render_aspect > 16.0f / 9.0f ? (16.0f / 9.0f) / g_render_aspect : 1.0f;
                 float sy = g_render_aspect < 16.0f / 9.0f ? g_render_aspect / (16.0f / 9.0f) : 1.0f;
+                HudCinematicBar cinematic_bar = hud_cinematic_bar(m, s);
+                if (cinematic_bar.relax_scissor) ui_relax_scissor = true;
                 HudLoadingTile loading_tile = hud_loading_tile(m, s);
                 // Layer 110 is the loading screen's scrolling backdrop: strips at y 168 / 433 / 570 that must stay one picture.
                 // The generic rule anchored each strip to a different edge and flattened it, leaving gaps between them.
@@ -3938,6 +3940,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // Wide layer 110 starts centred; only confirmed paired tiles move at the end of this pass.
                     anchor = hud_canvas_anchor(pos_z, anchor, menu_canvas, aiming, s >= 1.0f && (loading_strip || ui_loading_pass));
                     if (aiming && pos_z > 96.5f && pos_z < 98.5f) vanchor = V_CENTER;
+                    if (cinematic_bar.matched) anchor = ANCHOR_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
@@ -4031,7 +4034,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     float k = 1.0f / (sy * hk);
                     m[0] *= k; m[4] *= k; m[8] *= k;
                 } else {
-                    m[0] *= s * hk; m[4] *= s * hk; m[8] *= s * hk;
+                    float sx = cinematic_bar.horizontal_scale;
+                    m[0] *= sx * hk; m[4] *= sx * hk; m[8] *= sx * hk;
                 }
                 if (!backdrop_tall) { m[1] *= sy * hk; m[5] *= sy * hk; m[9] *= sy * hk; }
                 m[12] = new_pos_x;
