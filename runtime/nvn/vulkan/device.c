@@ -8,6 +8,7 @@
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
 //   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (no Vulkan 1.2 structures), to test it on a PC
+//   MHGU_VK_NO_POLL=1|0    no driver completion checks (fences waited for by a thread: on by itself for Turnip on Android)
 //   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -250,8 +251,26 @@ static void create_device(void) {
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
     g_vk.has_timeline = g_vk.api12 && f12_have.timelineSemaphore;
     g_vk.mirror_clamp = g_vk.api12 ? f12_have.samplerMirrorClampToEdge : mirror_ext;
+    // Turnip (Mesa's Adreno driver) on Android's KGSL: before Mesa 26.3 a completion check with no timeout waits until
+    // the GPU has finished everything submitted, so none are made on the submit path (issue #444): a fence per
+    // submission, waited for by a thread of its own, which moves the completed number along (exec.c). The timeline
+    // semaphore is no help there either (Mesa checks each pending point before it waits). MHGU_VK_NO_POLL=1 / 0 turns
+    // that on / off on any device.
+#ifdef __ANDROID__
+    if (g_vk.api12) {
+        VkPhysicalDeviceDriverProperties drv = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 drv_p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &drv};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &drv_p2);
+        g_vk.no_poll = drv.driverID == VK_DRIVER_ID_MESA_TURNIP;
+    }
+#endif
+    if (getenv("MHGU_VK_NO_POLL")) g_vk.no_poll = atoi(getenv("MHGU_VK_NO_POLL")) != 0;
+    if (g_vk.no_poll) {
+        g_vk.has_timeline = false;  // (the fence thread waits for them: no status poll reaches the driver)
+        LOG("[vk] no completion checks: a fence per submission, waited for by a thread of its own\n");
+    }
     maxwell_no_int64 = !have.features.shaderInt64 || getenv("MHGU_VK_NO_INT64");  // (the env: tests)
-    if (!g_vk.has_timeline) {
+    if (!g_vk.has_timeline && !g_vk.no_poll) {
         VkPhysicalDeviceSubgroupProperties sg = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &sg};
         vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
@@ -1139,6 +1158,7 @@ void backend_present(NvnTexture *t) {
     vk_trace_frame(t);
     g_frames++;
     g_present_count = g_frames;
+    { void vk_latewrite_frame(void); vk_latewrite_frame(); }  // (debug) MHGU_LATE_WRITES (exec.c)
 #ifdef __ANDROID__
     if (g_frames == 120) gpu_driver_good();  // (a driver of the player's own has drawn: it stays)
 #endif

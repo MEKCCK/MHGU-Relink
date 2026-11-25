@@ -22,6 +22,9 @@
 // breaks, KOs). Aggro is separate: 0x29dd40 is recorded, and called on the owner. The list of attack numbers that have
 // hit (+0x448: one hit per number and swing) isn't part of a report and isn't undone on the owner.
 //
+// The messages reach everyone in the hub, also those in another quest; an owner applies a report only from a slot
+// that has a hunter in its own quest (in_quest), so another quest's hits never land on this quest's monster.
+//
 // Mixed versions: no change to the link protocol. A game that has this on says so (Hello, to all, every second and when
 // it changes); an owner ignores its copy of a hunter, and applies that hunter's reports, only while it hears that
 // hunter's Hello and has this on itself. A game without this drops the unknown messages (the F_AUX handlers check their
@@ -160,6 +163,14 @@ static int local_slot(void) {
     return s >= 0 && s < 4 ? s : -1;
 }
 
+// That slot has a hunter in this game's quest. The messages go to the whole hub and a hunter keeps its hub slot in
+// any quest, so a report can come from a hunter in another quest, about that quest's monster with the same network id
+// (0 for the first large one of any quest): sPlayer's slots hold only this quest's hunters.
+static bool in_quest(int slot) {
+    uint32_t sp = LD32(G_SPLAYER);
+    return sane(sp) && slot >= 0 && slot < 4 && sane(LD32(sp + 0x1c + 4u * (uint32_t)slot));
+}
+
 static int slot_of(uint32_t player) {
     uint32_t sp = LD32(G_SPLAYER);
     if (!sane(sp) || !sane(player)) return -1;
@@ -246,7 +257,16 @@ static void report_send(const Snap *s, uint32_t en, uint32_t info, int slot, boo
     if (g_log) LOG("[hitsync] %s %u sent: monster %u, damage %d, KO %d, aggro %d\n", shot ? "shot" : "report", r.seq, r.id, d, r.parts[(0x4d2 - P_PARTS) / 2], r.aggro);
 }
 
+static bool g_plhits;  // (debug) MHGU_LOG_PLHITS=1: every attack this game runs against our own hunter logged
+
 static void hit(Cpu *c) {
+    if (g_plhits) {
+        uint32_t gc = LD32(G_MEMBER), sp = LD32(G_SPLAYER), slot = gc ? LD32(gc + 0x30) : 4;
+        uint32_t pl = sp && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0, at = c->r[1];
+        if (pl && c->r[2] == pl)
+            LOG("[plhit] attack %08x by %08x kind %u type 0x%x number %u, words %08x %08x %08x %08x\n", at, LD32(at + AT_OWNER),
+                LD8(at + AT_KIND), LD8(at + AT_TYPE), LD16(at + 0x34), LD32(at + 0x30), LD32(at + 0x34), LD32(at + 0x38), LD32(at + 0x3c));
+    }
     if (!active()) { fnhook_call_original(c, FN_HIT); return; }
     uint32_t at = c->r[1], en = c->r[2], info, player;
     if (LD8(at + AT_KIND) != KIND_HUNTER || !large(en, &info)) { fnhook_call_original(c, FN_HIT); return; }
@@ -358,6 +378,10 @@ static void en_apply(Cpu *c) {
         for (int i = 0; i < g_nq; i++) {
             if (now - g_q[i].at > QUEUE_STALE) continue;  // (its monster never came: another zone, or gone)
             if (g_q[i].r.id == id) {
+                if (!in_quest(g_q[i].r.slot)) {  // (another quest's hunter: dropped)
+                    if (g_log) LOG("[hitsync] report %u from slot %d dropped: not in this quest\n", g_q[i].r.seq, g_q[i].r.slot);
+                    continue;
+                }
                 if (owner && (g_q[i].r.kind == M_SHOT ? reports_shots(g_q[i].r.slot, now) : reports(g_q[i].r.slot, now))) take[n++] = g_q[i].r;
                 continue;
             }
@@ -472,6 +496,7 @@ static void hit_trace(Cpu *c) {
 
 void hitsync_init(void) {
     g_log = getenv("MHGU_LOG_HITSYNC") && atoi(getenv("MHGU_LOG_HITSYNC"));
+    g_plhits = getenv("MHGU_LOG_PLHITS") && atoi(getenv("MHGU_LOG_PLHITS"));
     const char *e = getenv("MHGU_HITSYNC_DIFF");
     if (e && *e && atoi(e)) {
         fnhook_set(FN_HIT, hle_register("hitsync:trace", hit_trace));

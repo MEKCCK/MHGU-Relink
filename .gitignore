@@ -70,3 +70,7 @@ packaging/*/*.pkg.tar.zst
 # Local test output and runtime data
 /analysis/
 /run/
+
+# hub server state (identity seed, admin-approved federation peers)
+/mhgu-hub.identity
+/mhgu-hub.federation

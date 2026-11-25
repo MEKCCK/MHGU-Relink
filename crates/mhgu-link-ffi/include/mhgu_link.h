@@ -10,6 +10,7 @@
 #ifndef MHGU_LINK_H
 #define MHGU_LINK_H
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -49,11 +50,20 @@ void mhgu_ldn_set_lcv(uint16_t lcv);
 void mhgu_ldn_set_mac(const uint8_t mac[6]);
 
 /* Hosts through a hub server (`[Multiplayer] Server`): the server lists the hub for players with the
- * same matchmaking key and splices them to links we open. Works alongside the LAN listener. */
+ * same matchmaking key and splices them to links we open. Works alongside the LAN listener.
+ * Link protocol 4: the hub is listed with a session code (a newer server); `mhgu_ldn_own_code` tells it. */
 bool mhgu_ldn_host_server(const char *server, const char *key);
-/* Joins a hub `hub` listed on `server` (its id from the list). */
-bool mhgu_ldn_join_server(const char *server, const char *key, uint64_t hub, const char *name,
-                          const uint8_t *info, uint32_t info_len);
+/* The hub's session code as "ABCD-EFGH" once the server took it (false: no hub, or a server older than 4). */
+bool mhgu_ldn_own_code(char *out, size_t size);
+/* The session code of the hub we joined through the server when we know it (false: none). */
+bool mhgu_ldn_joined_code(char *out, size_t size);
+/* Whether the link goes through a hub server (a relayed station: "in a hub" for the friends list). */
+bool mhgu_ldn_relayed(void);
+/* Joins a hub `hub` listed on `server` (its id from the list). `code` (8 bytes, NULL: none) is the hub's
+ * session code when known, which lets the server take us from any room; `peer_proto` is the hub's link
+ * protocol from the list (0: the oldest we speak). */
+bool mhgu_ldn_join_server(const char *server, const char *key, uint64_t hub, const uint8_t *code,
+                          uint16_t peer_proto, const char *name, const uint8_t *info, uint32_t info_len);
 
 /* Join a host at "a.b.c.d" (or "a.b.c.d:port"). */
 bool mhgu_ldn_join(const char *addr, const char *name, const uint8_t *info, uint32_t info_len);

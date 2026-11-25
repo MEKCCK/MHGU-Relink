@@ -97,6 +97,8 @@ fn t(l: Lang, key: &str) -> &'static str {
         "unban" => s!("Unban", "解封", "Desbloquear"),
         "ban ip" => s!("Ban an IP address", "封禁 IP 地址", "Bloquear una dirección IP"),        "settings" => s!("Live settings", "热设置", "Ajustes en vivo"),
         "min protocol" => s!("Oldest link protocol", "最低链路协议", "Protocolo de enlace mínimo"),
+        "max protocol" => s!("Newest link protocol (0: any)", "最高链路协议（0：不限）", "Protocolo de enlace máximo (0: cualquiera)"),
+        "link pool" => s!("Link protocols that play together (low-high, or off)", "互通链路协议（低-高，或 off）", "Protocolos que juegan juntos (bajo-alto, o off)"),
         "separate phones" => s!("Android public room separate", "Android 公共房间独立", "Sala pública Android separada"),
         "verbose" => s!("Verbose logs", "详细日志", "Registros detallados"),
         "max connections" => s!("Max connections", "最大连接数", "Conexiones máximas"),
@@ -109,6 +111,33 @@ fn t(l: Lang, key: &str) -> &'static str {
         "request burst" => s!("Request burst", "请求突发", "Ráfaga de solicitudes"),
         "bandwidth" => s!("Bandwidth (bytes/s)", "带宽（字节/秒）", "Ancho de banda (bytes/s)"),
         "save" => s!("Save", "保存", "Guardar"),
+        "federation peers" => s!("Federation peers", "联邦对端", "Servidores federados"),
+        "peer" => s!("Peer", "对端", "Par"),
+        "online" => s!("online", "在线", "en línea"),
+        "offline" => s!("offline", "离线", "desconectado"),
+        "latency" => s!("Latency", "延迟", "Latencia"),
+        "error" => s!("Error", "错误", "Error"),
+        "no peers" => s!("No federation peers configured.", "未配置联邦对端。", "No hay servidores federados."),
+        "federated joins" => s!("federated joins", "联邦加入", "uniones federadas"),
+        "federated traffic" => s!("federated traffic", "联邦流量", "tráfico federado"),
+        "discovered peers" => s!("Discovered peers (LAN)", "发现的联邦候选（局域网）", "Servidores descubiertos (LAN)"),
+        "discovery hint" => s!(
+            "Candidates only: nothing is joined automatically. Add the address to -federate and the id to -federation-allow on both servers to federate.",
+            "仅列出候选，不会自动并入。两端把地址加入 -federate、把 ID 加入 -federation-allow 后才会联邦。",
+            "Solo candidatos: no se une nada automáticamente. Añade la dirección a -federate y el id a -federation-allow en ambos servidores."
+        ),
+        "address" => s!("Address", "地址", "Dirección"),
+        "configured" => s!("Configured", "已配置", "Configurado"),
+        "no candidates" => s!("No LAN candidates heard yet.", "尚未收到局域网候选。", "Aún no hay candidatos en la LAN."),
+        "approve" => s!("Approve", "批准", "Aprobar"),
+        "approved" => s!("Approved", "已批准", "Aprobado"),
+        "candidate approved" => s!(
+            "Candidate approved and saved. The other server must approve this one too for its hubs to be listed.",
+            "候选已批准并保存。对端服务器也需要批准本服，才能列出它的集会所。",
+            "Candidato aprobado y guardado. El otro servidor también debe aprobar a este para listar sus salas."
+        ),
+        "yes" => s!("yes", "是", "sí"),
+        "no" => s!("no", "否", "no"),
         "applied" => s!("Settings applied.", "设置已应用。", "Ajustes aplicados."),
         "invalid settings" => s!("Invalid settings.", "设置无效。", "Ajustes no válidos."),
 
@@ -231,6 +260,9 @@ impl Web {
         let reply: (u16, &'static str, String) = match (method, path) {
             ("GET", "/") => (200, "text/html; charset=utf-8", self.public_page(lang)),
             ("GET", "/api/hubs") => (200, "application/json; charset=utf-8", self.api()),
+            ("GET", "/.well-known/mhgu-federation") => {
+                (200, "application/json; charset=utf-8", self.shared.lock().unwrap().well_known())
+            }
             ("GET", "/admin") => {
                 if token_ok {
                     (200, "text/html; charset=utf-8", self.admin_page(lang))
@@ -242,6 +274,23 @@ impl Web {
                 if token_ok {
                     let only = q("only").unwrap_or_default();
                     (200, "text/html; charset=utf-8", self.log_page(lang, &only))
+                } else {
+                    (401, "text/html; charset=utf-8", layout(lang, "admin", &login(lang), true))
+                }
+            }
+            ("POST", "/admin/approve") => {
+                if token_ok {
+                    let id = kv(&body_str(&body), "id").unwrap_or_default();
+                    let msg = match self.shared.lock().unwrap().approve_candidate(&id) {
+                        Ok(()) => format!("<p class=ok>{}</p>", t(lang, "candidate approved")),
+                        Err(e) => format!("<p class=err>{}</p>", html(&e)),
+                    };
+                    let page = format!(
+                        "{msg}<p><a href=\"/admin?token={}\">← {}</a></p>",
+                        self.token,
+                        t(lang, "admin")
+                    );
+                    (200, "text/html; charset=utf-8", layout(lang, "admin", &page, true))
                 } else {
                     (401, "text/html; charset=utf-8", layout(lang, "admin", &login(lang), true))
                 }
@@ -471,6 +520,46 @@ impl Web {
         if player_rows.is_empty() {
             player_rows = format!("<tr><td colspan=7>{}</td></tr>", t(l, "no players"));
         }
+        let mut peer_rows = String::new();
+        for p in &v.peers {
+            peer_rows.push_str(&format!(
+                "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                html(&p.name),
+                html(&p.addr),
+                if p.online { t(l, "online") } else { t(l, "offline") },
+                p.hubs,
+                if p.rtt_ms > 0 { format!("{} ms", p.rtt_ms) } else { "-".into() },
+                html(p.last_error.as_deref().unwrap_or(""))
+            ));
+        }
+        if peer_rows.is_empty() {
+            peer_rows = format!("<tr><td colspan=6>{}</td></tr>", t(l, "no peers"));
+        }
+        let mut candidate_rows = String::new();
+        for c in &v.candidates {
+            let action = if c.configured {
+                t(l, "approved").to_string()
+            } else {
+                format!(
+                    r#"<form method=post action="/admin/approve?token={}" style="margin:0"><input type=hidden name=id value="{}"><button>{}</button></form>"#,
+                    self.token,
+                    html(&c.id),
+                    t(l, "approve")
+                )
+            };
+            candidate_rows.push_str(&format!(
+                "<tr><td>{}</td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                html(&c.name),
+                html(&c.id),
+                html(&c.addr),
+                secs(c.age),
+                if c.configured { t(l, "yes") } else { t(l, "no") },
+                action
+            ));
+        }
+        if candidate_rows.is_empty() {
+            candidate_rows = format!("<tr><td colspan=5>{}</td></tr>", t(l, "no candidates"));
+        }
         let body = format!(
             r#"<div class=stats>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
@@ -481,6 +570,12 @@ impl Web {
 <p>{}</p>
 <h2>{}</h2>
 <table><tr><th>{}</th><th>{}</th><th>IP</th><th>↓</th><th>↑</th><th>{}</th><th></th></tr>{player_rows}</table>
+<h2>{}</h2>
+<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>{peer_rows}</table>
+<p style="color:#9a8a76">{} · {} {}</p>
+<h2>{}</h2>
+<p style="color:#9a8a76">{}</p>
+<table><tr><th>{}</th><th>ID</th><th>{}</th><th>{}</th><th>{}</th><th></th></tr>{candidate_rows}</table>
 <table><tr><th>{}</th><th></th></tr>{ban_rows}</table>
 {ban_form}{log_link}{settings}"#,
             v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
@@ -493,6 +588,10 @@ impl Web {
                 None => t(l, "key public").to_string(),
             },
             t(l, "players title"), t(l, "room"), t(l, "player"), t(l, "status"),
+            t(l, "federation peers"), t(l, "peer"), t(l, "status"), t(l, "hubs"), t(l, "latency"), t(l, "error"),
+            t(l, "federated joins"), v.fed_joins, t(l, "federated traffic"), traffic(v.fed_bytes),
+            t(l, "discovered peers"), t(l, "discovery hint"),
+            t(l, "peer"), t(l, "address"), t(l, "age"), t(l, "configured"),
             t(l, "ban ip")
         );
         layout(l, "admin", &body, true)
@@ -536,12 +635,33 @@ impl Web {
                 if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" }
             ));
         }
+        let mut candidates = Vec::new();
+        for c in &v.candidates {
+            candidates.push(format!(
+                r#"{{"id":{},"name":{},"addr":{},"age":{},"configured":{},"public_key":{}}}"#,
+                json_str(&c.id), json_str(&c.name), json_str(&c.addr), c.age, c.configured,
+                json_str(&c.public_key)
+            ));
+        }
+        let mut peers = Vec::new();
+        for p in &v.peers {
+            peers.push(format!(
+                r#"{{"name":{},"addr":{},"online":{},"rtt_ms":{},"hubs":{},"error":{}}}"#,
+                json_str(&p.name), json_str(&p.addr), p.online, p.rtt_ms, p.hubs,
+                p.last_error.as_deref().map(json_str).unwrap_or_else(|| "null".into())
+            ));
+        }
         format!(
-            r#"{{"uptime":{},"conns":{},"players":{},"hubs":[{}]}}"#,
+            r#"{{"uptime":{},"conns":{},"players":{},"hubs":[{}],"peers":[{}],"candidates":[{}],"federated_joins":{},"federated_bytes":{},"federated_presence":{}}}"#,
             v.uptime,
             v.conns,
             v.players,
-            hubs.join(",")
+            hubs.join(","),
+            peers.join(","),
+            candidates.join(","),
+            v.fed_joins,
+            v.fed_bytes,
+            v.federated_presence
         )
     }
 }
@@ -645,6 +765,8 @@ fn settings_form(w: &Web, l: Lang, v: &Live) -> String {
         "<h2>{}</h2>\
          <form method=post action=\"/admin/settings?token={}\" class=settings>\
          <label>{} <input type=number name=min_proto min=0 max=65535 value=\"{}\"></label>\
+         <label>{} <input type=number name=max_proto min=0 max=65535 value=\"{}\"></label>\
+         <label>{} <input type=text name=link_pool size=6 value=\"{}\"></label>\
          <label><input type=checkbox name=separate_phones{}> {}</label>\
          <label><input type=checkbox name=verbose{}> {}</label>\
          <label>{} <input type=number name=max_conns min=1 value=\"{}\"></label>\
@@ -659,6 +781,8 @@ fn settings_form(w: &Web, l: Lang, v: &Live) -> String {
          <button>{}</button></form>",
         t(l, "settings"), w.token,
         t(l, "min protocol"), v.min_proto,
+        t(l, "max protocol"), v.max_proto,
+        t(l, "link pool"), v.pool_text(),
         check(v.separate_phones), t(l, "separate phones"),
         check(v.verbose), t(l, "verbose"),
         t(l, "max connections"), v.max_conns,
@@ -691,6 +815,13 @@ fn parse_live(body: &str, cur: &Live) -> Result<Live, String> {
     };
     let min_proto = uint("min_proto", cur.min_proto as usize)?;
     if min_proto > 65535 { return Err("min_proto: at most 65535".into()); }
+    let max_proto = uint("max_proto", cur.max_proto as usize)?;
+    if max_proto > 65535 { return Err("max_proto: at most 65535".into()); }
+    if max_proto != 0 && max_proto < min_proto { return Err("max_proto: below min_proto".into()); }
+    let link_pool = match num("link_pool") {
+        None => (cur.link_pool_low, cur.link_pool_high),
+        Some(s) => parse_pool(s.trim())?,
+    };
     let max_conns = uint("max_conns", cur.max_conns)?;
     let max_conns_per_ip = uint("max_conns_per_ip", cur.max_conns_per_ip)?;
     let max_hubs = uint("max_hubs", cur.max_hubs)?;
@@ -711,10 +842,27 @@ fn parse_live(body: &str, cur: &Live) -> Result<Live, String> {
     }
     Ok(Live {
         min_proto: min_proto as u16,
+        max_proto: max_proto as u16,
+        link_pool_low: link_pool.0,
+        link_pool_high: link_pool.1,
         separate_phones: num("separate_phones").is_some(),
         verbose: num("verbose").is_some(),
         max_conns, max_conns_per_ip, max_hubs, max_hubs_per_ip, list_max, list_search_max, req_rate, req_burst, bandwidth,
     })
+}
+
+/// "3-4" / "off" into (low, high).
+fn parse_pool(s: &str) -> Result<(u16, u16), String> {
+    if s.eq_ignore_ascii_case("off") || s.is_empty() {
+        return Ok((0, 0));
+    }
+    let (lo, hi) = s.split_once('-').ok_or("link_pool: low-high, or off")?;
+    let lo: u16 = lo.trim().parse().map_err(|_| "link_pool: not a number")?;
+    let hi: u16 = hi.trim().parse().map_err(|_| "link_pool: not a number")?;
+    if lo == 0 || hi < lo {
+        return Err("link_pool: a low of 1 or more, and a high of at least the low".into());
+    }
+    Ok((lo, hi))
 }
 
 fn kv(s: &str, key: &str) -> Option<String> {
@@ -756,6 +904,21 @@ fn rand_u64() -> u64 {
 
 fn secs(s: u64) -> String {
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m", s / 60) } else { format!("{}h", s / 3600) }
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn rate(bps: u64) -> String {

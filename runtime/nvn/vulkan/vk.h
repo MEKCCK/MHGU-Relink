@@ -43,6 +43,7 @@ typedef struct {
     VkPipelineCache pcache;
     VkSemaphore timeline;      // value = last completed submission number (none on a Vulkan 1.1 driver: fences, exec.c)
     bool api12, has_timeline;  // the device works as Vulkan 1.2 or later; it has timeline semaphores
+    bool no_poll;              // never ask the driver whether work is done (submissions use fences: exec.c fence thread)
     bool mirror_clamp;         // the mirror-clamp sampler mode can be used
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;

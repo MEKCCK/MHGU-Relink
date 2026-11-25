@@ -6,6 +6,7 @@ license.workspace = true
 description = "A from-scratch Rust hub server for MHGU Local Play over the internet, wire-compatible with gu-native and MHGURecomp."
 
 [dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 getrandom = "0.4"
 mhgu-protocol = { path = "../mhgu-protocol" }
 

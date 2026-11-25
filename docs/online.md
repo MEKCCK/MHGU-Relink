@@ -50,11 +50,59 @@ cd build && ./mhgu-relink <游戏目录>
 传输层全部在 `crates/mhgu-link*`：主机/加入/中继、TCP/UDP 链路、踢人、NetworkInfo 广播。C 运行时只保留
 `nn::ldn` 的 HLE 包装、局域网扫描（Android 的组播锁与逐网卡探测）以及 hub 列表/检查的控制协议。
 
-链路协议为 **v3**（上游 0.15 起）。`mhgu-hub` 额外支持：
+链路协议为 **v4**（上游 0.19 起），与 **v3 互通**：link 帧不变，4 只增加 hub 服务器的能力，主机会接受任一版本的
+Hello，局域网探测按对方版本回应；对方是 v3 主机时按 v3 说。协议 4 的内容：
 
-- `-min-proto N`：拒绝更旧的链路协议（默认 0 = 不限）；
-- `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并；
+- **集会所代码（session code）**：主机为每个集会所生成 8 字符代码（Crockford base32，无 I/L/O/U），随 `HOST`
+  列出；被别的集会所占用时服务器返回 `errCodeTaken`（6），主机换一个重试；同一集会所（session id + BSSID）
+  重新列出会取回原代码。设置菜单 → 网络可看到并分享，`ABCD-EFGH` 形式。
+- **按代码加入**：`FIND`（请求 7）按代码找 hub，不论房间；该 hub 10 分钟内排在“加入集会所”列表首位，
+  加入时带上代码即可跨房间进入（代码即邀请）。Discord Rich Presence 的 Join secret 也用它，只接受本机服务器。
+- **好友（PRESENCE，请求 8 / 应答 22）**：安装身份为存档目录的 `friends-id.bin`（32 字节随机数），好友代码
+  为 `SHA-256("MHGURecomp friend:" + secret)` 前 10 字节（显示 16 字符）。`friends.txt` 保存好友与已删除列表。
+  服务器只在内存中保留最后 90 秒在线状态；互为好友才互见在线/开房/所在集会所代码。单向添加即好友请求，
+  可接受或拒绝；拒绝在本次游戏运行内不再提示。`[Multiplayer] FriendRequests`、`FriendOnlineNotices`、
+  `FriendHubNotices` 控制请求与提示。集会所内 v4 客户端还会用 `F_AUX 0xE9` 交换好友代码与猎人名。
+- **HUBS4（应答 21）**：列出每个 hub 的链路版本与代码；v3 客户端仍收到旧 `HUBS`。
+- **链接池**：服务器把 3 与 4 放在同一池中互相可见（`-link-pool 3-4`，可设 `off`），v4 客户端看到每个
+  hub 的版本并向下兼容。`-min-proto` / `-max-proto` 可淘汰旧版本或拒绝更新的版本，二者均可在运行时修改。
+
+`mhgu-hub` 额外支持：
+
+- `-min-proto N` / `-max-proto N`：拒绝更旧/更新的链路协议（默认 0 = 不限 / 100）；
+- `-link-pool LOW-HIGH`：互通版本区间（默认 `3-4`；`off` 各自独立）；
+- `-max-presence N`：好友在线表人数上限（默认 20000）；
+- `-presence-ttl SECS`：好友最后一次 PRESENCE 后保持在线的时间（默认 90 秒）；到期会向联邦 peer 广播下线。
+- `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并（游戏默认不再区分）；
 - `-v`：记录 hub、加入与因协议被拒的请求（不记录 IP）。
+
+### 服务器联邦（多台 hub 服务器）
+
+多台 `mhgu-hub` 可以互相共享集会所：玩家仍连自己的服务器，搜索里会出现对端服务器的 hub，加入由本服代理，
+不需要玩家切换 `Server`。配置两端互填：
+
+```sh
+mhgu-hub -federation-token 'b-token' -federation-name hub-b                 # B
+mhgu-hub -federation-token 'a-token' -federate 'hub-b:39510,b-token,B'     # A（B 的 token）
+```
+
+实际部署用 Ed25519 身份与允许列表：
+
+```sh
+# B：接受 A 的身份
+mhgu-hub -identity /var/lib/mhgu-hub/id -advertise hub-b.example:39510 \
+         -federation-allow 'ed25519:ABCDEFGH12345678' -web :39511
+# A：由 well-known 自动发现 B，或直接写地址+id
+mhgu-hub -identity /var/lib/mhgu-hub/id \
+         -federate 'http://hub-b.example:39511'
+```
+
+只联邦显式批准的对端；默认只列直连 peer 的 hub，`-federation-transitive N` 可让广告、代码 FIND 与加入沿最多 N 条额外
+peer 转发。跨服链路固定走中继（不做 P2P），每多一跳多一次转发且两边各计流量。协议不加密，公网请套
+WireGuard/VPN。`-discover lan` 只把验证过的局域网服务器列入候选表，不会自动并入。握手（Ed25519 / 兼容
+共享 token）、well-known、候选嗅探、好友在线状态（含传递同步）、缓存、UDP 前缀翻译、Web Peers 页与限制见
+[docs/FEDERATION.md](FEDERATION.md)。
+
 
 ### Direct（P2P 直连）
 

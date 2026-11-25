@@ -1,7 +1,14 @@
 # 更新日志
 
-## 未发布
+## 0.2.9（2026-11-26）
 
+- 兼容 ID 更新为 `3bfb26af6be3424b`：0.2.9 的 `libmhgugame.so`／`mhgugame.so`／`mhgugame.dll` 必须用本版工具重新生成；旧游戏代码库会在启动时被明确拒绝。
+- 联邦传递 PRESENCE 与自然离线：presence 流默认尝试 `FED_PRESENCE_EXT`/`UPDATE_EXT`（老 peer 退回普通流），每条在线记录带 origin/hops，中间服务器按 depth 转发本服与其它 peer 的在线玩家、好友请求和删除列表；快照与增量都支持，断开或自然离线（`-presence-ttl`，默认 90 秒）时发 tombstone 清理；中间服务器远端到期也继续转发，较短的直达记录优先。
+- 联邦传递广告：`-federation-transitive N`（默认 0）让 hub 广告逐跳转发，列表带 origin/hops、路径与 30 秒缓存；选中非直连的 hub 时用 `FED_JOIN_EXT` 沿同一路径逐跳加入，TCP 拼接与 UDP 前缀翻译嵌套进行。会话代码 `FIND` 也按同一 depth/path 递归（`FED_FIND_EXT`），两跳外的代码可直接搜索并沿 `FED_JOIN_EXT` 加入；老 peer 自动退回普通 `FIND`。中间服务器缓存广告并在过期时重新查询；hops 预算与路径防止环路，超过自身配置的转发被拒绝。
+- 联邦好友状态：peer 之间保持一条双向 PRESENCE 流，互发本服在线玩家的好友代码、状态、集会所代码、好友/删除列表与猎人名；客户端查询时本地与远端按同一“互相列出”规则合并（在线、好友请求、被删除），90 秒 TTL，断开即清除。只有一侧配置 `-federate` 也能双向同步；`-federation-presence=false` 关闭，`/api/hubs` 增加 `federated_presence`。管理页批准候选：Discovered peers 每行新增 Approve，批准后立即加入允许列表与联邦对端，并原子写入 `-federation-state`（默认 `mhgu-hub.federation`，只含 id/地址/名字，不含 token），重启自动加载；对端仍需同样批准本服。联邦身份与发现（MHGF v2）：每台 `mhgu-hub` 使用持久的 Ed25519 身份（`-identity`，默认 `mhgu-hub.identity`，`ed25519:<指纹>`），握手双方互验签名；`-federation-allow` 按身份放行（默认封闭，`*` 才开放）。Web 端口新增 `/.well-known/mhgu-federation`（id/endpoint/公钥/版本），`-federate http://…` 可自动发现并固定对端；`-advertise` 指定对外地址。`-discover lan` 发送/接收签名的局域网广播，只把验证过的服务器列入 Web/API 的候选表，**不会自动并入**，仍需两端显式配置；v1 共享 token 仍兼容。
+- Hub 联邦（v1）：多台 `mhgu-hub` 用 `-federation-token` / `-federate` 互配后共享集会所——玩家仍连自己的服务器，搜索里会出现对端 hub，加入由本服代理，无需切换 `Server`。远端 hub 在本服使用本地别名，房间/链接池/会话代码规则不变；代码 `FIND` 可跨服。跨服链路走 TCP 拼接 + `MHGR` 前缀翻译的 UDP 桥，固定中继、不打洞；每对 peer 独立 HMAC-SHA256 挑战应答，3 秒列表缓存、1.5 秒单 peer 超时，坏 peer 不影响本地。Web 管理页新增 Federation peers 与 `/api/hubs` 的 `peers`/`federated_joins`/`federated_bytes`。协议与限制见 `docs/FEDERATION.md`；仅直连对端，默认不加密（公网建议 WireGuard/VPN）。
+- 设置菜单重构：页签细分为 **显示 / 图形 / 音频 / 控制 / 在线 / 玩法 / 系统 / 模组 / 金手指**；内容多的页先进入子页（显示：窗口与画面、3D 画面、HUD 与镜头；图形：性能、画质、特效、HDR；控制：手柄、键盘与鼠标、触控、镜头；在线：集会所服务器、会话与好友、跨平台；玩法：集会所与任务、怪物血量；系统：外观、通用、存档数据、应用），子页首行返回上一级，按 B / Esc 先退出子页再关闭菜单。分区标题改为上方分隔线 + 标题 + 电话端尾线，子页入口带 `›`，行值降为次级颜色、焦点行保持高亮；电话端标题显示「页签 · 子页」。设置项、INI 键与存档格式不变；Android 的「检查更新」仍使用本仓库自己的 GitHub 实现，与 PC 更新器无关。
+- 同步 MHGURecomp 上游至 0.20.1（`330f968`）：链路协议 **v4**（与 v3 互通）——集会所代码、按代码加入（`FIND`）、好友在线/请求/删除（`PRESENCE`/`FRIENDS`）、`HUBS4` 与链接池（3-4）；设置 → 网络新增代码与好友区，好友代码与列表保存在存档目录（`friends-id.bin`、`friends.txt`），Discord Rich Presence 支持 Join secret；hub 新增 `-max-proto`、`-link-pool`、`-max-presence` 与热设置。上游修复同步：奖励箱单击 A 不再移动光标、内核等待到期保留唤醒结果、断肢同步（`partsync`）、小型怪物同步洪泛上限与 Zamite 卡住、Moofy 搬运、Duramboros 旋转、Uroktor 跳跃、贯通弹命中间隔、装备检查崩溃、怪物注意度、16:10 集会所食堂、超宽屏道具箱、纹理池回收、Turnip 提交路径、Mod 跳转/重叠告警与 Mod 互操作、G 级菜单鼠标、日志与超时改进。
 - 跨平台联机：修改 RyuLdn 服务器地址后，下一次搜索立即使用新地址——不再返回旧服务器缓存的搜索结果，旧地址的连接冷却也不再按列表位置波及新地址；搜索中途改地址时，旧地址尚在进行的搜索结果会被丢弃。保存后从下次搜索／创建集会所生效，无需重启游戏（正在集会所中时，退出当前集会所后生效）。
 
 ## 0.2.8（2026-11-22）

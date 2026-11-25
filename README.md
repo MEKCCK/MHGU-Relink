@@ -14,7 +14,8 @@ Ryujinx / suyu 模拟器互通。
 |---|---|
 | [docs/pc.md](docs/pc.md) | PC 版安装、控制、设置、模组、从源码构建 |
 | [docs/android.md](docs/android.md) | Android 安装、游戏文件、存档导入导出、排错 |
-| [docs/online.md](docs/online.md) | 局域网、hub 服务器、Ryujinx / suyu Crossplay、混合 hub |
+| [docs/online.md](docs/online.md) | 局域网、hub 服务器、联邦、Ryujinx / suyu Crossplay、混合 hub |
+| [docs/FEDERATION.md](docs/FEDERATION.md) | Hub 服务器联邦：配置、MHGF 协议、代理加入与 UDP 桥、限制 |
 | [docs/CROSSPLAY-zh-CN.md](docs/CROSSPLAY-zh-CN.md) | Crossplay 选项与端口速查 |
 | [docs/HDR.md](docs/HDR.md) | 原生 HDR 输出与 HDR 分析 |
 | [docs/MODS-zh-CN.md](docs/MODS-zh-CN.md) | Android 模组导入格式与兼容范围 |

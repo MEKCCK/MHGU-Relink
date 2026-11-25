@@ -1,17 +1,10 @@
-MHGU Relink 0.2.8 · 2026-11-22
+MHGU Relink 0.2.9 · 2026-11-26
 
-2026-11-22: HUD size
-Settings -> Display has HUD size (60-100%): the whole hunting HUD shrinks toward its corners - the bars, the item bar, the Hunter Arts, the map and the target camera - at once. 100% is exactly as before.
+2026-11-26: federated play and presence expiry
+Hub federation now carries advertisements, session-code FIND and joins across multiple hops: a server can list, search and join hubs several peers away, over the same path, with TCP and UDP relaying. Older peers fall back to direct federation.
 
-2026-11-22: Brick low-end tier
-One step below Toaster: 15% 3D, 30 FPS, a 360-line HUD, no reverb or grass; the 3D resolution can now go down to 10%.
+Friend presence is forwarded transitively too. The new -presence-ttl (default 90 s) immediately announces a player who stops polling, and expired remote records are cleared downstream instead of waiting for every TTL.
 
-2026-11-22: Effects switch
-Settings -> Graphics has Effects: off, the hits' sparks, the fire and the breath, the dust, the rain and the snow, and the monsters' and Hunter Arts' flashes are not drawn. Sounds, timing and the game's rules are unchanged, but a monster's attack warning is gone too.
+Synced with MHGURecomp 0.20.1: link protocol v4 (session codes, join by code, friend presence/requests/removals, HUBS4 and 3-4 player link pools), upstream fixes, mod interop and debugging improvements. The settings menu is reorganised into Display / Graphics / Audio / Controls / Online / Gameplay / System / Mods / Cheats.
 
-2026-11-22: Textures on low-memory phones
-Under 3.5 GB, one more level of the CPU-decoded 3D textures is dropped (about 1/16 of the memory); under 5 GB, Full-size textures keeps every level (needs a restart, takes much more memory, and the app may be closed).
-
-2026-11-22: Upscale filter, present pacing, and PC Low-end resolution
-Below 100% the 3D picture can be scaled Sharp (nearest); a frame cap that is a whole fraction of the screen's refresh rate now uses FIFO, for a steadier picture; on PC, Low-end mode asks for lines (720/540/360) instead of a percentage.
-
+GameLib ID is now 3bfb26af6be3424b: rebuild and replace your game-code library with this version's tools.
