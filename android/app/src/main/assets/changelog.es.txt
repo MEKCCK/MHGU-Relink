@@ -1,6 +1,6 @@
-MHGU Relink 0.3.1 · 2026-11-27
+MHGU Relink 0.3.2 · 2026-11-27
 
-2026-11-27: la sala permanece listada tras entrar un jugador
-El anfitrión sigue enviando sus PING de mantenimiento mientras un jugador está conectado por retransmisión; la sala ya no desaparece del servidor tras unos 45 segundos.
+2026-11-27: correcciones online de la rama principal
+La petición de listado vuelve a comprobar que la red sigue activa tras conectar, de modo que una red cerrada no envía un HOST sin su código. Los tipos de arma desconocidos de mods muestran una X roja en Unirse a sala y en la lista de jugadores del Hub.
 
-El GameLib ID sigue siendo 3bfb26af6be3424b; las bibliotecas de 0.3.0 siguen funcionando.
+El GameLib ID es ahora 4dbb66b724c00bf3; hay que regenerar la biblioteca del juego con las herramientas 0.3.2.

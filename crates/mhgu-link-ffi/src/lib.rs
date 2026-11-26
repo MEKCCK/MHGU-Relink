@@ -1447,16 +1447,22 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
     // an older server asks for the listing without one.
     let mut code = code_new();
     let mut with_code = true;
+    let stop = with(|st| Arc::clone(&st.stop));
     let mut sess = loop {
         let sock = Lobby::new(addr);
+        let still_current = || !stop.load(Ordering::Relaxed) && with(|st| st.hosting);
         let r = if with_code {
-            sock.host(&info, proto::LINK_PROTO_VERSION, room, Some(&code))
+            sock.host_checked(&info, proto::LINK_PROTO_VERSION, room, Some(&code), still_current)
         } else {
-            sock.host(&info, proto::LINK_PROTO_VERSION, room, None)
+            sock.host_checked(&info, proto::LINK_PROTO_VERSION, room, None, still_current)
         };
         match r {
             Ok(s) => break s,
             Err(e) => match mhgu_link::error_code(&e) {
+                None if e.kind() == io::ErrorKind::Interrupted => {
+                    eprintln!("[link] host server {addr}: network closed before listing");
+                    return false;
+                }
                 Some(proto::ERR_CODE_TAKEN) if with_code => {
                     eprintln!("[link] host server {addr}: that session code is taken, trying a new one");
                     code = code_new();

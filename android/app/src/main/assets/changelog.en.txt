@@ -1,6 +1,6 @@
-MHGU Relink 0.3.1 · 2026-11-27
+MHGU Relink 0.3.2 · 2026-11-27
 
-2026-11-27: keep the hub listed after a player joins
-A host now keeps sending its keep-alive PINGs while a relayed player is connected, so the room no longer disappears from the hub server after about 45 seconds.
+2026-11-27: online fixes from mainline
+The hub-list request now rechecks that its network is still alive after connecting, so a closed network cannot send a HOST without its code. Unknown weapon types from mods show a red X in Join Hub and the Hub player list instead of an empty/Great Sword icon.
 
-GameLib ID remains 3bfb26af6be3424b; the 0.3.0 game-code libraries still work.
+GameLib ID is now 4dbb66b724c00bf3; regenerate your game-code library with the 0.3.2 tools.

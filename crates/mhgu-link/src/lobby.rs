@@ -320,7 +320,26 @@ impl Lobby {
         room: [u8; 16],
         code: Option<&[u8; proto::CODE_LEN]>,
     ) -> io::Result<HostSession> {
+        self.host_checked(info, link_proto, room, code, || true)
+    }
+
+    /// Like `host`, but checks once after connecting and before sending HOST. The caller uses this to
+    /// avoid listing a network that closed while the connection was being made (ldn.c `lobby_thread`).
+    pub fn host_checked<F>(
+        self,
+        info: &[u8],
+        link_proto: u16,
+        room: [u8; 16],
+        code: Option<&[u8; proto::CODE_LEN]>,
+        still_current: F,
+    ) -> io::Result<HostSession>
+    where
+        F: FnOnce() -> bool,
+    {
         let mut s = open(self.addr)?;
+        if !still_current() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "network closed before listing"));
+        }
         match code {
             Some(c) => send(&mut s, proto::T_HOST, &[&header(link_proto, room), info, c])?,
             None => send(&mut s, proto::T_HOST, &[&header(link_proto, room), info])?,
