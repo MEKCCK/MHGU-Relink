@@ -50,7 +50,7 @@ cd build && ./mhgu-relink <游戏目录>
 传输层全部在 `crates/mhgu-link*`：主机/加入/中继、TCP/UDP 链路、踢人、NetworkInfo 广播。C 运行时只保留
 `nn::ldn` 的 HLE 包装、局域网扫描（Android 的组播锁与逐网卡探测）以及 hub 列表/检查的控制协议。
 
-链路协议为 **v4**（上游 0.19 起），与 **v3 互通**：link 帧不变，4 只增加 hub 服务器的能力，主机会接受任一版本的
+链路协议为 **v4**（上游 0.19 起），与旧版 **Recomp v3** 互通：link 帧不变，4 只增加 hub 服务器的能力，主机会接受任一版本的
 Hello，局域网探测按对方版本回应；对方是 v3 主机时按 v3 说。协议 4 的内容：
 
 - **集会所代码（session code）**：主机为每个集会所生成 8 字符代码（Crockford base32，无 I/L/O/U），随 `HOST`
@@ -120,7 +120,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 `SHA-256("MHGURecomp matchmaking key:" + Key)[0..16]`（空 Key = 全零的公共房间），放进每个请求的头部；
 服务器只比较这 16 字节，**永远看不到 Key 本身**，因此：
 
-- 客户端侧指定 Key：C 版/gu-native 在设置里填 `Key`（F1 覆盖层 / `[Multiplayer] Key`）；
+- 客户端侧指定 Key：在设置里填 `Key`（F1 覆盖层 / `[Multiplayer] Key`）；
   Rust FFI 是 `mhgu_ldn_host_server(server, key)` 与 `mhgu_lobby_*(…, key)` 的 `key` 参数；
 - 服务器侧限定房间：`mhgu-hub -key <同一个 Key>`。此时只有该 Key 的房间被服务，
   公共房间（空 Key）与其他 Key 的 HOST/JOIN 得到与「房间不存在」完全相同的 `T_ERROR(1)`，
@@ -140,8 +140,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 `mhgu-hub` 自带一个无依赖的 Web 界面（`-web :39511`，默认开；`off` 关闭）：
 
-- `GET /`：公开页，列「房间 1、房间 2 …」、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；
-- `GET /api/hubs`：同样的 JSON，带 `locked` 和 `access`（`public` / `phone` / `key`）；
+- `GET /`：公开页，列房间名、玩家名、任务、密码、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；
+- `GET /api/hubs`：同样的 JSON，带 `locked`、`access`（`public` / `phone` / `key`）、`room_name`、`names`、`count`/`max`、`quest_id`/`quest_name`/`quest_goal`/`quest_rank`/`quest_stars`、`in_quest`、`passcode`（无密码为 `null`）、`hunter_search`；
 - `GET /admin?token=…`：管理员页：统计、每个 hub 的 `Close`（`POST /admin/close`，会通知主机并踢掉该房间）、
   IP 封禁（`POST /admin/ban` / `unban`，被禁 IP 的连接立即被重置）、`/admin/log` 看最近 300 条事件；
 - 界面多语言：右上角 🌐 点开是语言列表（English / 中文 / Español），点击即切换；选择写进
@@ -150,6 +150,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 - 后台有 **Players** 表（每个已拼接连路的 pair、所属房间、玩家 IP、`↓/↑` 平均速率、`live`/`idle Ns`）与 `Kick`（`POST /admin/kick pair=…`，
   关掉该玩家两侧的 socket，pipe 线程结束、`joins` 递减）；日志可按 `?only=hubs|admin` 过滤；
 - 令牌来自 `-web-token`，不填则启动时随机生成并打印。
+
+房间名、最多四个猎人名、任务 ID、是否任务中、密码和猎人搜索标志来自游戏的 `NetworkInfo` advertise 块；任务名称/目标/等级/星数由 `crates/mhgu-hub/data/quests.json` 映射。该 JSON 由 `tools/extract_mhgudb_quests.py` 从 MHGU Database 2.4.5 的 `quests` 表提取，只保留显示所需元数据，不含 APK 或完整数据库。
 
 ### 热设置（WebUI，无需重启）
 
@@ -173,8 +175,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 ./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <你的令牌> -key <房间 Key>
 ```
 
-两条路径都由 `mhgu-link-ffi` 实现，与 C 版/gu-native 客户端双向兼容（LAN 直连、`MHGD` 数据报、
-经服务器的 `MHGR` 中继都已验证）。
+两条路径都由 `mhgu-link-ffi` 实现，只以 **MHGURecomp** 为联机兼容目标（LAN 直连、`MHGD` 数据报、
+经服务器的 `MHGR` 中继都已验证）。gu-native 没有跟进 Recomp 的协议更新，不再列入兼容列表。
 
 ## 菜单汉化 / 字体
 

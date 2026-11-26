@@ -49,6 +49,12 @@ fn t(l: Lang, key: &str) -> &'static str {
     let (en, zh, es) = match key {
         "hubs" => s!("hubs", "房间", "salas"),
         "players" => s!("players", "玩家", "jugadores"),
+        "room name" => s!("room name", "房间名", "nombre de la sala"),
+        "quest" => s!("quest", "任务", "misión"),
+        "password" => s!("password", "密码", "contraseña"),
+        "unnamed" => s!("unnamed", "未命名", "sin nombre"),
+        "in quest" => s!("in quest", "任务中", "en misión"),
+        "hunter search" => s!("hunter search", "猎人搜索", "búsqueda de cazadores"),
         "connections" => s!("connections", "连接数", "conexiones"),
         "uptime" => s!("uptime", "运行时长", "tiempo activo"),
         "hub" => s!("hub", "房间", "sala"),
@@ -437,29 +443,35 @@ impl Web {
             let public = h.room == [0u8; 4];
             let phone = h.room == proto::room_from_key("public-phone")[..4];
             let keyed = !public && !phone;
-            rows.push_str(&format!(
-                "<tr><td>{} {}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                t(l, "room"), i + 1,
-                h.players,
-                if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
+            let count = if h.count > 0 { h.count as usize } else { h.players };
+            let max = if h.max > 0 { h.max } else { 4 };
+            let names = h.names.iter().map(|n| html(n)).collect::<Vec<_>>().join(", ");
+            let room = if h.room_name.is_empty() { t(l, "unnamed").to_string() } else { html(&h.room_name) };
+            let quest = quest_label(h, l);
+            let pass = h.passcode.map(|p| format!("#{:04}", p)).unwrap_or_else(|| "—".into());
+            let access = if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
                 else if phone { format!("<span class=warn>📱 {}</span>", t(l, "phone room")) }
-                else { format!("<span class=ok>🌐 {}</span>", t(l, "public room")) },
-                if h.players > 1 { format!("<span class=ok>{}</span>", t(l, "open")) } else { format!("<span class=warn>{}</span>", t(l, "waiting")) }
+                else { format!("<span class=ok>🌐 {}</span>", t(l, "public room")) };
+            let status = if count > 1 { format!("<span class=ok>{}</span>", t(l, "open")) } else { format!("<span class=warn>{}</span>", t(l, "waiting")) };
+            rows.push_str(&format!(
+                "<tr><td><b>{}</b><br><small>{} {} · link {}</small></td><td>{} {}<br><small>{}</small></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                room, t(l, "room"), i + 1, h.link_proto,
+                count, format!("/{max}"), names, quest, pass, access, status
             ));
         }
         if rows.is_empty() {
-            rows = format!("<tr><td colspan=4>{}</td></tr>", t(l, "no hubs"));
+            rows = format!("<tr><td colspan=6>{}</td></tr>", t(l, "no hubs"));
         }
         let body = format!(
             r#"<div class=stats>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div></div>
-<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>{rows}</table>
+<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>{rows}</table>
 <p style="color:#9a8a76">{}</p>"#,
             v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
             v.conns, t(l, "connections"), uptime(v.uptime), t(l, "uptime"), traffic(v.bytes), t(l, "traffic"),
-            t(l, "room"), t(l, "players"), t(l, "access"), t(l, "status"),
+            t(l, "room name"), t(l, "players"), t(l, "quest"), t(l, "password"), t(l, "access"), t(l, "status"),
             t(l, "refresh")
         );
         layout(l, "hubs", &body, false)
@@ -629,10 +641,19 @@ impl Web {
         let v = self.view();
         let mut hubs = Vec::new();
         for h in &v.hubs {
+            let names = h.names.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
+            let q = crate::quests::get(h.quest_id);
+            let quest_name = q.map(|q| json_str(&q.name)).unwrap_or_else(|| "null".into());
+            let quest_goal = q.map(|q| json_str(&q.goal)).unwrap_or_else(|| "null".into());
+            let quest_rank = q.map(|q| json_str(&q.rank)).unwrap_or_else(|| "null".into());
+            let quest_stars = q.map(|q| q.stars.to_string()).unwrap_or_else(|| "null".into());
             hubs.push(format!(
-                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}"}}"#,
+                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_goal":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{}}}"#,
                 h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
-                if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" }
+                if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" },
+                json_str(&h.room_name), names, h.count, h.max, h.quest_id,
+                quest_name, quest_goal, quest_rank, quest_stars, h.in_quest,
+                h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search
             ));
         }
         let mut candidates = Vec::new();
@@ -664,6 +685,29 @@ impl Web {
             v.federated_presence
         )
     }
+
+}
+
+fn quest_label(h: &crate::server::HubView, l: Lang) -> String {
+    if h.hunter_search {
+        return t(l, "hunter search").to_string();
+    }
+    let Some(q) = crate::quests::get(h.quest_id) else {
+        return if h.quest_id != 0 {
+            format!("#{}", h.quest_id)
+        } else if h.in_quest {
+            t(l, "in quest").to_string()
+        } else {
+            "—".into()
+        };
+    };
+    let name = match l {
+        Lang::Es if !q.name_es.is_empty() => &q.name_es,
+        Lang::Zh if !q.name_ja.is_empty() => &q.name_ja,
+        Lang::Es | Lang::Zh if q.name.is_empty() => return "—".into(),
+        _ => &q.name,
+    };
+    html(name)
 }
 
 fn login(l: Lang) -> String {

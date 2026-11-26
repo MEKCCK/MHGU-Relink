@@ -240,6 +240,6 @@ Usage: mhgu-hub [options]\n\
 \
   -h, --help            this help\n\
 \n\
-Wire-compatible with gu-native and MHGURecomp clients."
+Online support: MHGURecomp clients."
     );
 }

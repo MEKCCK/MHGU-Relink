@@ -3,12 +3,13 @@ name = "mhgu-hub"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "A from-scratch Rust hub server for MHGU Local Play over the internet, wire-compatible with gu-native and MHGURecomp."
+description = "A from-scratch Rust hub server for MHGU Local Play over the internet, wire-compatible with MHGURecomp."
 
 [dependencies]
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 getrandom = "0.4"
 mhgu-protocol = { path = "../mhgu-protocol" }
+serde_json = "1"
 
 [[bin]]
 name = "mhgu-hub"

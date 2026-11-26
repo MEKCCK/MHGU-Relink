@@ -1,7 +1,7 @@
 //! The hub server: LIST / HOST / JOIN / ATTACH over TCP, the pair splice, and the MHGR UDP relay.
 //!
-//! Behaviour and wire format mirror MHGURecomp's `server/server.go` (and hence gu-native), so both
-//! clients can find each other's hubs and play through this server without a forwarded port.
+//! Behaviour and wire format mirror MHGURecomp's hub, so its clients can find each other's hubs
+//! and play through this server without a forwarded port. gu-native is not a supported target.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
@@ -136,7 +136,21 @@ pub struct Shared {
 }
 
 /// A hub as the web UI shows it.
-pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64, pub room: [u8; 4] }
+pub struct HubView {
+    pub id: u64,
+    pub players: usize,
+    pub link_proto: u16,
+    pub age: u64,
+    pub room: [u8; 4],
+    pub room_name: String,
+    pub names: Vec<String>,
+    pub count: u8,
+    pub max: u8,
+    pub quest_id: u32,
+    pub in_quest: bool,
+    pub passcode: Option<u16>,
+    pub hunter_search: bool,
+}
 
 /// A federated peer, as the web UI shows it.
 pub struct PeerRow {
@@ -169,14 +183,25 @@ impl Shared {
         let mut hubs: Vec<HubView> = self
             .hubs
             .values()
-            .map(|h| HubView {
-                id: h.id,
-                // The host, plus the players actually spliced to it (a JOIN that is still waiting for the
-                // host's ATTACH is not in the room yet, so it must not show up as a player).
-                players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
-                link_proto: h.link_proto,
-                age: h.created.elapsed().as_secs(),
-                room: [h.room[0], h.room[1], h.room[2], h.room[3]],
+            .map(|h| {
+                let d = crate::room::parse(&h.info);
+                HubView {
+                    id: h.id,
+                    // The host, plus the players actually spliced to it (a JOIN that is still waiting for the
+                    // host's ATTACH is not in the room yet, so it must not show up as a player).
+                    players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
+                    link_proto: h.link_proto,
+                    age: h.created.elapsed().as_secs(),
+                    room: [h.room[0], h.room[1], h.room[2], h.room[3]],
+                    room_name: d.room_name,
+                    names: d.names,
+                    count: d.count,
+                    max: d.max,
+                    quest_id: d.quest_id,
+                    in_quest: d.in_quest,
+                    passcode: d.passcode,
+                    hunter_search: d.hunter_search,
+                }
             })
             .collect();
         hubs.sort_by(|a, b| b.players.cmp(&a.players).then(a.id.cmp(&b.id)));

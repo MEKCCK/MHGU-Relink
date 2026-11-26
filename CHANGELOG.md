@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布
+
+- 联机兼容范围：只以 MHGURecomp 为目标；gu-native 未跟进 Recomp 的协议更新，不再列入联机兼容列表（历史来源说明保留）。
+- Hub Web/API 房间详情：显示房间名、猎人名、任务（ID → 名称/目标/等级/星数）、密码、是否任务中与猎人搜索；任务元数据由 MHGU Database 2.4.5 的 quests 表提取为 `crates/mhgu-hub/data/quests.json`，不含 APK/完整数据库。
+- 设置菜单：按平台隐藏 HDR/键盘鼠标/触控/手机振动等不适用的 section/row；补齐 `share_urgent`、好友通知开关的未保存判断；移除 0.2.9 子页重构留下的重复标题。
+
 ## 0.2.9（2026-11-26）
 
 - 兼容 ID 更新为 `3bfb26af6be3424b`：0.2.9 的 `libmhgugame.so`／`mhgugame.so`／`mhgugame.dll` 必须用本版工具重新生成；旧游戏代码库会在启动时被明确拒绝。
