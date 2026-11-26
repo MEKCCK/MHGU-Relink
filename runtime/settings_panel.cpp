@@ -1007,11 +1007,20 @@ static void net_session_codes(std::vector<Row> &rows) {
     r.value = cur;
     r.help = tr("Your hub's code, to share: another player types it in Join with code and finds your hub at the top of Join Hub, whatever your matchmaking key. It stays the same while the hub is listed. None: not hosting or in a hub through the hub server.");
     rows.push_back(std::move(r));
+    int st = ldn_invite_state(code, sizeof code);
+    const char *state = st == LDN_INVITE_SEARCHING ? "Looking for the hub..."
+                        : st == LDN_INVITE_READY ? "Found: first in Join Hub"
+                        : st == LDN_INVITE_NOT_FOUND ? "No hub has that code"
+                        : st == LDN_INVITE_OLD_SERVER ? "The hub server is older than this game"
+                        : st == LDN_INVITE_FAILED ? "Could not look up the code"
+                                                  : "None";
     r = Row{};
     r.id = "net.join.code";
     r.title = tr("Join with code");
-    r.value = *net_join_code ? net_join_code : std::string(tr("None"));
-    r.help = tr("Type a hub's session code (8 letters and digits); the hub is looked up on the hub server and comes first in Join Hub for ten minutes.");
+    std::string join_value = *net_join_code ? net_join_code : std::string(tr("None"));
+    if (st != LDN_INVITE_NONE) join_value += " (" + std::string(tr(state)) + ")";
+    r.value = join_value;
+    r.help = tr("Type a hub's session code (8 letters and digits); the hub is looked up on the hub server and comes first in Join Hub for ten minutes. The lookup result appears after the code.");
     r.activate = []() {
         keyboard(tr("Session code"), net_join_code, sizeof net_join_code - 1, [](const std::string &typed, std::string &error) {
             SDL_utf8strlcpy(net_join_code, typed.c_str(), sizeof net_join_code);
@@ -1022,19 +1031,6 @@ static void net_session_codes(std::vector<Row> &rows) {
             return true;
         });
     };
-    rows.push_back(std::move(r));
-    int st = ldn_invite_state(code, sizeof code);
-    const char *state = st == LDN_INVITE_SEARCHING ? "Looking for the hub..."
-                        : st == LDN_INVITE_READY ? "Found: first in Join Hub"
-                        : st == LDN_INVITE_NOT_FOUND ? "No hub has that code"
-                        : st == LDN_INVITE_OLD_SERVER ? "The hub server is older than this game"
-                        : st == LDN_INVITE_FAILED ? "Could not look up the code"
-                                                  : "None";
-    r = Row{};
-    r.id = "net.invite";
-    r.title = tr("Join by code");
-    r.value = (st != LDN_INVITE_NONE && code[0] && code[0] != '-') ? std::string(code) + " (" + tr(state) + ")"
-                                                                   : tr(state);
     rows.push_back(std::move(r));
 }
 
