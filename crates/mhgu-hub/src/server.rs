@@ -382,11 +382,23 @@ impl Shared {
         for id in &gone {
             self.close_hub(*id);
         }
+        // Turning "separate Android public room" off merges the hubs already in the phone room into
+        // the public room. (Turning it back on cannot identify the Android hubs among the public ones.)
+        let mut merged = 0usize;
+        if old.separate_phones && !next.separate_phones {
+            let phone = proto::phone_room();
+            for h in self.hubs.values_mut() {
+                if h.room == phone {
+                    h.room = [0u8; 16];
+                    merged += 1;
+                }
+            }
+        }
         if old != next {
             self.note(format!(
-                "admin: settings min-proto {} -> {}, max-proto {} -> {}, link-pool {} -> {}, separate-phones {} -> {} ({} hub(s) closed)",
+                "admin: settings min-proto {} -> {}, max-proto {} -> {}, link-pool {} -> {}, separate-phones {} -> {} ({} hub(s) closed, {} merged)",
                 old.min_proto, next.min_proto, old.max_proto, next.max_proto, old.pool_text(), next.pool_text(),
-                old.separate_phones, next.separate_phones, gone.len()
+                old.separate_phones, next.separate_phones, gone.len(), merged
             ));
         }
         gone.len()

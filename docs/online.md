@@ -169,7 +169,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 | `Bandwidth (bytes/s)` | 每条 pair 每方向带宽 | 新建 pair；已有 pair 保持原值 |
 
 非法值（非数字、0 上限、list > 64、带宽 < 1）整次拒绝，服务器保持原设置。
-修改会写入管理员日志；所有设置也可用启动参数指定，WebUI 只负责运行中修改。
+修改会写入管理员日志；所有设置也可用启动参数指定，WebUI 只负责**本次进程**的运行中修改——重启后回到启动参数/默认值。需要重启后保持的，请写进 systemd 的启动参数，例如 `-separate-phones false`、`-min-proto 3`。
 
 ```sh
 ./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <你的令牌> -key <房间 Key>

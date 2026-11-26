@@ -3,6 +3,7 @@
 ## 未发布
 
 - 联机兼容范围：只以 MHGURecomp 为目标；gu-native 未跟进 Recomp 的协议更新，不再列入联机兼容列表（历史来源说明保留）。
+- Hub 公共房间：关闭「仅手机」时把已存在的 Android 公共房间立即合并进公共房间；`-separate-phones=false` 与 `-separate-phones false` 都支持。WebUI 热设置只对当前进程生效，重启后请保留启动参数。
 - Hub Web/API 房间详情：显示房间名、猎人名、任务（ID → 名称/目标/等级/星数）、密码、是否任务中与猎人搜索；任务元数据由 MHGU Database 2.4.5 的 quests 表提取为 `crates/mhgu-hub/data/quests.json`，不含 APK/完整数据库。
 - 设置菜单：按平台隐藏 HDR/键盘鼠标/触控/手机振动等不适用的 section/row；补齐 `share_urgent`、好友通知开关的未保存判断；移除 0.2.9 子页重构留下的重复标题。
 
