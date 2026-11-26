@@ -1,6 +1,6 @@
-MHGU Relink 0.3.3 · 2026-11-27
+MHGU Relink 0.3.4 · 2026-11-27
 
-2026-11-27: offline pause/suspend
-Pause (PauseKey, default Pause) now pauses the game offline, stops the guest clock and audio, and shows PAUSED; Esc or Enter resumes. It is refused in a hub, with Hunter Search, or while the game saves.
+2026-11-27: Pause binding, logs and hub settings
+Pause/Suspend now has a settings-menu binding row. Hub host failures log the address, session-code state, error kind and text. The Rust hub accepts -settings FILE and reloads min-proto, max-proto, link-pool and separate-phones on SIGHUP.
 
-GameLib ID remains 4dbb66b724c00bf3; 0.3.2 game libraries still work.
+GameLib ID remains 4dbb66b724c00bf3.

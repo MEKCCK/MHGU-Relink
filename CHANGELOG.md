@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.3.4（2026-11-27）
+
+- 设置 → 按键绑定/游戏操作：接上 Pause/Suspend 绑定行，可选择、清空、重置；PauseKey 仍可写 ini。
+- Hub 日志：主机 HOST 失败现在带服务器地址、是否带会话码、错误类型和错误文本；更接近上游 e368c19 的诊断信息。
+- Hub 运维：新增 `-settings FILE` + SIGHUP，热加载 `min-proto`、`max-proto`、`link-pool`、`separate-phones`；systemd 示例已加 ExecReload。
+- GameLib ID 保持 `4dbb66b724c00bf3`，0.3.2 私库游戏库继续可用。
+
 ## 0.3.3（2026-11-27）
 
 - 同步主线 `7ec3347`：新增离线 Pause/Suspend（默认 Pause 键）；离线时暂停游戏、停止游戏时钟和音频，显示 PAUSED 覆盖层；Hub/Hunter Search 或正在保存时拒绝。

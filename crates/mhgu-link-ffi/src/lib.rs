@@ -1472,7 +1472,11 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
                     with_code = false;
                 }
                 _ => {
-                    eprintln!("[link] host server {addr}: {e}");
+                    eprintln!(
+                        "[link] host server {addr}: HOST failed{}: {e} (kind {:?})",
+                        if with_code { " with a session code" } else { "" },
+                        e.kind()
+                    );
                     return false;
                 }
             },

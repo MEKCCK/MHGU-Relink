@@ -1,6 +1,6 @@
-MHGU Relink 0.3.3 · 2026-11-27
+MHGU Relink 0.3.4 · 2026-11-27
 
-2026-11-27: pausa/suspensión sin conexión
-La tecla Pause (PauseKey, Pause por defecto) pausa el juego sin conexión, detiene el reloj del juego y el audio, y muestra PAUSED; Esc o Enter lo reanudan. Se rechaza en una sala, con Búsqueda de cazadores o mientras el juego guarda.
+2026-11-27: enlace de Pausa, logs y ajustes del Hub
+Pausa/Suspender ahora tiene una fila de enlace en los ajustes. Los fallos de host del Hub registran la dirección, el estado del código de sesión, el tipo y el texto del error. El Hub Rust acepta -settings FILE y recarga min-proto, max-proto, link-pool y separate-phones con SIGHUP.
 
-El GameLib ID sigue siendo 4dbb66b724c00bf3; las bibliotecas de 0.3.2 siguen funcionando.
+El GameLib ID sigue siendo 4dbb66b724c00bf3.

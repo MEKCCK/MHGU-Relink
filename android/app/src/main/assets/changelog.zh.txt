@@ -1,6 +1,6 @@
-MHGU Relink 0.3.3 · 2026-11-27
+MHGU Relink 0.3.4 · 2026-11-27
 
-2026-11-27：离线暂停/挂起
-暂停键（PauseKey，默认 Pause）现在可在离线时暂停游戏，停止游戏时钟和音频，并显示 PAUSED；Esc 或 Enter 继续。Hub、猎人搜索或正在保存时会被拒绝。
+2026-11-27：暂停绑定、日志与 Hub 运维
+暂停/挂起现在有设置菜单绑定行。Hub 主机失败日志会显示地址、是否带会话码、错误类型和文本。Rust Hub 支持 -settings FILE，并在 SIGHUP 时热加载 min-proto、max-proto、link-pool、separate-phones。
 
-GameLib ID 保持 4dbb66b724c00bf3，0.3.2 游戏代码库继续可用。
+GameLib ID 保持 4dbb66b724c00bf3。

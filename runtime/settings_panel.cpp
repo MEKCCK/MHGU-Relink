@@ -1177,6 +1177,7 @@ const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left"
                                         "Item left", "Item right"};
 // What else a key (or KEY_MOUSE + a mouse button) does: one of the recomp's own keys (keymap.h), a keybind other than
 // skip, or (for a keybind's) the chat key; nullptr: nothing
+const int CAPTURE_CHAT = -1, CAPTURE_PAUSE = -2;
 const char *key_use(int code, int skip) {
     if (const char *use = code < KEY_MOUSE ? key_reserved(code) : nullptr)
         return tr(use);
@@ -1184,11 +1185,13 @@ const char *key_use(int code, int skip) {
         for (int k = 0; k < BIND_KEYS; k++)
             if (i != skip && (s.draft.binds[i][k] == code || (config_mod_bound(i) && config_live_bind(i, k) == code)))
                 return tr(bind_titles[i]);
-    if (skip >= 0 && code == (int)SDL_GetScancodeFromName(s.draft.chat_key))
+    if (skip != CAPTURE_CHAT && code == (int)SDL_GetScancodeFromName(s.draft.chat_key))
         return tr("Chat key");
+    if (skip != CAPTURE_PAUSE && code == (int)SDL_GetScancodeFromName(s.draft.pause_key))
+        return tr("Pause/Suspend");
     return nullptr;
 }
-// Choosing a key: for a keybind (BIND_*, add: its second key) or the chat key (-1)
+// Choosing a key: for a keybind (BIND_*, add: its second key), the chat key or the pause key
 void capture(int bind, bool add) {
     acts().capture = -1;
     s.capture_bind = bind;
@@ -1209,7 +1212,22 @@ void chat_key_row(std::vector<Row> &rows) {
         r.value += std::string(" (") + tr("in use:") + " " + use + ")";
         r.warn = true;
     }
-    r.activate = []() { capture(-1, false); };
+    r.activate = []() { capture(CAPTURE_CHAT, false); };
+    rows.push_back(std::move(r));
+}
+// Pause/Suspend's key; red when something else already uses it
+void pause_key_row(std::vector<Row> &rows) {
+    Row r;
+    r.id = "pause.key";
+    r.title = tr("Pause/Suspend");
+    keyed(r, ini("PauseKey"));
+    SDL_Scancode key = SDL_GetScancodeFromName(s.draft.pause_key);
+    r.value = key != SDL_SCANCODE_UNKNOWN ? s.draft.pause_key : tr("None");
+    if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_use((int)key, CAPTURE_PAUSE) : nullptr) {
+        r.value += std::string(" (") + tr("in use:") + " " + use + ")";
+        r.warn = true;
+    }
+    r.activate = []() { capture(CAPTURE_PAUSE, false); };
     rows.push_back(std::move(r));
 }
 // One keybind as a row (the Keybinds submenu's, and the Keys of the Game actions screen)
@@ -1268,10 +1286,13 @@ void keybind_rows(std::vector<Row> &r) {
     }
     header(r, "bind.other", tr("Chat"));
     chat_key_row(r);
+    header(r, "bind.pause", tr("Pause/Suspend"));
+    pause_key_row(r);
     action(r, "bind.reset", tr("Reset keybinds"), []() {
         Config f = config_defaults();
         memcpy(s.draft.binds, f.binds, sizeof f.binds);
         SDL_strlcpy(s.draft.chat_key, f.chat_key, sizeof s.draft.chat_key);
+        SDL_strlcpy(s.draft.pause_key, f.pause_key, sizeof s.draft.pause_key);
     });
     action(r, "bind.back", tr("Back"), []() { pop(); });
 }
@@ -1513,6 +1534,8 @@ void key_rows(std::vector<Row> &r) {
         r.push_back(bind_row(i, "key." + std::to_string(i)));
     header(r, "key.h.chat", tr("Chat"));
     chat_key_row(r);
+    header(r, "key.h.pause", tr("Pause/Suspend"));
+    pause_key_row(r);
     if (!simple) {
         header(r, "key.h.buttons", tr("Buttons"));
         for (int i = BIND_A; i <= BIND_RSTICK; i++)
@@ -1723,6 +1746,7 @@ void action_rows(std::vector<Row> &r) {
 // What the focused row (or the one being set) reads is lit on it with an arrow to its label; the row under the pointer is
 // ringed; every input down right now glows; an input clicked on it goes to the row being set.
 const int BV_KEY_CHAT = 999;  // (the chat key's id among the keys of the Keys tab)
+const int BV_KEY_PAUSE = 998; // (the pause key's)
 bool g_bv_pointing;           // the pointer is on the drawing: a click there is the drawing's, not a button chosen
 std::string g_bv_help;        // the help of the row focused or pointed at, under the drawing
 std::string short_label(const std::string &full) {
@@ -1787,12 +1811,14 @@ FocusTarget focus_target(const std::string &id) {
         return {3, atoi(id.c_str() + 4)};
     else if (id == "chat.key")
         return {4, BV_KEY_CHAT};
+    else if (id == "pause.key")
+        return {5, BV_KEY_PAUSE};
     return {0, -1};
 }
 int key_of(const std::string &id, int kind) {
     FocusTarget t = focus_target(id);
     if (kind == TAB_KEYS)
-        return t.kind == 3 || t.kind == 4 ? t.key : -1;
+        return t.kind == 3 || t.kind == 4 || t.kind == 5 ? t.key : -1;
     if (acts().layout == ACT_LAYOUT_SIMPLE)
         return t.kind == 2 ? t.key : -1;
     return t.kind == 1 ? t.key : -1;
@@ -1810,7 +1836,7 @@ std::string key_label(int key, int kind) {
     if (key < 0)
         return "";
     if (kind == TAB_KEYS)
-        return key == BV_KEY_CHAT ? tr("Chat key") : tr(bind_titles[key]);
+        return key == BV_KEY_CHAT ? tr("Chat key") : key == BV_KEY_PAUSE ? tr("Pause/Suspend") : tr(bind_titles[key]);
     if (acts().layout == ACT_LAYOUT_SIMPLE)
         return short_label(tr(act_row(key)->label));
     return short_label(tr(act_label(key)));
@@ -3368,6 +3394,22 @@ void pad_map_rows(std::vector<Row> &r) {
 bool bind_take(int key) {
     const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
     const char *reserved = key > 0 && key < KEY_MOUSE ? key_reserved(key) : nullptr;
+    if (s.capture_bind == CAPTURE_PAUSE && key > 0) {
+        if (reserved) {
+            s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+            return false;
+        }
+        if (key == SDL_SCANCODE_RETURN || key == SDL_SCANCODE_KP_ENTER) {
+            s.error = tr("That key can't be used.");
+            return false;
+        }
+        if (*name && strlen(name) < sizeof s.draft.pause_key && !strpbrk(name, ";#")) {
+            SDL_strlcpy(s.draft.pause_key, name, sizeof s.draft.pause_key);
+            return true;
+        }
+        s.error = tr("That key can't be used.");
+        return false;
+    }
     if (s.capture_bind >= 0 && key > 0) {
         int *keys = s.draft.binds[s.capture_bind];
         if (reserved) {
@@ -3441,6 +3483,8 @@ std::vector<Row> rows_for_view(bool *open) {
             action(r, "capture.none", tr("None"), []() {
                 if (s.capture_bind >= 0)
                     s.draft.binds[s.capture_bind][0] = s.draft.binds[s.capture_bind][1] = 0;
+                else if (s.capture_bind == CAPTURE_PAUSE)
+                    s.draft.pause_key[0] = 0;
                 else
                     s.draft.chat_key[0] = 0;
                 pop();
