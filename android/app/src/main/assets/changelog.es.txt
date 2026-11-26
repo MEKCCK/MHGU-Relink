@@ -2,5 +2,3 @@ MHGU Relink 0.3.4 · 2026-11-27
 
 2026-11-27: enlace de Pausa, logs y ajustes del Hub
 Pausa/Suspender ahora tiene una fila de enlace en los ajustes. Los fallos de host del Hub registran la dirección, el estado del código de sesión, el tipo y el texto del error. El Hub Rust acepta -settings FILE y recarga min-proto, max-proto, link-pool y separate-phones con SIGHUP.
-
-El GameLib ID sigue siendo 4dbb66b724c00bf3.

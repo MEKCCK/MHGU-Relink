@@ -2,5 +2,3 @@ MHGU Relink 0.3.4 · 2026-11-27
 
 2026-11-27：暂停绑定、日志与 Hub 运维
 暂停/挂起现在有设置菜单绑定行。Hub 主机失败日志会显示地址、是否带会话码、错误类型和文本。Rust Hub 支持 -settings FILE，并在 SIGHUP 时热加载 min-proto、max-proto、link-pool、separate-phones。
-
-GameLib ID 保持 4dbb66b724c00bf3。
