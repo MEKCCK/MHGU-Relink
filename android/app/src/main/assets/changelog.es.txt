@@ -1,10 +1,8 @@
-MHGU Relink 0.2.9 · 2026-11-26
+MHGU Relink 0.3.0 · 2026-11-27
 
-2026-11-26: juego federado y presencia caducada
-La federación de hubs ahora propaga anuncios, FIND por código de sesión y uniones por varios saltos: un servidor puede listar, buscar y entrar en hubs a varios peers de distancia, por la misma ruta, con retransmisión TCP y UDP. Los peers antiguos vuelven a la federación directa.
+2026-11-27: cinemáticas panorámicas y limpieza de ajustes
+Las cinemáticas panorámicas mantienen sus barras centradas: las capas anchas y bajas ya no se comprimen con el HUD ni dejan huecos a los lados.
 
-La presencia de amigos también se reenvía de forma transitiva. El nuevo -presence-ttl (90 s por defecto) anuncia de inmediato a un jugador que deja de responder, y los registros remotos caducados se borran aguas abajo sin esperar el TTL completo.
+Ajustes → En línea → Sesión y amigos ya no muestra la fila duplicada Unirse por código. El resultado de la búsqueda aparece después de la única fila editable Unirse con código.
 
-Sincronizado con MHGURecomp 0.20.1: protocolo de enlace v4 (códigos de sesión, unirse por código, presencia/solicitudes/eliminaciones de amigos, HUBS4 y grupos de enlace de 3-4), correcciones upstream, interoperabilidad de mods y mejoras de depuración. El menú de ajustes se reorganiza en Pantalla / Gráficos / Audio / Controles / En línea / Juego / Sistema / Mods / Trucos.
-
-El GameLib ID ahora es 3bfb26af6be3424b: reconstruye y sustituye la biblioteca de código del juego con las herramientas de esta versión.
+El GameLib ID no cambia (3bfb26af6be3424b): las bibliotecas de código del juego existentes siguen funcionando.

@@ -1,10 +1,8 @@
-MHGU Relink 0.2.9 · 2026-11-26
+MHGU Relink 0.3.0 · 2026-11-27
 
-2026-11-26: federated play and presence expiry
-Hub federation now carries advertisements, session-code FIND and joins across multiple hops: a server can list, search and join hubs several peers away, over the same path, with TCP and UDP relaying. Older peers fall back to direct federation.
+2026-11-27: widescreen cutscenes and settings cleanup
+Widescreen cutscenes now keep their cinematic bars centred: the wide, shallow layers are no longer squeezed with the HUD or split with gaps at the sides.
 
-Friend presence is forwarded transitively too. The new -presence-ttl (default 90 s) immediately announces a player who stops polling, and expired remote records are cleared downstream instead of waiting for every TTL.
+Settings → Online → Session & Friends no longer shows the duplicate Join by code status row. The lookup result appears after the single editable Join with code row.
 
-Synced with MHGURecomp 0.20.1: link protocol v4 (session codes, join by code, friend presence/requests/removals, HUBS4 and 3-4 player link pools), upstream fixes, mod interop and debugging improvements. The settings menu is reorganised into Display / Graphics / Audio / Controls / Online / Gameplay / System / Mods / Cheats.
-
-GameLib ID is now 3bfb26af6be3424b: rebuild and replace your game-code library with this version's tools.
+GameLib ID is unchanged (3bfb26af6be3424b): existing game-code libraries keep working.

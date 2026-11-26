@@ -1,6 +1,6 @@
 # Maintainer: mhgu
 pkgname=mhgu-hub
-pkgver=0.2.9
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="MHGU Relink hub server (Rust, wire-compatible with MHGURecomp)"
 arch=('x86_64' 'aarch64')
