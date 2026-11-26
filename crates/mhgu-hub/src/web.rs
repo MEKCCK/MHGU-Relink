@@ -67,6 +67,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "key room" => s!("key", "Key 房间", "sala con Key"),
         "phone room" => s!("phone only", "仅手机", "solo Android"),
         "waiting" => s!("waiting", "等待中", "esperando"),
+        "full" => s!("full", "已满", "completa"),
         "no hubs" => s!("No hubs right now.", "当前没有房间。", "Ahora no hay salas."),
         "traffic" => s!("traffic", "流量", "tráfico"),
         "kick" => s!("Kick", "踢出", "Expulsar"),
@@ -458,7 +459,13 @@ impl Web {
             let access = if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
                 else if phone { format!("<span class=warn>📱 {}</span>", t(l, "phone room")) }
                 else { format!("<span class=ok>🌐 {}</span>", t(l, "public room")) };
-            let status = if count > 1 { format!("<span class=ok>{}</span>", t(l, "open")) } else { format!("<span class=warn>{}</span>", t(l, "waiting")) };
+            let status = if count >= max as usize {
+                format!("<span class=warn>{}</span>", t(l, "full"))
+            } else if count > 1 {
+                format!("<span class=ok>{}</span>", t(l, "open"))
+            } else {
+                format!("<span class=warn>{}</span>", t(l, "waiting"))
+            };
             rows.push_str(&format!(
                 "<tr><td><b>{}</b><br><small>{} {} · link {}</small></td><td>{} {}<br><small>{}</small></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 room, t(l, "room"), i + 1, h.link_proto,
@@ -654,12 +661,13 @@ impl Web {
             let quest_rank = q.map(|q| json_str(&q.rank)).unwrap_or_else(|| "null".into());
             let quest_stars = q.map(|q| q.stars.to_string()).unwrap_or_else(|| "null".into());
             hubs.push(format!(
-                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_goal":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{}}}"#,
+                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_goal":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
                 h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
                 if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" },
                 json_str(&h.room_name), names, h.count, h.max, h.quest_id,
                 quest_name, quest_goal, quest_rank, quest_stars, h.in_quest,
-                h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search
+                h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search,
+                h.count > 0 && h.count >= h.max
             ));
         }
         let mut candidates = Vec::new();

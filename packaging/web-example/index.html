@@ -55,7 +55,7 @@ const TEXT = {
     tagline: 'Public gathering hall board', boardEyebrow: 'GATHERING HALLS', boardTitle: 'Open rooms',
     rooms: 'Rooms', hunters: 'Hunters', connections: 'Connections', uptime: 'Uptime', updated: 'Updated',
     loading: 'Reading the board…', none: 'No gathering halls are open right now.', error: 'The hub could not be reached.',
-    room: 'Room', quest: 'Quest', passcode: 'Passcode', access: 'Access', status: 'Status', open: 'Open', waiting: 'Waiting',
+    room: 'Room', quest: 'Quest', passcode: 'Passcode', access: 'Access', status: 'Status', open: 'Open', full: 'Full', waiting: 'Waiting',
     public: 'Public', phone: 'Phone public', key: 'Key room', hunterSearch: 'Hunter search',
     unnamed: 'Unnamed room', inQuest: 'In quest', noQuest: 'No quest selected', noPasscode: 'No passcode',
     players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters'
@@ -64,7 +64,7 @@ const TEXT = {
     tagline: '公开集会所留言板', boardEyebrow: '集会所', boardTitle: '当前房间',
     rooms: '房间', hunters: '猎人', connections: '连接数', uptime: '运行时长', updated: '更新于',
     loading: '正在读取留言板…', none: '当前没有开放的集会所。', error: '无法连接到 Hub。',
-    room: '房间', quest: '任务', passcode: '密码', access: '访问', status: '状态', open: '可加入', waiting: '等待中',
+    room: '房间', quest: '任务', passcode: '密码', access: '访问', status: '状态', open: '可加入', full: '已满', waiting: '等待中',
     public: '公开', phone: '手机公共', key: 'Key 房间', hunterSearch: '猎人搜索',
     unnamed: '未命名房间', inQuest: '任务中', noQuest: '未选任务', noPasscode: '无密码',
     players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入'
@@ -73,7 +73,7 @@ const TEXT = {
     tagline: 'Tablón de salas públicas', boardEyebrow: 'SALAS DE REUNIÓN', boardTitle: 'Salas abiertas',
     rooms: 'Salas', hunters: 'Cazadores', connections: 'Conexiones', uptime: 'Tiempo activo', updated: 'Actualizado',
     loading: 'Leyendo el tablón…', none: 'No hay salas abiertas ahora.', error: 'No se pudo conectar con el hub.',
-    room: 'Sala', quest: 'Misión', passcode: 'Contraseña', access: 'Acceso', status: 'Estado', open: 'Abierta', waiting: 'Esperando',
+    room: 'Sala', quest: 'Misión', passcode: 'Contraseña', access: 'Acceso', status: 'Estado', open: 'Abierta', full: 'Completa', waiting: 'Esperando',
     public: 'Pública', phone: 'Pública de móvil', key: 'Sala con Key', hunterSearch: 'Búsqueda de cazadores',
     unnamed: 'Sala sin nombre', inQuest: 'En misión', noQuest: 'Sin misión', noPasscode: 'Sin contraseña',
     players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores'
@@ -126,6 +126,10 @@ function questTitle(h) {
   if (h.in_quest) return T().inQuest;
   return T().noQuest;
 }
+function roomState(h) {
+  const count = Number(h.count || h.players || 0), max = Number(h.max || 4);
+  return count >= max ? 'full' : count > 1 ? 'open' : 'waiting';
+}
 function pass(h) {
   return h.passcode == null ? T().noPasscode : '#' + String(h.passcode).padStart(4, '0');
 }
@@ -166,7 +170,8 @@ function renderRooms(v) {
       const goal = h.quest_goal ? `<span class="quest-goal">${esc(h.quest_goal)}</span>` : '';
       const rank = h.quest_rank ? `<span class="quest-rank">${esc(h.quest_rank)}${h.quest_stars ? ' · ' + '★'.repeat(Math.min(10, Number(h.quest_stars))) : ''}</span>` : '';
       const hunterNames = names(h) || `<span class="hunter empty-name">${esc(t.emptyNames)}</span>`;
-      return `<article class="room ${kind}${h.hunter_search ? ' search' : ''}">
+      const st = h.full || roomState(h) === 'full' ? 'full' : roomState(h);
+      return `<article class="room ${kind}${h.hunter_search ? ' search' : ''}${st === 'full' ? ' full' : ''}">
         <div class="room-top">
           <div>
             <p class="room-kicker">${esc(t.room)} ${i + 1} · Link ${esc(h.link)} · ${esc(age(h.age))}</p>
@@ -185,7 +190,7 @@ function renderRooms(v) {
         </div>
         <div class="room-bottom">
           <span class="pass ${h.passcode == null ? 'none' : ''}">${esc(t.passcode)} · ${esc(pass(h))}</span>
-          <span class="state ${count > 1 ? 'open' : 'waiting'}">${esc(count > 1 ? t.open : t.waiting)}</span>
+          <span class="state ${st}">${esc(t[st])}</span>
         </div>
       </article>`;
     }).join('');

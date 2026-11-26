@@ -173,6 +173,7 @@ h1 { margin: 2px 0 2px; font: 600 clamp(24px, 3vw, 38px)/1.05 Georgia, "Times Ne
 .room.key::before { background: linear-gradient(var(--gold), #8f642a); }
 .room.phone::before { background: linear-gradient(#b78b4b, #7d5b30); }
 .room.search::before { background: linear-gradient(var(--muted), #b7a994); }
+.room.full::before { background: linear-gradient(var(--red), #6f2f26); }
 .room:hover { border-color: var(--line-strong); box-shadow: 0 13px 30px rgba(55, 37, 18, .14); transform: translateY(-1px); transition: .18s ease; }
 @keyframes rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 .room-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
@@ -217,6 +218,7 @@ h1 { margin: 2px 0 2px; font: 600 clamp(24px, 3vw, 38px)/1.05 Georgia, "Times Ne
 .state { border-radius: 999px; padding: 3px 9px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .state.open { background: rgba(76, 116, 85, .13); color: var(--green); }
 .state.waiting { background: rgba(195, 152, 77, .14); color: #8a6225; }
+.state.full { background: rgba(150, 63, 49, .13); color: var(--red); }
 .empty { grid-column: 1 / -1; display: grid; place-items: center; gap: 8px; min-height: 190px; color: var(--muted); text-align: center; }
 .empty-mark { font: 600 36px/1 Georgia, serif; color: var(--gold); }
 .spinner { width: 26px; height: 26px; border: 2px solid var(--line); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; }
