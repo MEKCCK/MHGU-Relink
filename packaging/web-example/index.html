@@ -74,7 +74,7 @@ const TEXT = {
     room: 'Room', quest: 'Quest', passcode: 'Passcode', access: 'Access', status: 'Status', open: 'Open', full: 'Full', waiting: 'Waiting',
     public: 'Public', phone: 'Phone public', key: 'Key room', hunterSearch: 'Hunter search',
     unnamed: 'Unnamed room', inQuest: 'In quest', noQuest: 'No quest selected', noPasscode: 'No passcode',
-    players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters', roomIdle: 'Room idle'
+    players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters', roomIdle: 'Room idle', questElapsed: 'In quest'
   },
   zh: {
     tagline: '公开集会所留言板', boardEyebrow: '集会所', boardTitle: '当前房间',
@@ -83,7 +83,7 @@ const TEXT = {
     room: '房间', quest: '任务', passcode: '密码', access: '访问', status: '状态', open: '可加入', full: '已满', waiting: '等待中',
     public: '公开', phone: '手机公共', key: 'Key 房间', hunterSearch: '猎人搜索',
     unnamed: '未命名房间', inQuest: '任务中', noQuest: '未选任务', noPasscode: '无密码',
-    players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入', roomIdle: '房间空闲'
+    players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入', roomIdle: '房间空闲', questElapsed: '已出发'
   },
   es: {
     tagline: 'Tablón de salas públicas', boardEyebrow: 'SALAS DE REUNIÓN', boardTitle: 'Salas abiertas',
@@ -92,7 +92,7 @@ const TEXT = {
     room: 'Sala', quest: 'Misión', passcode: 'Contraseña', access: 'Acceso', status: 'Estado', open: 'Abierta', full: 'Completa', waiting: 'Esperando',
     public: 'Pública', phone: 'Pública de móvil', key: 'Sala con Key', hunterSearch: 'Búsqueda de cazadores',
     unnamed: 'Sala sin nombre', inQuest: 'En misión', noQuest: 'Sin misión', noPasscode: 'Sin contraseña',
-    players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores', roomIdle: 'Sala libre'
+    players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores', roomIdle: 'Sala libre', questElapsed: 'En misión'
   }
 };
 const $ = s => document.querySelector(s);
@@ -156,6 +156,10 @@ function questTitle(h) {
   if (h.quest_id) return '#' + h.quest_id;
   return T().inQuest;
 }
+function questAge(sec) {
+  sec = Math.max(0, Number(sec) || 0);
+  return sec < 60 ? sec + 's' : duration(sec);
+}
 function roomState(h) {
   const count = Number(h.count || h.players || 0), max = Number(h.max || 4);
   return count >= max ? 'full' : count > 1 ? 'open' : 'waiting';
@@ -207,6 +211,7 @@ function renderRooms(v) {
       const q = h.in_quest ? questFor(h) : {goal: ''};
       const goal = q.goal ? `<span class="quest-goal">${esc(q.goal)}</span>` : '';
       const rank = h.in_quest && h.quest_rank ? `<span class="quest-rank">${esc(h.quest_rank)}${h.quest_stars ? ' · ' + '★'.repeat(Math.min(10, Number(h.quest_stars))) : ''}</span>` : '';
+      const elapsed = h.in_quest && h.quest_age != null ? `<span class="quest-time">${esc(t.questElapsed)} ${esc(questAge(h.quest_age))}</span>` : '';
       const st = h.full || roomState(h) === 'full' ? 'full' : roomState(h);
       const hunterNames = names(h) || (st === 'full' ? '' : `<span class="hunter empty-name">${esc(t.emptyNames)}</span>`);
       return `<article class="room ${kind}${st === 'full' ? ' full' : ''}">
@@ -220,7 +225,7 @@ function renderRooms(v) {
         <div class="quest">
           <span class="field-label">${esc(t.quest)}</span>
           <strong>${esc(quest)}</strong>
-          ${goal}${rank}
+          ${goal}${rank}${elapsed}
         </div>
         <div class="hunters-row">
           <div class="count"><b>${count}</b><span>/${max}</span></div>

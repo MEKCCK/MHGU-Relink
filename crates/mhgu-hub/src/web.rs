@@ -57,6 +57,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "hunter search" => s!("hunter search", "猎人搜索", "búsqueda de cazadores"),
         "hunter searches" => s!("Hunter Search", "猎人搜索", "Búsqueda de cazadores"),
         "room idle" => s!("Room idle", "房间空闲", "Sala libre"),
+        "quest elapsed" => s!("in quest", "已出发", "en misión"),
         "connections" => s!("connections", "连接数", "conexiones"),
         "uptime" => s!("uptime", "运行时长", "tiempo activo"),
         "hub" => s!("hub", "房间", "sala"),
@@ -453,6 +454,7 @@ impl Web {
             let names = h.names.iter().map(|n| html(n)).collect::<Vec<_>>().join(", ");
             let room = if h.room_name.is_empty() { t(l, "unnamed").to_string() } else { html(&h.room_name) };
             let quest = quest_label(h, l);
+            let elapsed = h.quest_age.map(|s| format!("<br><small>{} {}</small>", t(l, "quest elapsed"), secs(s))).unwrap_or_default();
             let pass = h.passcode.map(|p| format!("#{:04}", p)).unwrap_or_else(|| "—".into());
             let access = if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
                 else if phone { format!("<span class=warn>📱 {}</span>", t(l, "phone room")) }
@@ -467,7 +469,7 @@ impl Web {
             rows.push_str(&format!(
                 "<tr><td><b>{}</b><br><small>{} {} · link {}</small></td><td>{} {}<br><small>{}</small></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 room, t(l, "room"), i + 1, h.link_proto,
-                count, format!("/{max}"), names, quest, pass, access, status
+                count, format!("/{max}"), names, format!("{quest}{elapsed}"), pass, access, status
             ));
         }
         if rows.is_empty() {
@@ -689,13 +691,14 @@ impl Web {
             let quest_goal_zh = q.map(|q| json_str(&q.goal_zh)).unwrap_or_else(|| "null".into());
             let quest_rank = q.map(|q| json_str(&q.rank)).unwrap_or_else(|| "null".into());
             let quest_stars = q.map(|q| q.stars.to_string()).unwrap_or_else(|| "null".into());
+            let quest_age = h.quest_age.map(|s| s.to_string()).unwrap_or_else(|| "null".into());
             let item = format!(
-                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_name_es":{},"quest_name_zh":{},"quest_goal":{},"quest_goal_es":{},"quest_goal_zh":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
+                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_name_es":{},"quest_name_zh":{},"quest_goal":{},"quest_goal_es":{},"quest_goal_zh":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"quest_age":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
                 h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
                 if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" },
                 json_str(&h.room_name), names, h.count, h.max, h.quest_id,
                 quest_name, quest_name_es, quest_name_zh, quest_goal, quest_goal_es, quest_goal_zh,
-                quest_rank, quest_stars, h.in_quest,
+                quest_rank, quest_stars, h.in_quest, quest_age,
                 h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search,
                 h.count > 0 && h.count >= h.max
             );

@@ -2,7 +2,7 @@
 
 ## 0.2.9（2026-11-26）
 
-- Hub WebUI 重新设计：Hunter 留言板风格的纸张/墨绿/金色主题、房间卡片、任务与猎人信息、密码/访问/状态徽章、中英西切换和手机响应式布局；房间达到人数上限时显示「已满」而不是「可加入」；猎人搜索不再算作房间，单独列在下方表格，`/api/hubs` 用 `hunter_searches` 返回。任务名/目标支持中文（从 MHGU Database 的 `name_zh`/`goal_zh` 拆出）；不在任务中显示「房间空闲」；切换/开始/结束任务按主机的 UPDATE 实时刷新。继续支持自定义 `-web-dir` 与 `/api/hubs`。
+- Hub WebUI 重新设计：Hunter 留言板风格的纸张/墨绿/金色主题、房间卡片、任务与猎人信息、密码/访问/状态徽章、中英西切换和手机响应式布局；房间达到人数上限时显示「已满」而不是「可加入」；猎人搜索不再算作房间，单独列在下方表格，`/api/hubs` 用 `hunter_searches` 返回。任务名/目标支持中文（从 MHGU Database 的 `name_zh`/`goal_zh` 拆出）；不在任务中显示「房间空闲」；切换/开始/结束任务按主机的 UPDATE 实时刷新；任务中显示已出发时长（`quest_age`）。继续支持自定义 `-web-dir` 与 `/api/hubs`。
 - 联机兼容范围：只以 MHGURecomp 为目标；gu-native 未跟进 Recomp 的协议更新，不再列入联机兼容列表（历史来源说明保留）。
 - Hub 公共房间：关闭「仅手机」时把已存在的 Android 公共房间立即合并进公共房间；`-separate-phones=false` 与 `-separate-phones false` 都支持。WebUI 热设置只对当前进程生效，重启后请保留启动参数。
 - Hub Web/API 房间详情：显示房间名、猎人名、任务（ID → 名称/目标/等级/星数）、密码、是否任务中与猎人搜索；任务元数据由 MHGU Database 2.4.5 的 quests 表提取为 `crates/mhgu-hub/data/quests.json`，不含 APK/完整数据库。
