@@ -1496,7 +1496,10 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
                             let p = relay_prefix(relay.0, relay.1);
                             let _ = u.send_to(&p, addr);
                         }
-                        serve_peer_relay(sp.stream, Some(relay));
+                        // Serve the peer beside the listing loop: this loop also PINGs the hub server.
+                        // Serving it inline stopped the PINGs while a relayed player was connected, and the
+                        // server dropped the hub after its 3-ping timeout.
+                        std::thread::spawn(move || serve_peer_relay(sp.stream, Some(relay)));
                     }
                     Err(e) => eprintln!("[link] attach: {e}"),
                 },
