@@ -508,6 +508,11 @@ static void template_regression() {
 #else
     setenv("MHGU_CONFIG", "obj/settings-test/panel-settings.ini", 1);
 #endif
+#ifdef _WIN32
+    _putenv_s("MHGU_TEST_TOUCH", "1");  // (the touch-section tests run on a desktop: present the panel as a touch screen)
+#else
+    setenv("MHGU_TEST_TOUCH", "1", 1);
+#endif
     seek_row("dialog.discard");
     confirm();
     assert(template_uses.size() == 5 && !settings_panel_dirty());
@@ -1659,6 +1664,16 @@ int main(int argc, char **argv) {
     opened = false;
     frame();
     assert(!settings_panel_dirty());
+    // Regression: the v4 friend-notice toggles were missing from the draft comparison, so their Save stayed disabled.
+    opened = true;
+    frame();
+    tab();  // (Audio -> Controls)
+    tab();  // (Controls -> Online)
+    open_section(2);  // (Session & Friends)
+    seek_row("friend.requests");
+    confirm();
+    idle();
+    assert(settings_panel_dirty());
     ImGui::DestroyContext();
     remove("obj/settings-test/panel-settings.ini");
     puts("settings panel: inline numbers, explicit Save/Reset, Back guide, dirty discard, focus and layout "

@@ -294,28 +294,72 @@ const char *const page_names[PAGES] = {"Display", "Graphics", "Audio", "Controls
                                        "Gameplay", "System", "Mods", "Cheats"};
 // The pages with more than a screenful of rows open on their sections: a list of them first, then one section at a
 // time with a Back row. 0 sections: the page's rows are shown as they are (Audio, Mods, Cheats).
+// The id is stable across platforms (the code's section checks use it); the list only exposes the sections that exist
+// on this device. Android has no HDR output or keyboard/mouse panel; a PC shows no phone-only touch vibration rows.
+// Touch controls are an Android feature. A PC shows their rows only on a touch screen (the test harness forces it).
+static bool touch_available() {
+#ifdef __ANDROID__
+    return true;
+#else
+    static int has = -1;
+    if (has < 0) {
+        if (getenv("MHGU_TEST_TOUCH")) {
+            has = 1;
+        } else {
+            int n = 0;
+            SDL_free(SDL_GetTouchDevices(&n));
+            has = n > 0;
+        }
+    }
+    return has != 0;
+#endif
+}
+
+const char *const section_titles[7][4] = {
+    {"Window & Screen", "3D Picture", "HUD & Camera"},
+    {"Performance", "Quality", "Effects", "HDR"},
+    {},
+    {"Controller", "Keyboard & Mouse", "Touch", "Camera"},
+    {"Hub Server", "Session & Friends", "Crossplay"},
+    {"Hub & Quests", "Monster HP"},
+    {"Appearance", "General", "Save Data", "Application"},
+};
 int section_count(int page) {
     switch (page) {
-    case 0: return 3;  // Window & Screen, 3D Picture, HUD & Camera
-    case 1: return 4;  // Performance, Quality, Effects, HDR
-    case 3: return 4;  // Controller, Keyboard & Mouse, Touch, Camera
-    case 4: return 3;  // Hub Server, Session & Friends, Crossplay
-    case 5: return 2;  // Hub & Quests, Monster HP
-    case 6: return 4;  // Appearance, General, Save Data, Application
+    case 0: return 3;
+    case 1:
+#ifdef __ANDROID__
+        return 3;  // (no HDR output)
+#else
+        return 4;
+#endif
+    case 3:
+#ifdef __ANDROID__
+        return 3;  // (no keyboard or mouse panel; Touch is 3, Camera 4)
+#else
+        return touch_available() ? 4 : 3;  // (no Touch panel without a touch screen)
+#endif
+    case 4: return 3;
+    case 5: return 2;
+    case 6: return 4;
     default: return 0;
     }
 }
+int section_id_at(int page, int index) {
+    if (page == 3) {
+#ifdef __ANDROID__
+        return index >= 1 ? index + 2 : 1;  // Controller, Touch (3), Camera (4)
+#else
+        if (!touch_available() && index >= 2) return 4;  // Controller, Keyboard & Mouse, Camera
+#endif
+    }
+    return index + 1;
+}
+const char *section_title(int page, int id) {
+    return page >= 0 && page < 7 && id >= 1 && id <= 4 ? section_titles[page][id - 1] : "";
+}
 const char *section_name(int page, int index) {
-    static const char *const names[7][4] = {
-        {"Window & Screen", "3D Picture", "HUD & Camera"},
-        {"Performance", "Quality", "Effects", "HDR"},
-        {},
-        {"Controller", "Keyboard & Mouse", "Touch", "Camera"},
-        {"Hub Server", "Session & Friends", "Crossplay"},
-        {"Hub & Quests", "Monster HP"},
-        {"Appearance", "General", "Save Data", "Application"},
-    };
-    return index >= 0 && index < section_count(page) ? names[page][index] : "";
+    return index >= 0 && index < section_count(page) ? section_title(page, section_id_at(page, index)) : "";
 }
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
@@ -587,6 +631,10 @@ bool equal(const Config &a, const Config &b) {
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
+    SAME(share_urgent);
+    SAME(ldn_friend_requests);
+    SAME(ldn_friend_online_notices);
+    SAME(ldn_friend_hub_notices);
 #undef SAME
     if (a.lock_on != b.lock_on || a.persistent_lock_on != b.persistent_lock_on)
         return false;
@@ -2425,9 +2473,8 @@ std::vector<Row> main_rows() {
     };
     int sections = section_count(s.page);
     if (sections && !s.section) {  // the page's sections first: one screen of them, each opening its own rows
-        header(r, "sections.header", tr(page_names[s.page]));
         for (int i = 0; i < sections; i++) {
-            int section = i + 1;
+            int section = section_id_at(s.page, i);
             std::string id = "sec." + std::to_string(section);
             action(r, id, tr(section_name(s.page, i)), [section]() { enter_section(section); });
             r.back().value = "›";
@@ -2437,7 +2484,7 @@ std::vector<Row> main_rows() {
         if (sections) {  // inside one: Back first, then its name and rows
             action(r, "sec.back", fmt("Back to %s", tr(page_names[s.page])), []() { leave_section(); });
             r.back().value = "‹";
-            header(r, "sec.title", tr(section_name(s.page, s.section - 1)));
+            // (the window title and the tab strip already carry "Page · Section": no second title row)
         }
         switch (s.page) {
     case 0:
@@ -2545,10 +2592,12 @@ std::vector<Row> main_rows() {
         r.back().help = tr("For weak phones: turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change all of them. Toaster: everything for speed and the battery before looks: 25%, 30 FPS, no reverb, and a lighter HUD and textures still. Brick: the same lower still, 15% and a 360-line HUD, for the weakest phones and the longest hunts on the battery.");
         add_bool(r, "effects", tr("Effects"), &c.effects, ini("Effects"));
         r.back().help = tr("Leaves out the game's particles: the hits' sparks, the blood, the fire and the breath, the dust, the rain and the snow, and the flashes of the monsters' and the Hunter Arts' attacks. It runs faster where there are many. A monster's attack often warns through its effect: with this off the warning is gone too.");
+#ifdef __ANDROID__
         if (vk_low_memory_device()) {  // (only where the textures are cut anyway: a phone under 5 GB)
             add_bool(r, "fulltextures", tr("Full-size textures"), &c.full_textures, ini("FullTextures"));
             r.back().help = tr("On a phone with little memory, keep the 3D textures at their full size anyway: sharper up close, and it takes much more memory, so the game may be closed. It needs a restart.");
         }
+#endif
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};
@@ -2570,7 +2619,11 @@ std::vector<Row> main_rows() {
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "vsync", "VSync", &c.vsync, ini("VSync"));
 #endif
+#ifdef __ANDROID__
         add_bool(r, "stats", "Show FPS and temperature", &c.show_stats, ini("ShowStats"));
+#else
+        add_bool(r, "stats", "Show FPS", &c.show_stats, ini("ShowStats"));
+#endif
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, ini("ShaderPrewarm"));
 #endif
@@ -2663,8 +2716,7 @@ std::vector<Row> main_rows() {
         add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
         }
         if (s.section == 4) {  // HDR
-        header(r, "hdr.header", "HDR");
-        add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
+            add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
         if (c.fsr)  // (FSR is turned off for HDR at the next start)
             r.back().cold = true;
         if (c.hdr) {
@@ -2701,8 +2753,7 @@ std::vector<Row> main_rows() {
         }
         break;
     case 2:  // Audio: its own page, small enough as it is
-        header(r, "audio.header", tr("Audio"));
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+            number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
         add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
@@ -2725,8 +2776,7 @@ std::vector<Row> main_rows() {
         break;
     case 3:  // Controls: four sections
         if (s.section == 1) {  // Controller
-        header(r, "ctrl.pad.header", tr("Controller"));
-        add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
+            add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
         add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
                    [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
@@ -2741,12 +2791,9 @@ std::vector<Row> main_rows() {
         action(r, "pad.map", tr("Map a controller"), []() { push(View::PadList, "pad.0"); });
         r.back().help = tr("For a controller the game does not read well: press each button once and it works from then on.");
         }
-        if (s.section == 2) {  // Keyboard & Mouse
-#ifdef __ANDROID__
-        action(r, "ctrl.kbm.none", tr("No keyboard or mouse settings on this device"), []() {});
-#else
-        header(r, "ctrl.kbm.header", tr("Keyboard and mouse"));
-        add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
+        if (s.section == 2) {  // Keyboard & Mouse (PC)
+#ifndef __ANDROID__
+            add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         number(r, "mouse.y", tr("Vertical sensitivity"), &c.mouse_sensitivity_y, lo("MouseSensitivityY"), hi("MouseSensitivityY"), .05f, ini("MouseSensitivityY"));
         add_bool(r, "mouse.invert", "Invert mouse Y", &c.mouse_invert_y, ini("MouseInvertY"));
@@ -2760,8 +2807,7 @@ std::vector<Row> main_rows() {
 #endif
         }
         if (s.section == 3) {  // Touch
-        header(r, "ctrl.touch.header", tr("Touch layout"));
-        add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
+            add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
                    [](int v) { c.touch_controls = v; }, ini("Controls"));
         add_bool(r, "touch.hud", "Move the HUD for touch", &c.touch_hud, ini("MoveHUD"));
         add_bool(r, "touch.floating", "Floating left stick", &c.touch_floating, ini("FloatingStick"));
@@ -2772,8 +2818,10 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Choose visible buttons and six combinations. Item and ammo arrows never turn the camera when dragged. Independent ammo arrows are available only during quests with a bow or bowgun; move and resize them in the layout editor.");
         number(r, "touch.camera", tr("Touch camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));
         number(r, "touch.opacity", tr("Touch controls opacity"), &c.touch_opacity, lo("Opacity"), hi("Opacity"), .05f, ini("Opacity"));
+#ifdef __ANDROID__
         add_bool(r, "touch.vibration", "Vibrate on touch", &c.touch_vibration, ini("Vibration"));
         add_bool(r, "phone.rumble", "Game rumble on the phone", &c.phone_rumble, ini("PhoneRumble"));
+#endif
         {  // (the layout editor is worked by fingers: offered where there is a touch screen)
             bool touch_edit = true;
 #ifndef __ANDROID__
@@ -2795,8 +2843,7 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Choose default, built-in or custom image icons for each common button and all six combined buttons. Icons are saved immediately with the current layout and copied into templates.");
         }
         if (s.section == 4) {  // Camera
-        header(r, "ctrl.camera.header", tr("Camera"));
-        add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
+            add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
         r.back().help = tr("Tap the target icon to lock on, then tap again to switch monsters. Hold it for half a second, or click a controller's right stick, to toggle the lock. Off: the icon turns the camera to the monster once, as in the original game.");
         add_bool(r, "lock.persistent", "Persistent lock-on", &c.persistent_lock_on, ini("PersistentLockOn"));
         r.back().enabled = c.lock_on != 0;
@@ -2805,8 +2852,7 @@ std::vector<Row> main_rows() {
         break;
     case 4:  // Online: three sections
         if (s.section == 1) {  // Hub Server
-        header(r, "net.hub.header", tr("Hub"));
-        number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
+            number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
         text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), ini("Join"));
         // (internet hubs through a hub server of the player's choice, crates/mhgu-hub: none is built in, LDN_DEFAULT_SERVER)
         text(r, "server", "Hub server", c.ldn_server, sizeof c.ldn_server,
@@ -2827,8 +2873,7 @@ std::vector<Row> main_rows() {
         net_friends(r);
         }
         if (s.section == 3) {  // Crossplay
-        header(r, "net.crossplay.header", tr("Crossplay"));
-        add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
+            add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
                    [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
         r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn), suyu rooms, or both (a mixed hub).");
         text(r, "ryu.servers", tr("RyuLdn servers"), c.ryu_servers, sizeof c.ryu_servers,
@@ -2855,16 +2900,14 @@ std::vector<Row> main_rows() {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
         if (s.section == 1) {  // Hub & Quests
-        header(r, "hub.header", tr("Hub"));
-        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
+            add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
         add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
         add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
         }
         if (s.section == 2) {  // Monster HP
-        header(r, "hp.header", tr("Monster HP Scaling"));
-        for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
                    lo("1Player"), hi("1Player"), .05f, ini("1Player"));
         number(r, "hp.village", tr("Village quests in Hub"), &c.hp.village, lo("HubHP"), hi("HubHP"), .05f,
@@ -2937,8 +2980,7 @@ std::vector<Row> main_rows() {
         break;
     case APP_PAGE:
         if (s.section == 1) {  // Appearance
-        header(r, "app.appearance.header", tr("Appearance"));
-        add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
+            add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
                    [](int v) { c.language = v; }, ini("Language"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
@@ -2947,8 +2989,9 @@ std::vector<Row> main_rows() {
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
         }
         if (s.section == 2) {  // General
-        header(r, "app.general.header", tr("General"));
+    #ifdef __ANDROID__
         add_bool(r, "pause.bg", "Pause in the background", &c.pause_background, ini("PauseInBackground"));
+#endif
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
 #endif
@@ -2966,8 +3009,7 @@ std::vector<Row> main_rows() {
 #endif
         }
         if (s.section == 3) {  // Save Data
-        header(r, "save.header", tr("Save data"));
-#ifndef __ANDROID__  // (the PC build keeps its save in a folder of its choice)
+    #ifndef __ANDROID__  // (the PC build keeps its save in a folder of its choice)
         text(r, "save.location", "Save folder", c.save_location, sizeof c.save_location,
              *c.save_location ? c.save_location : tr("Default folder"), ini("SaveLocation"));
         r.back().help = tr("Where the save is kept (the folder that holds save_0), for example on another drive or in a folder you sync. Type a path, or use Choose folder. Press Save, then restart the game. Your current save is not moved: copy the save_0 folder there first.");
@@ -3008,8 +3050,7 @@ std::vector<Row> main_rows() {
 #endif
         }
         if (s.section == 4) {  // Application
-        header(r, "app.application.header", tr("Application"));
-        if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)
+            if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)
             action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"), []() {
                 s.floating = !s.floating;
                 if (!s.floating)
@@ -4507,7 +4548,7 @@ void touch_panel(bool *open, const Config &before) {
         float size = std::floor(f * 1.1f), cy = by + side * .5f;
         ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
         std::string sub = s.view == View::Main
-                              ? (s.section ? std::string(tr(page_names[s.page])) + " · " + tr(section_name(s.page, s.section - 1))
+                              ? (s.section ? std::string(tr(page_names[s.page])) + " · " + tr(section_title(s.page, s.section))
                                            : std::string(tr(page_names[s.page])))
                               : dialog ? "" : view_title();
         dl->PushClipRect(ImVec2(x0, y0), ImVec2(std::max(title_x, right), y0 + band), true);
