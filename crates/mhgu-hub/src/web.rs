@@ -774,34 +774,39 @@ fn layout_at(l: Lang, title: &str, body: &str, admin: bool, here: &str) -> Strin
 }
 
 const STYLE: &str = r#"
-:root{color-scheme:dark}
-body{font:14px/1.55 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;margin:0;background:#14100c;color:#e8ded0}
-header{padding:18px 24px;background:#241c14;border-bottom:1px solid #4a3a28}
-h1{font-size:18px;margin:0}
-h2{font-size:15px;margin:26px 0 8px;color:#d8c6a8}
-main{padding:24px;max-width:1100px;margin:auto}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #3a2e22}
-th{color:#b9a68e;font-weight:600}
-code{color:#f0c674}
-pre{background:#1c1610;border:1px solid #3a2e22;border-radius:8px;padding:12px;max-height:420px;overflow:auto}
-.ok{color:#8bc34a}.warn{color:#e5c07b}.stats{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 18px}
-.stat{background:#241c14;border:1px solid #4a3a28;border-radius:8px;padding:10px 16px;min-width:96px}
-.stat b{display:block;font-size:20px}
-button{background:#5a3f22;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer}
-button:hover{background:#7a5630}
-a{color:#f0c674}
-input{padding:6px 10px;border-radius:6px;border:1px solid #4a3a28;background:#1c1610;color:#e8ded0}
+:root{color-scheme:light;--ink:#2c251c;--muted:#7b6a55;--line:rgba(76,52,27,.18);--paper:#fbf4e6;--forest:#2d4335;--gold:#c3984d}
+*{box-sizing:border-box}
+body{font:14px/1.55 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;margin:0;color:var(--ink);
+background:radial-gradient(900px 420px at 12% -8%,rgba(255,252,242,.85),transparent 62%),linear-gradient(135deg,#e7d4b2,#f4e8d3 45%,#ead8b9);min-height:100vh}
+header{padding:22px 28px;background:linear-gradient(115deg,#1e3026,#2d4335 55%,#3c5a48);color:#f7edda;border-bottom:4px solid var(--gold);box-shadow:0 8px 24px rgba(55,37,18,.16)}
+h1{font:600 26px/1.1 Georgia,"Times New Roman","Noto Serif CJK SC",serif;margin:0}
+h2{font:600 22px/1.2 Georgia,"Times New Roman","Noto Serif CJK SC",serif;color:var(--forest);margin:26px 0 8px}
+main{padding:24px;max-width:1180px;margin:auto}
+a{color:#8a6225}
+table{width:100%;border-collapse:separate;border-spacing:0;background:rgba(251,244,230,.88);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 12px 30px rgba(55,37,18,.10)}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:rgba(45,67,53,.08);color:var(--forest);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+tr:last-child td{border-bottom:0}
+small{color:var(--muted)}
+code{color:#8a6225}
+pre{background:#f3e5cc;border:1px solid var(--line);border-radius:10px;padding:12px;max-height:420px;overflow:auto}
+.ok{color:#4c7455}.warn{color:#963f31}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:0 0 18px}
+.stat{background:rgba(251,244,230,.9);border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 5px 16px rgba(55,37,18,.06)}
+.stat b{display:block;font:600 22px/1.1 Georgia,serif;color:var(--forest)}
+button{background:var(--forest);color:#fff;border:1px solid #1e3026;border-radius:7px;padding:6px 13px;cursor:pointer}
+button:hover{background:#3c5a48}
+input{padding:6px 10px;border-radius:7px;border:1px solid var(--line);background:#fffaf0;color:var(--ink)}
 .settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:10px 0}
-.settings label{display:flex;justify-content:space-between;gap:10px;align-items:center;background:#1c1610;border:1px solid #3a2e22;border-radius:8px;padding:8px 12px}
+.settings label{display:flex;justify-content:space-between;gap:10px;align-items:center;background:rgba(251,244,230,.86);border:1px solid var(--line);border-radius:9px;padding:8px 12px}
 .settings input[type=number]{width:96px}
 .settings button{justify-self:start}
-details.lang{position:relative}
-details.lang summary{cursor:pointer;list-style:none;padding:4px 10px;border:1px solid #4a3a28;border-radius:6px;background:#241c14}
+details.lang{position:relative;display:inline-block;margin-right:4px}
+details.lang summary{cursor:pointer;list-style:none;padding:4px 10px;border:1px solid rgba(227,194,124,.55);border-radius:999px;background:rgba(0,0,0,.14);color:#f7edda}
 details.lang summary::-webkit-details-marker{display:none}
-details.lang .menu{position:absolute;right:0;top:110%;background:#241c14;border:1px solid #4a3a28;border-radius:8px;min-width:140px;z-index:9}
-details.lang .menu a{display:block;padding:6px 12px;white-space:nowrap}
-details.lang .menu a:hover,details.lang .menu a.cur{background:#3a2e22}
+details.lang .menu{position:absolute;right:0;top:110%;background:#fbf4e6;border:1px solid var(--line);border-radius:9px;min-width:140px;z-index:9;box-shadow:0 12px 30px rgba(55,37,18,.18)}
+details.lang .menu a{display:block;padding:6px 12px;white-space:nowrap;color:var(--ink);text-decoration:none}
+details.lang .menu a:hover,details.lang .menu a.cur{background:#f3e5cc}
+@media(max-width:720px){header{padding:16px}main{padding:12px}.stats{grid-template-columns:repeat(2,1fr)}table{font-size:12px}th,td{padding:7px}}
 "#;
 
 fn html(s: &str) -> String {

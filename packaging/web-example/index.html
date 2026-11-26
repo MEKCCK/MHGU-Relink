@@ -3,53 +3,215 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MHGU hub</title>
+<meta name="theme-color" content="#2d4335">
+<title>MHGU Relink · Hunter Hub</title>
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-<h1>MHGU hub</h1>
-<div class="stats" id="stats"></div>
-<table>
-  <thead><tr><th>Room</th><th>Players</th><th>Quest</th><th>Password</th><th>Access</th><th>Status</th></tr></thead>
-  <tbody id="rooms"><tr><td colspan="6">loading…</td></tr></tbody>
-</table>
-<p class="hint">This page is your own: replace the files in this directory (<code>-web-dir</code>) freely.
-Data comes from <code>/api/hubs</code>.</p>
+<div class="page">
+  <header class="masthead">
+    <div class="brand">
+      <div class="crest" aria-hidden="true"><span>MH</span><i></i></div>
+      <div>
+        <p class="eyebrow">MONSTER HUNTER GENERATIONS ULTIMATE</p>
+        <h1>Hunter Hub</h1>
+        <p class="tagline" id="tagline">Public gathering hall board</p>
+      </div>
+    </div>
+    <nav class="langs" aria-label="Language">
+      <button type="button" data-lang="en">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+      <button type="button" data-lang="es">ES</button>
+    </nav>
+  </header>
+
+  <section class="stats" id="stats" aria-live="polite"></section>
+
+  <section class="board">
+    <div class="board-head">
+      <div>
+        <p class="eyebrow" id="boardEyebrow">GATHERING HALLS</p>
+        <h2 id="boardTitle">Open rooms</h2>
+      </div>
+      <p class="updated" id="updated"></p>
+    </div>
+    <div class="rooms" id="rooms" aria-live="polite">
+      <div class="empty"><span class="spinner"></span><p id="loading">Reading the board…</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <span id="footerNote">Auto-refreshes every 5 seconds</span>
+    <a href="/api/hubs">/api/hubs</a>
+  </footer>
+</div>
 <script>
-const zh = (navigator.language || '').startsWith('zh');
-const T = { room: zh ? '房间' : 'Room', players: zh ? '玩家' : 'Players',
-            quest: zh ? '任务' : 'Quest', password: zh ? '密码' : 'Password',
-            unnamed: zh ? '未命名' : 'Unnamed', inQuest: zh ? '任务中' : 'In quest',
-            hunterSearch: zh ? '猎人搜索' : 'Hunter search',
-            access: zh ? '访问' : 'Access', status: zh ? '状态' : 'Status',
-            pub: zh ? '公开' : 'Public', phone: zh ? '仅手机' : 'Phone only', key: zh ? 'Key 房间' : 'Key room',
-            open: zh ? '可加入' : 'open', waiting: zh ? '等待中' : 'waiting',
-            none: zh ? '当前没有房间。' : 'No rooms right now.', up: zh ? '运行' : 'up' };
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names = h => (h.names || []).map(esc).join(', ');
-const quest = h => h.hunter_search ? T.hunterSearch : h.quest_name ? esc(h.quest_name) : h.in_quest ? T.inQuest : '—';
-const roomName = h => h.hunter_search ? T.hunterSearch : esc(h.room_name || T.unnamed);
-const pass = h => h.passcode == null ? '—' : '#' + String(h.passcode).padStart(4, '0');
+const params = new URLSearchParams(location.search);
+const savedLang = localStorage.getItem('mhgu-hub-lang');
+let lang = params.get('lang') || savedLang || ((navigator.language || '').startsWith('zh') ? 'zh' : (navigator.language || '').startsWith('es') ? 'es' : 'en');
+
+const TEXT = {
+  en: {
+    tagline: 'Public gathering hall board', boardEyebrow: 'GATHERING HALLS', boardTitle: 'Open rooms',
+    rooms: 'Rooms', hunters: 'Hunters', connections: 'Connections', uptime: 'Uptime', updated: 'Updated',
+    loading: 'Reading the board…', none: 'No gathering halls are open right now.', error: 'The hub could not be reached.',
+    room: 'Room', quest: 'Quest', passcode: 'Passcode', access: 'Access', status: 'Status', open: 'Open', waiting: 'Waiting',
+    public: 'Public', phone: 'Phone public', key: 'Key room', hunterSearch: 'Hunter search',
+    unnamed: 'Unnamed room', inQuest: 'In quest', noQuest: 'No quest selected', noPasscode: 'No passcode',
+    players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters'
+  },
+  zh: {
+    tagline: '公开集会所留言板', boardEyebrow: '集会所', boardTitle: '当前房间',
+    rooms: '房间', hunters: '猎人', connections: '连接数', uptime: '运行时长', updated: '更新于',
+    loading: '正在读取留言板…', none: '当前没有开放的集会所。', error: '无法连接到 Hub。',
+    room: '房间', quest: '任务', passcode: '密码', access: '访问', status: '状态', open: '可加入', waiting: '等待中',
+    public: '公开', phone: '手机公共', key: 'Key 房间', hunterSearch: '猎人搜索',
+    unnamed: '未命名房间', inQuest: '任务中', noQuest: '未选任务', noPasscode: '无密码',
+    players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入'
+  },
+  es: {
+    tagline: 'Tablón de salas públicas', boardEyebrow: 'SALAS DE REUNIÓN', boardTitle: 'Salas abiertas',
+    rooms: 'Salas', hunters: 'Cazadores', connections: 'Conexiones', uptime: 'Tiempo activo', updated: 'Actualizado',
+    loading: 'Leyendo el tablón…', none: 'No hay salas abiertas ahora.', error: 'No se pudo conectar con el hub.',
+    room: 'Sala', quest: 'Misión', passcode: 'Contraseña', access: 'Acceso', status: 'Estado', open: 'Abierta', waiting: 'Esperando',
+    public: 'Pública', phone: 'Pública de móvil', key: 'Sala con Key', hunterSearch: 'Búsqueda de cazadores',
+    unnamed: 'Sala sin nombre', inQuest: 'En misión', noQuest: 'Sin misión', noPasscode: 'Sin contraseña',
+    players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores'
+  }
+};
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T = () => TEXT[lang] || TEXT.en;
+
+function setLang(next) {
+  lang = next;
+  localStorage.setItem('mhgu-hub-lang', lang);
+  document.documentElement.lang = lang;
+  for (const b of document.querySelectorAll('[data-lang]')) b.classList.toggle('active', b.dataset.lang === lang);
+  $('#tagline').textContent = T().tagline;
+  $('#boardEyebrow').textContent = T().boardEyebrow;
+  $('#boardTitle').textContent = T().boardTitle;
+  $('#footerNote').textContent = T().auto;
+  renderStats(lastData);
+  renderRooms(lastData);
+}
+
+for (const b of document.querySelectorAll('[data-lang]')) b.addEventListener('click', () => setLang(b.dataset.lang));
+
+let lastData = null;
+let lastError = false;
+
+function duration(sec) {
+  sec = Math.max(0, Number(sec) || 0);
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+function age(sec) {
+  sec = Math.max(0, Number(sec) || 0);
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm';
+  return Math.floor(sec / 3600) + 'h';
+}
 function access(h) {
-  if (h.access === 'phone') return '📱 ' + T.phone;
-  if (h.access === 'key' || h.locked) return '🔒 ' + T.key;
-  return '🌐 ' + T.pub;
+  if (h.access === 'phone') return ['phone', T().phone];
+  if (h.access === 'key' || h.locked) return ['key', T().key];
+  return ['public', T().public];
 }
-function tick() {
-  fetch('/api/hubs').then(r => r.json()).then(v => {
-    document.getElementById('stats').textContent =
-      `${v.hubs.length} ${T.room} · ${v.players} ${T.players} · ${T.up} ${Math.floor(v.uptime / 60)}m`;
-    const rows = v.hubs.map((h, i) => {
-      const count = h.count || h.players, max = h.max || 4;
-      return `<tr><td><b>${roomName(h)}</b><br><small>${T.room} ${i + 1} · link ${h.link}</small></td>` +
-        `<td>${count}/${max}<br><small>${names(h)}</small></td>` +
-        `<td>${quest(h)}</td><td>${pass(h)}</td><td>${access(h)}</td>` +
-        `<td>${count > 1 ? T.open : T.waiting}</td></tr>`;
+function questTitle(h) {
+  if (h.hunter_search) return T().hunterSearch;
+  if (h.quest_name) return h.quest_name;
+  if (h.quest_id) return '#' + h.quest_id;
+  if (h.in_quest) return T().inQuest;
+  return T().noQuest;
+}
+function pass(h) {
+  return h.passcode == null ? T().noPasscode : '#' + String(h.passcode).padStart(4, '0');
+}
+function names(h) {
+  if (!h.names || !h.names.length) return '';
+  return h.names.map(n => `<span class="hunter">${esc(n)}</span>`).join('');
+}
+function renderStats(v) {
+  const t = T();
+  const hubs = v ? v.hubs || [] : [];
+  const hunters = hubs.reduce((n, h) => n + Number(h.count || h.players || 0), 0);
+  const items = [
+    ['rooms', hubs.length, t.rooms],
+    ['hunters', hunters, t.hunters],
+    ['connections', v ? Number(v.conns || 0) : 0, t.connections],
+    ['uptime', v ? duration(v.uptime) : '—', t.uptime]
+  ];
+  $('#stats').innerHTML = items.map(([kind, value, label]) =>
+    `<div class="stat ${kind}"><span class="stat-value">${esc(value)}</span><span class="stat-label">${esc(label)}</span></div>`
+  ).join('');
+}
+function renderRooms(v) {
+  const t = T();
+  if (!v) {
+    $('#rooms').innerHTML = `<div class="empty"><span class="spinner"></span><p>${esc(t.loading)}</p></div>`;
+    $('#updated').textContent = '';
+    return;
+  }
+  const hubs = v.hubs || [];
+  if (!hubs.length) {
+    $('#rooms').innerHTML = `<div class="empty"><div class="empty-mark">◇</div><p>${esc(t.none)}</p></div>`;
+  } else {
+    $('#rooms').innerHTML = hubs.map((h, i) => {
+      const [kind, label] = access(h);
+      const count = h.count || h.players || 0;
+      const max = h.max || 4;
+      const quest = questTitle(h);
+      const goal = h.quest_goal ? `<span class="quest-goal">${esc(h.quest_goal)}</span>` : '';
+      const rank = h.quest_rank ? `<span class="quest-rank">${esc(h.quest_rank)}${h.quest_stars ? ' · ' + '★'.repeat(Math.min(10, Number(h.quest_stars))) : ''}</span>` : '';
+      const hunterNames = names(h) || `<span class="hunter empty-name">${esc(t.emptyNames)}</span>`;
+      return `<article class="room ${kind}${h.hunter_search ? ' search' : ''}">
+        <div class="room-top">
+          <div>
+            <p class="room-kicker">${esc(t.room)} ${i + 1} · Link ${esc(h.link)} · ${esc(age(h.age))}</p>
+            <h3>${h.hunter_search ? esc(t.hunterSearch) : esc(h.room_name || t.unnamed)}</h3>
+          </div>
+          <span class="badge ${kind}">${esc(label)}</span>
+        </div>
+        <div class="quest">
+          <span class="field-label">${esc(t.quest)}</span>
+          <strong>${esc(quest)}</strong>
+          ${goal}${rank}
+        </div>
+        <div class="hunters-row">
+          <div class="count"><b>${count}</b><span>/${max}</span></div>
+          <div class="hunter-list">${hunterNames}</div>
+        </div>
+        <div class="room-bottom">
+          <span class="pass ${h.passcode == null ? 'none' : ''}">${esc(t.passcode)} · ${esc(pass(h))}</span>
+          <span class="state ${count > 1 ? 'open' : 'waiting'}">${esc(count > 1 ? t.open : t.waiting)}</span>
+        </div>
+      </article>`;
     }).join('');
-    document.getElementById('rooms').innerHTML = rows || `<tr><td colspan="6">${T.none}</td></tr>`;
-  }).catch(() => {});
+  }
+  const when = v.updated || new Date();
+  $('#updated').textContent = `${t.updated} ${new Date(when).toLocaleTimeString()}`;
 }
-tick(); setInterval(tick, 5000);
+
+async function tick() {
+  try {
+    const r = await fetch('/api/hubs', {cache: 'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    lastData = await r.json();
+    lastError = false;
+    renderStats(lastData);
+    renderRooms(lastData);
+  } catch (e) {
+    lastError = true;
+    $('#stats').innerHTML = '';
+    $('#rooms').innerHTML = `<div class="empty error"><div class="empty-mark">!</div><p>${esc(T().error)}</p></div>`;
+    $('#updated').textContent = '';
+  }
+}
+setLang(lang);
+tick();
+setInterval(tick, 5000);
 </script>
 </body>
 </html>
