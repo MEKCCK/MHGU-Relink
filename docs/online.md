@@ -151,7 +151,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
   关掉该玩家两侧的 socket，pipe 线程结束、`joins` 递减）；日志可按 `?only=hubs|admin` 过滤；
 - 令牌来自 `-web-token`，不填则启动时随机生成并打印。
 
-房间名、最多四个猎人名、任务 ID、是否任务中、密码和猎人搜索标志来自游戏的 `NetworkInfo` advertise 块；任务名称/目标/等级/星数由 `crates/mhgu-hub/data/quests.json` 映射，英文/西班牙文/中文分别来自 APK 的 `name`/`goal`、`name_es`/`goal_es`、`name_zh`/`goal_zh`。等级是任务等级，不是玩家等级；同名任务可能有不同 ID（例如「雪山之主」的 LR 10216 与 HR 10530）。该 JSON 由 `tools/extract_mhgudb_quests.py` 从 MHGU Database 2.4.5 的 `quests` 表提取，只保留显示所需元数据，不含 APK 或完整数据库。
+房间名、最多四个猎人名、任务 ID、是否任务中、密码和猎人搜索标志来自游戏的 `NetworkInfo` advertise 块；任务名称/目标/等级/星数由 `crates/mhgu-hub/data/quests.json` 映射，英文/西班牙文/中文分别来自 APK 的 `name`/`goal`、`name_es`/`goal_es`、`name_zh`/`goal_zh`。等级是任务等级，不是玩家等级；同名任务可能有不同 ID（例如「雪山之主」的 LR 10216 与 HR 10530）。数据库没有的占位/模组任务显示「未知任务 #ID」，不会伪造名称。该 JSON 由 `tools/extract_mhgudb_quests.py` 从 MHGU Database 2.4.5 的 `quests` 表提取，只保留显示所需元数据，不含 APK 或完整数据库。
 
 ### 热设置（WebUI，无需重启）
 

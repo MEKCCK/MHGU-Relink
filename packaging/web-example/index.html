@@ -74,7 +74,7 @@ const TEXT = {
     room: 'Room', quest: 'Quest', passcode: 'Passcode', access: 'Access', status: 'Status', open: 'Open', full: 'Full', waiting: 'Waiting',
     public: 'Public', phone: 'Phone public', key: 'Key room', hunterSearch: 'Hunter search',
     unnamed: 'Unnamed room', inQuest: 'In quest', noQuest: 'No quest selected', noPasscode: 'No passcode',
-    players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters', roomIdle: 'Room idle', questElapsed: 'In quest'
+    players: 'Hunters', auto: 'Auto-refreshes every 5 seconds', emptyNames: 'Waiting for hunters', roomIdle: 'Room idle', questElapsed: 'In quest', unknownQuest: 'Unknown quest'
   },
   zh: {
     tagline: '公开集会所留言板', boardEyebrow: '集会所', boardTitle: '当前房间',
@@ -83,7 +83,7 @@ const TEXT = {
     room: '房间', quest: '任务', passcode: '密码', access: '访问', status: '状态', open: '可加入', full: '已满', waiting: '等待中',
     public: '公开', phone: '手机公共', key: 'Key 房间', hunterSearch: '猎人搜索',
     unnamed: '未命名房间', inQuest: '任务中', noQuest: '未选任务', noPasscode: '无密码',
-    players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入', roomIdle: '房间空闲', questElapsed: '已出发'
+    players: '猎人', auto: '每 5 秒自动刷新', emptyNames: '等待猎人加入', roomIdle: '房间空闲', questElapsed: '已出发', unknownQuest: '未知任务'
   },
   es: {
     tagline: 'Tablón de salas públicas', boardEyebrow: 'SALAS DE REUNIÓN', boardTitle: 'Salas abiertas',
@@ -92,7 +92,7 @@ const TEXT = {
     room: 'Sala', quest: 'Misión', passcode: 'Contraseña', access: 'Acceso', status: 'Estado', open: 'Abierta', full: 'Completa', waiting: 'Esperando',
     public: 'Pública', phone: 'Pública de móvil', key: 'Sala con Key', hunterSearch: 'Búsqueda de cazadores',
     unnamed: 'Sala sin nombre', inQuest: 'En misión', noQuest: 'Sin misión', noPasscode: 'Sin contraseña',
-    players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores', roomIdle: 'Sala libre', questElapsed: 'En misión'
+    players: 'Cazadores', auto: 'Se actualiza cada 5 segundos', emptyNames: 'Esperando cazadores', roomIdle: 'Sala libre', questElapsed: 'En misión', unknownQuest: 'Misión desconocida'
   }
 };
 const $ = s => document.querySelector(s);
@@ -153,7 +153,7 @@ function questTitle(h) {
   if (!h.in_quest) return T().roomIdle;
   const {name} = questFor(h);
   if (name) return name;
-  if (h.quest_id) return '#' + h.quest_id;
+  if (h.quest_id) return T().unknownQuest + ' #' + h.quest_id;
   return T().inQuest;
 }
 function questAge(sec) {

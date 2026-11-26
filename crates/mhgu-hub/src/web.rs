@@ -58,6 +58,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "hunter searches" => s!("Hunter Search", "猎人搜索", "Búsqueda de cazadores"),
         "room idle" => s!("Room idle", "房间空闲", "Sala libre"),
         "quest elapsed" => s!("in quest", "已出发", "en misión"),
+        "unknown quest" => s!("Unknown quest", "未知任务", "Misión desconocida"),
         "connections" => s!("connections", "连接数", "conexiones"),
         "uptime" => s!("uptime", "运行时长", "tiempo activo"),
         "hub" => s!("hub", "房间", "sala"),
@@ -746,7 +747,7 @@ fn quest_label(h: &crate::server::HubView, l: Lang) -> String {
     }
     let Some(q) = crate::quests::get(h.quest_id) else {
         return if h.quest_id != 0 {
-            format!("#{}", h.quest_id)
+            format!("{} #{}", t(l, "unknown quest"), h.quest_id)
         } else {
             t(l, "in quest").to_string()
         };
