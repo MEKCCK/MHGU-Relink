@@ -127,6 +127,7 @@ typedef struct {
     char room_name[64];       // [Multiplayer] RoomName: the room's name
     char room_password[64];   // [Multiplayer] RoomPassword: the room's password (empty: open)
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
+    char pause_key[32];       // [Controls] PauseKey: Pause/Suspend's key (runtime/pause.h), by SDL's name; "" none
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
     int smooth_gradients;     // [Graphics] SmoothGradients: the game's RGBA8 render targets as RGBA16 (nvn/vulkan/textures.c)
@@ -306,6 +307,7 @@ int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
+int config_live_pause_key(void);  // [Controls] PauseKey as an SDL scancode (0: none)
 int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds, or a mod's for now)
 // A mod's keys for BIND_* for now (runtime/forge.c forge_input_setKeybind), over the settings' own; NULL: theirs again.
 // Not saved: mhgurecomp.ini and the settings menu keep the player's.

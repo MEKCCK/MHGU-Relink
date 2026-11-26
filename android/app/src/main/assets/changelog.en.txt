@@ -1,6 +1,6 @@
-MHGU Relink 0.3.2 · 2026-11-27
+MHGU Relink 0.3.3 · 2026-11-27
 
-2026-11-27: online fixes from mainline
-The hub-list request now rechecks that its network is still alive after connecting, so a closed network cannot send a HOST without its code. Unknown weapon types from mods show a red X in Join Hub and the Hub player list instead of an empty/Great Sword icon.
+2026-11-27: offline pause/suspend
+Pause (PauseKey, default Pause) now pauses the game offline, stops the guest clock and audio, and shows PAUSED; Esc or Enter resumes. It is refused in a hub, with Hunter Search, or while the game saves.
 
-GameLib ID is now 4dbb66b724c00bf3; regenerate your game-code library with the 0.3.2 tools.
+GameLib ID remains 4dbb66b724c00bf3; 0.3.2 game libraries still work.

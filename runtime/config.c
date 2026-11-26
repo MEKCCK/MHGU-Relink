@@ -119,6 +119,7 @@
     .prompt_icons = 0,                                                                               \
     .combo_window = COMBO_LENIENT,                                                                  \
     .chat_key = "/",                                                                                \
+    .pause_key = "Pause",                                                                          \
     .menu_chord = 1,                                                                                \
     .lock_on = 1,                                                                                   \
     .persistent_lock_on = 0,                                                                        \
@@ -1112,6 +1113,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "MenuChord", menu_chord, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
+    {"Controls", "PauseKey", SET_TEXT, F(pause_key), sizeof g_config.pause_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
     {"Mouse", "MouseSensitivityY", SET_FLOAT, F(mouse_sensitivity_y), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_MOUSE},
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),

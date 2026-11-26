@@ -40,6 +40,7 @@
 #include "keymap.h"
 #include "mods.h"
 #include "overlay.h"
+#include "pause.h"
 #include "padmap.h"
 #include "settings_panel.h"
 #include "rt.h"
@@ -957,6 +958,12 @@ void host_input_event(const SDL_Event *e) {
                 keys[e->key.scancode] = false;  // (Alt+Enter: windowed <-> full screen, not a button press)
                 keys[SDL_SCANCODE_LALT] = keys[SDL_SCANCODE_RALT] = false;
                 ui_toggle_fullscreen();
+            } else if ((int)e->key.scancode == config_live_pause_key() && config_live_pause_key()) {
+                keys[e->key.scancode] = false;
+                pause_toggle();
+            } else if ((e->key.scancode == SDL_SCANCODE_ESCAPE || e->key.scancode == SDL_SCANCODE_RETURN ||
+                        e->key.scancode == SDL_SCANCODE_KP_ENTER) && pause_wanted() && pause_resume()) {
+                keys[e->key.scancode] = false;
             } else if ((int)e->key.scancode == config_live_chat_key() && config_live_chat_key()) {
                 keys[e->key.scancode] = false;
                 chat_open();  // (a line to type, sent as chat: runtime/hle/chat.c)

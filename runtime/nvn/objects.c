@@ -6,6 +6,7 @@
 #include <pthread.h>
 
 #include "../kernel.h"
+#include "../pause.h"
 #include "../forge.h"
 #include "../overlay.h"
 #include "nvn.h"
@@ -707,12 +708,15 @@ NVN(nvnQueueAcquireTexture) {
     w->next = (w->next + 1) % (w->active ? w->active : 1);
     RET(0);
 }
+static void present_again(void *t) { backend_present(t); }
 NVN(nvnQueuePresentTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
     int i = (int)A(2);
     if (i >= 0 && i < w->num) {
         forge_nvn_present(c, (uint32_t)A(0), (uint32_t)A(1), i);
-        backend_present(HOST(NvnTexture, w->textures[i]));
+        NvnTexture *t = HOST(NvnTexture, w->textures[i]);
+        backend_present(t);
+        pause_frame(c, present_again, t);
     }
 }
 
