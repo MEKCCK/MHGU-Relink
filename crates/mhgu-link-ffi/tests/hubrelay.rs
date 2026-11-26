@@ -60,10 +60,13 @@ fn through_the_hub() {
         std::thread::sleep(Duration::from_millis(200));
     }
     let hub = hubs.iter().max_by_key(|h| h.id).expect("a hub").id;
+    let entry = hubs.iter().find(|h| h.id == hub).expect("the hub");
+    let code = entry.code;
+    let code_ptr = if code.iter().any(|&b| b != 0) { code.as_ptr() } else { std::ptr::null() };
     let info = valid_info();
     let mut ok = false;
     for _ in 0..30 {
-        if mhgu_ldn_join_server(server.as_ptr(), key.as_ptr(), hub, c"guest".as_ptr() as *const _, info.as_ptr(), info.len() as u32) { ok = true; break; }
+        if mhgu_ldn_join_server(server.as_ptr(), key.as_ptr(), hub, code_ptr, entry.link_proto, c"guest".as_ptr() as *const _, info.as_ptr(), info.len() as u32) { ok = true; break; }
         std::thread::sleep(Duration::from_millis(200));
     }
     assert!(ok, "join through the hub failed");

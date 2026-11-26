@@ -528,6 +528,55 @@ static VkSpan guest_copy(uint64_t addr, uint64_t size) {
 
 static bool guest_range_ok(uint64_t addr, uint64_t size) { return addr && addr < GUEST_SPACE && size <= GUEST_SPACE - addr; }
 
+// ---- (debug) MHGU_LATE_WRITES=1: the vertices a small draw reads (immediate quads: at most 512 bytes), as copied for
+// it, compared with guest memory again when the frame is presented (vk_latewrite_frame). A difference means the game
+// wrote them after the copy: a Switch GPU reads them when it runs the commands, later than this submit-time copy.
+// (The Deck's shadow cascades cleared to 0 in a rectangle: is the clear quad's data copied before the game wrote it?)
+#define LW_TAB 4096
+static struct { uint64_t addr, vs; uint32_t len, stride, count; float vp_y; uint8_t depth_only, snap[512]; } lw[LW_TAB];
+static uint32_t lw_n, lw_frames, lw_checked, lw_changed, lw_logged, lw_quads;
+static bool latewrite_on(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("MHGU_LATE_WRITES") && atoi(getenv("MHGU_LATE_WRITES"));
+    return on;
+}
+static void latewrite_note(uint64_t addr, const void *copied, uint32_t len, uint32_t stride, uint32_t count, uint64_t vs,
+                           bool depth_only, float vp_y) {
+    if (!len || len > sizeof lw[0].snap || lw_n >= LW_TAB || !guest_range_ok(addr, len)) return;
+    lw[lw_n].addr = addr, lw[lw_n].len = len, lw[lw_n].stride = stride, lw[lw_n].count = count, lw[lw_n].vs = vs;
+    lw[lw_n].depth_only = depth_only, lw[lw_n].vp_y = vp_y;
+    memcpy(lw[lw_n].snap, copied ? copied : G2H((uint32_t)addr), len);
+    lw_n++;
+}
+void vk_latewrite_frame(void) {
+    if (!latewrite_on()) return;
+    uint32_t changed = 0;
+    for (uint32_t i = 0; i < lw_n; i++) {
+        lw_quads += lw[i].depth_only && lw[i].count == 4;  // (the shadow cascades' clear quads among them)
+        if (!memcmp(lw[i].snap, G2H((uint32_t)lw[i].addr), lw[i].len)) continue;
+        changed++;
+        if (lw_logged >= 300) continue;
+        lw_logged++;
+        char cp[200] = "", now[200] = "";
+        int a = 0, b = 0;
+        for (uint32_t v = 0; v < lw[i].count && v < 4 && (v + 1) * lw[i].stride <= lw[i].len && lw[i].stride >= 12; v++) {
+            float f[3], g[3];
+            memcpy(f, lw[i].snap + v * lw[i].stride, 12);
+            memcpy(g, G2H((uint32_t)(lw[i].addr + v * lw[i].stride)), 12);
+            a += snprintf(cp + a, sizeof cp - a, " (%.3g %.3g %.3g)", f[0], f[1], f[2]);
+            b += snprintf(now + b, sizeof now - b, " (%.3g %.3g %.3g)", g[0], g[1], g[2]);
+        }
+        LOG("[latew] present %llu: vs %llx %s vp y %.0f, %u vertices at %llx (%u bytes) changed after the copy\n"
+            "[latew]   copied:%s\n[latew]   now:   %s\n", (unsigned long long)vk_frame_counter(), (unsigned long long)lw[i].vs,
+            lw[i].depth_only ? "depth-only" : "colour", lw[i].vp_y, lw[i].count, (unsigned long long)lw[i].addr, lw[i].len, cp, now);
+    }
+    lw_checked += lw_n, lw_changed += changed, lw_frames++;
+    if (lw_frames % 600 == 0)
+        LOG("[latew] %u frames: %u small vertex ranges checked (%u depth-only 4-vertex), %u changed after their copy\n", lw_frames,
+            lw_checked, lw_quads, lw_changed);
+    lw_n = 0;
+}
+
 // ---- vertex cache: device-local copies of bound vertex ranges, kept across submissions and refreshed only when the
 // CPU wrote their pages since (page write tracking, textures.c vk_pages_changed). The copy goes into the submission's
 // upload command buffer, which starts with a full barrier (earlier submissions' reads are done) and completes before
@@ -1052,6 +1101,12 @@ static struct {
     float z, xmin, xmax, ymin, ymax;
     struct { float *m, pos_y; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group_prev;
+// The layer 97 pieces drawn in a row before the current one (cbuf_info menu_text): a menu window of this tree's is
+// anchored piece by piece ("A resolved menu canvas must not be re-anchored"), so ui_group may not hold it whole; the
+// layer 94 text inside it (the Hub Info's Canteen rows) still belongs to it. Kept while the rows of that window pass
+// (any), started again by the next window (prev97: the piece before was one of its own); a piece outside it, or a new
+// frame, clears it.
+static struct { float x0, y0, x1, y1; uint64_t frame; bool any, prev97; } ui_menu_run;
 // Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
 // scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
 #define UI_KNOWN 64
@@ -1092,14 +1147,22 @@ static int ui_float_cmp(const void *a, const void *b) {
 static void ui_group_hend(int n) {
     float x0 = ui_group.xmin, x1 = ui_group.xmax, cut = INFINITY, asp = g_render_aspect;
     int h = ui_group_hside(x0, x1), h2 = h;
-    if (h != 2 && x0 < 640.0f && x1 > 640.0f) {
+    // Across the middle, not centred, with nothing of it over a quarter of the canvas: two things side by side on one
+    // row (the smithy's title at the top left and its page counter at the top right), each placed by its own side.
+    // Centred too when the empty quarter is the middle and each side is a window of its own (wider than 160): Set
+    // Decorations' details window (x 26..402) and Equipment Box (870..1254) mirror about x 640 and went Centre as one
+    // dialog, but on an empty slot the box is drawn alone and went Right: it jumped sideways with Edges / 21:9. (A
+    // frame drawn as its corners only has nothing between its sides either, but no width on each side.)
+    if (x0 < 640.0f && x1 > 640.0f) {
         static float xs[UI_GROUP_MAX];
         for (int i = 0; i < n; i++) xs[i] = ui_group.p[i].pos_x;
         qsort(xs, (size_t)n, sizeof xs[0], ui_float_cmp);
         int k = 0;
         for (int i = 1; i < n; i++)
             if (xs[i] - xs[i - 1] > (k ? xs[k] - xs[k - 1] : 0.0f)) k = i;
-        if (k && xs[k] - xs[k - 1] > 320.0f) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
+        bool apart = k && xs[k] - xs[k - 1] > 320.0f;
+        if (h == 2) apart = apart && xs[k - 1] < 640.0f && xs[k] > 640.0f && xs[k - 1] - x0 > 160.0f && x1 - xs[k] > 160.0f;
+        if (apart) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
     }
     float s = (16.0f / 9.0f) / asp, anchor = g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
     float left = 640.0f * (1.0f - anchor / asp);
@@ -3765,6 +3828,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool item_bar_part = false, arts_part = false, target_part = false, map_part = false;
                 bool grouped = false;
                 int vgroup = 1;
+                float zgroup = pos_z;  // (the layer its group is on: a menu window's text, 94, joins the window's 97)
 
                 if (is_3d_overlay && g_hudtrace_active)
                     LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: 3D overlay, not moved\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
@@ -3772,6 +3836,31 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     enum { ANCHOR_LEFT = HUD_LEFT, ANCHOR_RIGHT = HUD_RIGHT, ANCHOR_CENTER = HUD_CENTER } anchor = ANCHOR_CENTER;
                     // vertically one anchor per layer (or per part of one), so a window drawn in pieces stays together
                     enum { V_TOP, V_BOTTOM, V_CENTER } vanchor = V_CENTER;
+                    // Text of layer 94 drawn on a layer 97 window right after its pieces, inside them: the Hub Info's
+                    // Canteen panel (frame x 508..942, y 300..470; its skill rows at x 598 / 610, y 350..431). By the
+                    // banners' rule it went Centre, ~40 px below its Top-anchored frame at 16:10 (out of the box), and
+                    // stayed in the middle wider than 16:9 while the frame went to its side. It is part of the window:
+                    // the menus' rule and group. (The rows' group at 97 is not what finds them here: this tree's menu
+                    // canvases are not grouped, so the window's own pieces are kept in a run instead, which the rows of
+                    // that window stay inside; the next window starts a new one.)
+                    bool menu_text = pos_z < 95.0f &&
+                                     ((ui_group.n && fabsf(ui_group.z - 97.0f) < 0.5f && pos_x >= ui_group.xmin &&
+                                       pos_x <= ui_group.xmax && pos_y >= ui_group.ymin && pos_y <= ui_group.ymax) ||
+                                      (ui_menu_run.any && ui_menu_run.frame == g_present_count && pos_x >= ui_menu_run.x0 &&
+                                       pos_x <= ui_menu_run.x1 && pos_y >= ui_menu_run.y0 && pos_y <= ui_menu_run.y1));
+                    if (fabsf(pos_z - 97.0f) < 0.5f) {
+                        if (!ui_menu_run.prev97 || ui_menu_run.frame != g_present_count) {
+                            ui_menu_run.x0 = ui_menu_run.x1 = pos_x, ui_menu_run.y0 = ui_menu_run.y1 = pos_y;
+                            ui_menu_run.frame = g_present_count, ui_menu_run.any = true;
+                        } else {
+                            ui_menu_run.x0 = fminf(ui_menu_run.x0, pos_x), ui_menu_run.y0 = fminf(ui_menu_run.y0, pos_y);
+                            ui_menu_run.x1 = fmaxf(ui_menu_run.x1, pos_x), ui_menu_run.y1 = fmaxf(ui_menu_run.y1, pos_y);
+                        }
+                        ui_menu_run.prev97 = true;
+                    } else {
+                        ui_menu_run.prev97 = false;
+                        if (!menu_text) ui_menu_run.any = false;
+                    }
 
                     // Title screen: its layout (layer 108) is placed at the canvas centre and carries the copyright line at
                     // its bottom (y ~698), which the centre anchor moved up into "PRESS A" (layer 100, y 653 / 671, bottom
@@ -3786,7 +3875,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // "Summary" header landed on the text. All of it scales about the center instead.
                         anchor = ANCHOR_CENTER;
                         vanchor = V_CENTER;
-                    } else if (pos_z < 95.0f) {
+                    } else if (pos_z < 95.0f && !menu_text) {
                         // 94.0: Central notifications & banners ("Time limit: 50 min.")
                         // 60.0: the Guild Card's name plate (top right, under its page counter): by which third it is in
                         anchor = ANCHOR_CENTER;
@@ -3796,7 +3885,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // left and right)
                         anchor = pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_LEFT;
                         vanchor = pos_y < 360.0f ? V_TOP : V_BOTTOM;
-                    } else if (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f) {
+                    } else if (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || menu_text) {
                         // 97.0: Menus and Submenus
                         // 98.0: text drawn over them (the Qty. label of the quantity box): it used the generic rule, which
                         // centered it 36 px below its top-anchored box
@@ -4014,12 +4103,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // windows/prompts of 100. By their own place a piece went left of x 430 and right of it, splitting
                     // the item box's submenu and the multiplayer dialog. A resolved menu canvas must not be re-anchored.
                     if (s < 1.0f && !menu_canvas && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f ||
-                                    fabsf(pos_z - 100.0f) < 0.5f) &&
+                                    fabsf(pos_z - 100.0f) < 0.5f || menu_text) &&
                         !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
                         !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)
                         grouped = true;
                     grouped = hud_touch_group_allowed(grouped, offset);
                     vgroup = v;
+                    if (menu_text) zgroup = 97.0f;
                     if (g_hudtrace_active)
                         LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],
                             m[5], "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "", st.scissor[0][0],
@@ -4044,7 +4134,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
                 ui_loading_record(loading_tile, (float *)sp.ptr);
-                if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
+                if (grouped) ui_group_add((float *)sp.ptr, zgroup, pos_x, pos_y, vgroup);
                 {   // (where the piece ends up: read at the frame's end, once its group has its anchor - runtime/menulearn.c)
                     void menulearn_piece_final(const float *m);
                     menulearn_piece_final((const float *)sp.ptr);
@@ -5085,6 +5175,12 @@ static void draw(CmdRec *r, bool indexed) {
             if (!v.addr || !guest_range_ok(v.addr, need)) { static const uint8_t zero[256]; sp = vk_transient_copy(zero, 256, 16); }
             else if (v.size && guest_range_ok(v.addr, v.size) && vcache(v.addr, v.size, &cached)) sp = (VkSpan){cached, 0, NULL};
             else sp = guest_copy(v.addr, need ? need : 16);
+            if (latewrite_on() && v.addr && stride && max_index && (uint64_t)max_index * stride <= 512) {  // (debug)
+                uint32_t lo = indexed ? 0 : first, len = (max_index - lo) * (uint32_t)stride;
+                latewrite_note(v.addr + (uint64_t)lo * stride, sp.ptr ? (const uint8_t *)sp.ptr + (uint64_t)lo * stride : NULL,
+                               len, (uint32_t)stride, max_index - lo, st.program->stages[0].code_addr, !st.rt.ncolor,
+                               st.viewport[0][1]);
+            }
         }
         VkDeviceSize off = sp.off;
         if ((ss.vb_known >> s & 1) && ss.vb[s] == sp.buf && ss.vo[s] == off) continue;

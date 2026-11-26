@@ -1,17 +1,10 @@
-MHGU Relink 0.2.8 · 2026-11-22
+MHGU Relink 0.2.9 · 2026-11-26
 
-2026-11-22: Tamaño del HUD
-Ajustes -> Pantalla tiene Tamaño del HUD (60-100 %): todo el HUD de caza se encoge hacia sus esquinas —las barras, la barra de objetos, las Artes de cazador, el mapa y la cámara de objetivo— a la vez. El 100 % es exactamente como antes.
+2026-11-26: juego federado y presencia caducada
+La federación de hubs ahora propaga anuncios, FIND por código de sesión y uniones por varios saltos: un servidor puede listar, buscar y entrar en hubs a varios peers de distancia, por la misma ruta, con retransmisión TCP y UDP. Los peers antiguos vuelven a la federación directa.
 
-2026-11-22: Nivel de gama baja Ladrillo
-Un paso por debajo de Tostadora: 3D al 15 %, 30 FPS, HUD de 360 líneas, sin reverberación ni césped; la resolución 3D puede bajar hasta el 10 %.
+La presencia de amigos también se reenvía de forma transitiva. El nuevo -presence-ttl (90 s por defecto) anuncia de inmediato a un jugador que deja de responder, y los registros remotos caducados se borran aguas abajo sin esperar el TTL completo.
 
-2026-11-22: Interruptor de partículas
-Ajustes -> Gráficos tiene Efectos: apagado, no se dibujan las chispas de los golpes, el fuego y el aliento, el polvo, la lluvia y la nieve, ni los destellos de los monstruos y de las Artes. Los sonidos, los tiempos y las reglas del juego no cambian, pero el aviso del ataque de un monstruo también desaparece.
+Sincronizado con MHGURecomp 0.20.1: protocolo de enlace v4 (códigos de sesión, unirse por código, presencia/solicitudes/eliminaciones de amigos, HUBS4 y grupos de enlace de 3-4), correcciones upstream, interoperabilidad de mods y mejoras de depuración. El menú de ajustes se reorganiza en Pantalla / Gráficos / Audio / Controles / En línea / Juego / Sistema / Mods / Trucos.
 
-2026-11-22: Texturas en celulares con poca memoria
-Por debajo de 3,5 GB se descarta un nivel más de las texturas 3D decodificadas en la CPU (cerca de 1/16 de la memoria); por debajo de 5 GB, Texturas completas conserva todos los niveles (necesita reiniciar, ocupa mucha más memoria y la app puede cerrarse).
-
-2026-11-22: Filtro de escala, ritmo de presentación y resolución de gama baja en PC
-Por debajo del 100 % la imagen 3D puede escalarse Nítida (vecino); un límite de FPS que sea una fracción entera de la frecuencia de la pantalla ahora usa FIFO, para una imagen más estable; en PC la gama baja pide líneas (720/540/360) en vez de un porcentaje.
-
+El GameLib ID ahora es 3bfb26af6be3424b: reconstruye y sustituye la biblioteca de código del juego con las herramientas de esta versión.

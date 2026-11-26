@@ -40,6 +40,16 @@
 - 不接受把 0.1.7+ 代码搬进来的提交，也不接受去掉来源/署名的搬运；
 - 欢迎基于证据的来源讨论，但不接受人身攻击或无证据的指控。
 
+## 上游同步（0.20.1，协议 v4）
+
+- 基线：`ce7f8e9`（0.17.6 开发中的 `Update README.md`，即本仓库上次同步点）→ `330f968`（0.20.1），共 130 个提交。
+- 协议：链路协议 4（与 3 互通）——`HUBS4`、`FIND`、`PRESENCE`/`FRIENDS`、集会所代码、链接池；Rust 侧落在
+  `crates/mhgu-protocol`、`mhgu-hub`、`mhgu-link`、`mhgu-link-ffi`，C 侧落在 `runtime/net/ldn.c` 与设置菜单。
+- 修复：按上游补丁逐文件三方合并（base `0.17.5`），新增上游的 `partsync.c`、`shellstep.c`、`plcarry.c`、
+  `equipcheck.c`、`emturn.c`；`tools/gen.py` 增加对应 patch 入口，需重新 `make gen`。
+- 未采用：JIT（`fe2d11a`/`6b048fa`）、Android 双屏、存档备份、窗口位置/更新器、韩语字体等纯新功能；
+  各向异性过滤选项（本仓库没有该设置，纹理沿用游戏自身的 maxAniso）。
+
 ## 验证
 
 合并后通过：

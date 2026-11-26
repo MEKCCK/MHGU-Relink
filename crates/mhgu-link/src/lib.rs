@@ -18,7 +18,7 @@ pub mod vpacket;
 
 pub use client::{Client, Event, Reply};
 pub use hello::Hello;
-pub use lobby::{room_from_key, HostSession, HubEntry, Lobby, Spliced};
+pub use lobby::{room_from_key, error_code, FriendOnline, FriendRequest, Friends, HostSession, HubEntry, Lobby, ServerError, Spliced};
 pub use scan::ScanReply;
 pub use vpacket::VPacket;
 

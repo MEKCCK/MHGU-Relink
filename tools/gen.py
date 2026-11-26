@@ -113,6 +113,23 @@ PATCHES = {
     # 10, s16 at r5) it now skips the push (`ldr r0, [r4, #0x18]`, the push's first instruction) for its end
     ('main', 0x5d6e74): (0xE5940018, '{ extern int stageview_skip_push(uint32_t); if (stageview_skip_push(c->r[5])) '
                          'goto L_5d6fc4; c->r[0] = LD32(c->r[4] + 0x18u); }'),
+    # Monster turns (runtime/hle/emturn.c): Duramboros' turn at the end of 7:32 divides by the frame step instead of
+    # multiplying (`vdiv.f32 s0, s6, s0`, s0 = (C2 / speed) * s2, s2 = step / 2, r4 = the monster)
+    ('main', 0x10dc744): (0xEE830A00, '{ extern float emturn_div(uint32_t, float, float, float); '
+                          'c->v.f[0] = emturn_div(c->r[4], c->v.f[6], c->v.f[0], c->v.f[2]); }'),
+    # Carry run (runtime/hle/plcarry.c): the push of `vmov.f32 s6, #2.5` units per update along the hunter's facing
+    # (r4 = the player) is scaled by the frame step; 0x49430c the Moofy's run, 0x490380 its twin (motion 0x138f)
+    ('main', 0x49430c): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
+    ('main', 0x490380): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
+    # Another hunter's equipment this game can't use, as a mod's new weapon type (runtime/hle/equipcheck.c): f_46e964
+    # swaps a piece failing its check for an empty one of its kind and calls itself again; an empty one that fails as
+    # well recursed forever (a crash when that hunter joins). The swap's `add r6, sp, #4`: an empty weapon that fails
+    # becomes a Great Sword and is put on, anything else that's already empty is left off
+    ('main', 0x46e998): (0xE28D6004, '{ extern int equipcheck_swap(Cpu *); int k = equipcheck_swap(c); '
+                         'if (k == 1) goto L_46ea80; if (k == 2) goto L_46e9ec; c->r[6] = c->r[13] + 0x4u; }'),
+    # ... and f_475a68 makes no quest object for a weapon class without an entry in its table (class 5), so the quest
+    # crashed on load: `ldrb r0, [r8, #0x4d4]`, that hunter is a Great Sword user instead
+    ('main', 0x475afc): (0xE5D804D4, '{ extern uint32_t equipcheck_class(uint32_t); c->r[0] = equipcheck_class(c->r[8]); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per
@@ -134,6 +151,9 @@ for _a, _kind, _axis, _jerk in EMJUMP:
     _reg = 1 if _a == 0x1122bc8 else 0  # vstr s2 there, s0 elsewhere
     _word = 0xED800A00 | (_reg << 12) | (_off // 4)
     PATCHES[('main', _a)] = (_word, f'{{ extern void emjump_{_kind}(Cpu *, int, float); emjump_{_kind}(c, {_axis}, {float(_jerk)}f); }}')
+# Uroktor's leap out of the ground (emjump.c emjump_launch): the store of the launch speed before its one-update move
+# (`vstr s0, [r0, #0x14]`), so that move lifts it as far as at 30 fps and the landing check doesn't end the leap at once
+PATCHES[('main', 0x1308838)] = (0xED800A05, '{ extern void emjump_launch(Cpu *); emjump_launch(c); }')
 
 
 class Module:

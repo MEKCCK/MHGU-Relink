@@ -95,6 +95,7 @@ struct State {
     bool editing = false, floating = false, advanced = false, focus_request = true, saved_notice = false;
     bool aspect_custom = false;  // the aspect row shows Custom (not one of the presets)
     int page = 0;
+    int section = 0;  // (a page with sections: 0 the list of them, else one of them)
     View view = View::Main;
     Command command = Command::None;
     std::string focus, error;
@@ -288,9 +289,34 @@ void switch_mark(ImDrawList *dl, const ImRect &r, bool on) {
     diamond(dl, knob.GetCenter(), side * .2f, on ? IM_COL32(28, 20, 15, 255) : IM_COL32(60, 48, 40, 255));
 }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
-constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
-const char *const page_names[PAGES] = {"Display", "Graphics & Audio", "Controls", "Network",
-                                       "Misc",    "Mods",             "Cheats",   "Menu Options"};
+constexpr int PAGES = 9, APP_PAGE = 6, MODS_PAGE = 7, CHEATS_PAGE = 8;
+const char *const page_names[PAGES] = {"Display", "Graphics", "Audio", "Controls", "Online",
+                                       "Gameplay", "System", "Mods", "Cheats"};
+// The pages with more than a screenful of rows open on their sections: a list of them first, then one section at a
+// time with a Back row. 0 sections: the page's rows are shown as they are (Audio, Mods, Cheats).
+int section_count(int page) {
+    switch (page) {
+    case 0: return 3;  // Window & Screen, 3D Picture, HUD & Camera
+    case 1: return 4;  // Performance, Quality, Effects, HDR
+    case 3: return 4;  // Controller, Keyboard & Mouse, Touch, Camera
+    case 4: return 3;  // Hub Server, Session & Friends, Crossplay
+    case 5: return 2;  // Hub & Quests, Monster HP
+    case 6: return 4;  // Appearance, General, Save Data, Application
+    default: return 0;
+    }
+}
+const char *section_name(int page, int index) {
+    static const char *const names[7][4] = {
+        {"Window & Screen", "3D Picture", "HUD & Camera"},
+        {"Performance", "Quality", "Effects", "HDR"},
+        {},
+        {"Controller", "Keyboard & Mouse", "Touch", "Camera"},
+        {"Hub Server", "Session & Friends", "Crossplay"},
+        {"Hub & Quests", "Monster HP"},
+        {"Appearance", "General", "Save Data", "Application"},
+    };
+    return index >= 0 && index < section_count(page) ? names[page][index] : "";
+}
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
     ModScan scan = {};
@@ -653,6 +679,7 @@ void first_page(int page) {
     s.dropdown.open = false;
     s.drag = {};
     s.page = page;
+    s.section = 0;
     s.view = View::Main;
     s.origins.clear();
     s.focus.clear();
@@ -671,6 +698,24 @@ void discard() {
     s.error.clear();
     s.saved_notice = false;
 }
+void enter_section(int section) {
+    s.dropdown.open = false;
+    s.drag = {};
+    s.section = section;
+    s.focus.clear();
+    s.focus_request = true;
+    s.restore_scroll = true;
+    s.scroll = 0;
+    s.error.clear();
+    s.help_row.clear();
+}
+void leave_section() {
+    int was = s.section;
+    s.section = 0;
+    focus("sec." + std::to_string(was));
+    s.restore_scroll = true;
+    s.scroll = 0;
+}
 void ask_back(bool *open) {
     if (s.dropdown.open)
         close_dropdown();
@@ -681,6 +726,8 @@ void ask_back(bool *open) {
         }
         if (s.view == View::CloseChanges) touch_edit_cancel();  // (B / Esc / the chord: the menu stays, no editor)
         pop();
+    } else if (s.view == View::Main && s.section) {
+        leave_section();
     } else if (dirty())
         push(View::CloseChanges, "dialog.cancel");
     else
@@ -900,6 +947,157 @@ void text(std::vector<Row> &rows, const char *id, const char *name, char *field,
     };
     rows.push_back(std::move(r));
 }
+// ---- link protocol 4: session codes and friends (runtime/net/ldn.c)
+static char net_join_code[32], net_friend_code[64], net_friend_remove[64];
+
+static void net_session_codes(std::vector<Row> &rows) {
+    char code[16];
+    std::string cur = ldn_session_code(code, sizeof code) ? code : tr("None");
+    Row r;
+    r.id = "net.session.code";
+    r.title = tr("Session code");
+    r.value = cur;
+    r.help = tr("Your hub's code, to share: another player types it in Join with code and finds your hub at the top of Join Hub, whatever your matchmaking key. It stays the same while the hub is listed. None: not hosting or in a hub through the hub server.");
+    rows.push_back(std::move(r));
+    r = Row{};
+    r.id = "net.join.code";
+    r.title = tr("Join with code");
+    r.value = *net_join_code ? net_join_code : std::string(tr("None"));
+    r.help = tr("Type a hub's session code (8 letters and digits); the hub is looked up on the hub server and comes first in Join Hub for ten minutes.");
+    r.activate = []() {
+        keyboard(tr("Session code"), net_join_code, sizeof net_join_code - 1, [](const std::string &typed, std::string &error) {
+            SDL_utf8strlcpy(net_join_code, typed.c_str(), sizeof net_join_code);
+            if (!ldn_join_code(net_join_code, s.draft.ldn_server)) {
+                error = tr("That is not a session code, or there is no hub server.");
+                return false;
+            }
+            return true;
+        });
+    };
+    rows.push_back(std::move(r));
+    int st = ldn_invite_state(code, sizeof code);
+    const char *state = st == LDN_INVITE_SEARCHING ? "Looking for the hub..."
+                        : st == LDN_INVITE_READY ? "Found: first in Join Hub"
+                        : st == LDN_INVITE_NOT_FOUND ? "No hub has that code"
+                        : st == LDN_INVITE_OLD_SERVER ? "The hub server is older than this game"
+                        : st == LDN_INVITE_FAILED ? "Could not look up the code"
+                                                  : "None";
+    r = Row{};
+    r.id = "net.invite";
+    r.title = tr("Join by code");
+    r.value = (st != LDN_INVITE_NONE && code[0] && code[0] != '-') ? std::string(code) + " (" + tr(state) + ")"
+                                                                   : tr(state);
+    rows.push_back(std::move(r));
+}
+
+static const char *friend_state_text(int st) {
+    switch (st) {
+    case LDN_FRIEND_OFFLINE: return tr("Offline");
+    case LDN_FRIEND_ONLINE: return tr("Online");
+    case LDN_FRIEND_HOSTING: return tr("Hosting a hub");
+    case LDN_FRIEND_IN_HUB: return tr("In a hub");
+    default: return tr("Not asked yet");
+    }
+}
+
+static void net_friends(std::vector<Row> &rows) {
+    char code[24];
+    ldn_my_friend_code(code, sizeof code);
+    Row r;
+    r.id = "net.friend.code";
+    r.title = tr("Friend code");
+    r.value = code;
+    r.help = tr("This install's friend code, kept in the save folder (friends-id.bin). Players add each other by it; a friend who lists you back shows as online here and the game itself counts them as a friend.");
+    rows.push_back(std::move(r));
+    r = Row{};
+    r.id = "net.friend.add";
+    r.title = tr("Add a friend");
+    r.value = *net_friend_code ? net_friend_code : std::string(tr("None"));
+    r.help = tr("Type a friend code (16 letters and digits), then a name if you like: \"ABCD-EFGH-JKMN-PQRS Name\".");
+    r.activate = []() {
+        keyboard(tr("Friend code and name"), net_friend_code, sizeof net_friend_code - 1, [](const std::string &typed, std::string &error) {
+            SDL_utf8strlcpy(net_friend_code, typed.c_str(), sizeof net_friend_code);
+            const char *why = ldn_friend_add(net_friend_code);
+            if (why) {
+                error = settings_text(s.draft.language, why);
+                return false;
+            }
+            return true;
+        });
+    };
+    rows.push_back(std::move(r));
+    r = Row{};
+    r.id = "net.friend.remove";
+    r.title = tr("Remove a friend");
+    r.value = *net_friend_remove ? net_friend_remove : std::string(tr("None"));
+    r.help = tr("Type a friend's code to remove them. Their requests won't be shown again until you add them back.");
+    r.activate = []() {
+        keyboard(tr("Friend code"), net_friend_remove, sizeof net_friend_remove - 1, [](const std::string &typed, std::string &error) {
+            SDL_utf8strlcpy(net_friend_remove, typed.c_str(), sizeof net_friend_remove);
+            ldn_friend_remove(net_friend_remove);
+            (void)error;
+            return true;
+        });
+    };
+    rows.push_back(std::move(r));
+    int server = HUB_UNKNOWN;
+    static LdnFriend friends[LDN_FRIENDS_MAX];
+    int n = ldn_friends(friends, LDN_FRIENDS_MAX, &server);
+    header(rows, "net.friends.header", tr("Friends"));
+    if (!n) {
+        r = Row{};
+        r.id = "net.friends.none";
+        r.title = tr("No friends yet");
+        r.value = server == HUB_VERSION ? tr("The hub server is older than this game") : "";
+        rows.push_back(std::move(r));
+    }
+    for (int i = 0; i < n; i++) {
+        r = Row{};
+        r.id = "net.friend." + std::to_string(i);
+        r.title = friends[i].name;
+        r.value = std::string(friend_state_text(friends[i].state)) +
+                  (friends[i].hub[0] ? std::string(" (") + friends[i].hub + ")" : std::string());
+        r.help = friends[i].code;
+        rows.push_back(std::move(r));
+    }
+    static LdnRequest reqs[8];
+    int nr = ldn_friend_requests(reqs, 8);
+    if (nr) header(rows, "net.requests.header", tr("Friend requests"));
+    for (int i = 0; i < nr; i++) {
+        r = Row{};
+        r.id = "net.request." + std::to_string(i);
+        r.title = reqs[i].name;
+        r.value = reqs[i].code;
+        r.help = tr("Accept adds them to your friends; reject leaves them out until the game restarts.");
+        std::string c = reqs[i].code;
+        r.activate = [c]() { ldn_friend_request_answer(c.c_str(), true); };
+        rows.push_back(std::move(r));
+        r = Row{};
+        r.id = "net.request.reject." + std::to_string(i);
+        r.title = tr("Reject");
+        r.value = reqs[i].name;
+        r.activate = [c]() { ldn_friend_request_answer(c.c_str(), false); };
+        rows.push_back(std::move(r));
+    }
+    static LdnHunter hunters[8];
+    int nh = ldn_hub_hunters(hunters, 8);
+    if (nh) header(rows, "net.hunters.header", tr("Hunters in your hub"));
+    for (int i = 0; i < nh; i++) {
+        r = Row{};
+        r.id = "net.hunter." + std::to_string(i);
+        r.title = hunters[i].name;
+        r.value = hunters[i].state == LDN_HUNTER_FRIEND ? tr("Friend")
+                  : hunters[i].state == LDN_HUNTER_ADDED ? tr("Added")
+                                                         : tr("Add");
+        r.help = hunters[i].code;
+        if (hunters[i].state == LDN_HUNTER_ADD) {
+            std::string c = std::string(hunters[i].code) + " " + hunters[i].name;
+            r.activate = [c]() { ldn_friend_add(c.c_str()); };
+        }
+        rows.push_back(std::move(r));
+    }
+}
+
 // The hub server and key being edited, checked on request (runtime/net/ldn.c); the value: the server's last known
 // state, from the check or from the game's own searches and hubs
 void hub_check(std::vector<Row> &rows) {
@@ -1883,6 +2081,8 @@ void reset_section() {
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.fxaa_mode = f.fxaa_mode;
+        break;
+    case 2:  // Audio
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         c.audio_output = f.audio_output;
@@ -1891,7 +2091,7 @@ void reset_section() {
         c.voice_volume = f.voice_volume;
         c.noise_suppression = f.noise_suppression;
         break;
-    case 2:
+    case 3:
         c.face_buttons = f.face_buttons;
         c.button_icons = f.button_icons;
         c.background_input = f.background_input;
@@ -1920,12 +2120,15 @@ void reset_section() {
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
-    case 3:
+    case 4:  // Online
         c.ldn_port = f.ldn_port;
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
         c.ldn_direct = f.ldn_direct;
+        c.ldn_friend_requests = f.ldn_friend_requests;
+        c.ldn_friend_online_notices = f.ldn_friend_online_notices;
+        c.ldn_friend_hub_notices = f.ldn_friend_hub_notices;
         c.crossplay = f.crossplay;
         SDL_strlcpy(c.ryu_servers, f.ryu_servers, sizeof c.ryu_servers);
         c.ryu_host = f.ryu_host;
@@ -1937,7 +2140,7 @@ void reset_section() {
         SDL_strlcpy(c.room_name, f.room_name, sizeof c.room_name);
         SDL_strlcpy(c.room_password, f.room_password, sizeof c.room_password);
         break;
-    case 4:
+    case 5:  // Gameplay
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
@@ -2220,94 +2423,97 @@ std::vector<Row> main_rows() {
         r.back().enabled = false;
         r.back().value = tr("Off (low-end)");
     };
-    switch (s.page) {
+    int sections = section_count(s.page);
+    if (sections && !s.section) {  // the page's sections first: one screen of them, each opening its own rows
+        header(r, "sections.header", tr(page_names[s.page]));
+        for (int i = 0; i < sections; i++) {
+            int section = i + 1;
+            std::string id = "sec." + std::to_string(section);
+            action(r, id, tr(section_name(s.page, i)), [section]() { enter_section(section); });
+            r.back().value = "›";
+            r.back().help = fmt("Open %s.", tr(section_name(s.page, i)));
+        }
+    } else {
+        if (sections) {  // inside one: Back first, then its name and rows
+            action(r, "sec.back", fmt("Back to %s", tr(page_names[s.page])), []() { leave_section(); });
+            r.back().value = "‹";
+            header(r, "sec.title", tr(section_name(s.page, s.section - 1)));
+        }
+        switch (s.page) {
     case 0:
+        if (s.section == 1) {  // Window & Screen
 #ifndef __ANDROID__  // (a phone: the window is the screen, at its own resolution; the 3D in percent of it below)
-        add_choice(
-            r, "display.mode", "Window mode", c.display_mode,
-            {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, ini("Mode"));
-        add_choice(
-            r, "display.auto", "Screen resolution", !c.width ? 0 : 1, {tr("Desktop"), tr("Custom")},
-            [](int v) {
-                s.draft.width = v ? 1920 : 0;
-                s.draft.height = v ? 1080 : 0;
-            },
-            ini("Resolution"));
-        if (c.width) {
-            number(r, "display.width", "Width", &c.width, 320, 16384, 80, ini("Resolution"));
-            number(r, "display.height", "Height", &c.height, 180, 16384, 45, ini("Resolution"));
-        }
-        add_choice(
-            r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
-            [](int v) {
-                s.draft.render_w = v ? 1920 : 0;
-                s.draft.render_h = v ? 1080 : 0;
-            },
-            ini("RenderResolution"));
-        if (c.render_w) {
-            number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, ini("RenderResolution"));
-            number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, ini("RenderResolution"));
-        } else
-#endif
-        if ((!c.fsr || c.low_end) && !c.render_w) {  // (Auto: the 3D picture in percent of the screen's, RenderScale; the nearest of the presets;
-                              // with FSR its quality sets the 3D size)
-            static const int scales[] = {100, 90, 80, 75, 66, 50, 40, 33, 25};
-            int pick = 0;
-            for (int i = 1; i < (int)std::size(scales); i++)
-                if (std::abs(scales[i] - c.render_scale) < std::abs(scales[pick] - c.render_scale))
-                    pick = i;
             add_choice(
-                r, "render.scale", "3D resolution", pick, {"100%", "90%", "80%", "75%", "66%", "50%", "40%", "33%", "25%"},
-                [](int v) { s.draft.render_scale = scales[v]; }, ini("RenderScale"));
-            if (scales[pick] != c.render_scale)  // (another value set in the file: shown as it is)
-                r.back().value = std::to_string(c.render_scale) + "%";
-            r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
-        }
-        add_choice(r, "upscalefilter", tr("Upscale filter"), c.upscale_filter ? 1 : 0, {tr("Smooth"), tr("Sharp (nearest)")},
-                   [](int v) { c.upscale_filter = v; }, ini("UpscaleFilter"));
-        r.back().help = tr("How a 3D picture below 100% is scaled up to the screen: Smooth blends its pixels; Sharp keeps each one a crisp block, as in the MH4U port. Not used while FSR runs.");
-        aspect_rows(r);  // (phones with 21:9 / 21:10 screens use the same presets)
-        add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
-        number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
-        add_choice(
-            r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
-            [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
-        {   // the whole hunting HUD smaller, every part toward its corner (nvn/vulkan/exec.c); 100 leaves it as it is
-            static const int sizes[] = {100, 95, 90, 85, 80, 75, 70, 65, 60};
-            int pick = 0;
-            for (int i = 1; i < 9; i++) {
-                int d = sizes[i] - c.hud_size, b = sizes[pick] - c.hud_size;
-                if (d * d < b * b) pick = i;
+                r, "display.mode", "Window mode", c.display_mode,
+                {tr("Windowed"), tr("Fullscreen"), tr("Borderless")}, [](int v) { c.display_mode = v; }, ini("Mode"));
+            add_choice(
+                r, "display.auto", "Screen resolution", !c.width ? 0 : 1, {tr("Desktop"), tr("Custom")},
+                [](int v) {
+                    s.draft.width = v ? 1920 : 0;
+                    s.draft.height = v ? 1080 : 0;
+                },
+                ini("Resolution"));
+            if (c.width) {
+                number(r, "display.width", "Width", &c.width, 320, 16384, 80, ini("Resolution"));
+                number(r, "display.height", "Height", &c.height, 180, 16384, 45, ini("Resolution"));
             }
-            add_choice(r, "hudsize", tr("HUD size"), pick, {"100%", "95%", "90%", "85%", "80%", "75%", "70%", "65%", "60%"},
-                       [](int v) { s.draft.hud_size = sizes[v]; }, ini("HUDSize"));
-            if (sizes[pick] != c.hud_size) r.back().value = std::to_string(c.hud_size) + "%";
-            r.back().help = tr("The whole hunting HUD, smaller toward its corners: the clock, the bars, the item bar, the Hunter Arts, the map and the target camera. It applies at once.");
+#endif
+            add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
+        }
+        if (s.section == 2) {  // 3D Picture
+#ifndef __ANDROID__
+            add_choice(
+                r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
+                [](int v) {
+                    s.draft.render_w = v ? 1920 : 0;
+                    s.draft.render_h = v ? 1080 : 0;
+                },
+                ini("RenderResolution"));
+            if (c.render_w) {
+                number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, ini("RenderResolution"));
+                number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, ini("RenderResolution"));
+            }
+#endif
+            if ((!c.fsr || c.low_end) && !c.render_w) {  // (Auto: the 3D picture in percent of the screen's, RenderScale; the nearest of the presets;
+                                  // with FSR its quality sets the 3D size)
+                static const int scales[] = {100, 90, 80, 75, 66, 50, 40, 33, 25};
+                int pick = 0;
+                for (int i = 1; i < (int)std::size(scales); i++)
+                    if (std::abs(scales[i] - c.render_scale) < std::abs(scales[pick] - c.render_scale))
+                        pick = i;
+                add_choice(
+                    r, "render.scale", "3D resolution", pick, {"100%", "90%", "80%", "75%", "66%", "50%", "40%", "33%", "25%"},
+                    [](int v) { s.draft.render_scale = scales[v]; }, ini("RenderScale"));
+                if (scales[pick] != c.render_scale)  // (another value set in the file: shown as it is)
+                    r.back().value = std::to_string(c.render_scale) + "%";
+                r.back().help = tr("The size of the 3D picture, in percent of the screen's. Lower is faster and softer.");
+            }
+            add_choice(r, "upscalefilter", tr("Upscale filter"), c.upscale_filter ? 1 : 0, {tr("Smooth"), tr("Sharp (nearest)")},
+                       [](int v) { c.upscale_filter = v; }, ini("UpscaleFilter"));
+            r.back().help = tr("How a 3D picture below 100% is scaled up to the screen: Smooth blends its pixels; Sharp keeps each one a crisp block, as in the MH4U port. Not used while FSR runs.");
+            aspect_rows(r);  // (phones with 21:9 / 21:10 screens use the same presets)
+            number(r, "fov", tr("Field of view"), &c.fov, lo("FOV"), hi("FOV"), .05f, ini("FOV"));
+        }
+        if (s.section == 3) {  // HUD & Camera
+            add_choice(
+                r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
+                [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
+            {   // the whole hunting HUD smaller, every part toward its corner (nvn/vulkan/exec.c); 100 leaves it as it is
+                static const int sizes[] = {100, 95, 90, 85, 80, 75, 70, 65, 60};
+                int pick = 0;
+                for (int i = 1; i < 9; i++) {
+                    int d = sizes[i] - c.hud_size, b = sizes[pick] - c.hud_size;
+                    if (d * d < b * b) pick = i;
+                }
+                add_choice(r, "hudsize", tr("HUD size"), pick, {"100%", "95%", "90%", "85%", "80%", "75%", "70%", "65%", "60%"},
+                           [](int v) { s.draft.hud_size = sizes[v]; }, ini("HUDSize"));
+                if (sizes[pick] != c.hud_size) r.back().value = std::to_string(c.hud_size) + "%";
+                r.back().help = tr("The whole hunting HUD, smaller toward its corners: the clock, the bars, the item bar, the Hunter Arts, the map and the target camera. It applies at once.");
+            }
         }
         break;
     case 1:
-        header(r, "audio.header", tr("Audio"));
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
-        add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
-#ifndef __ANDROID__  // (a phone: not worth a row)
-        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
-        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
-                   [](int v) { c.audio_output = v; }, ini("Output"));
-        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
-#endif
-        header(r, "voice.header", tr("Voice chat"));
-        add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
-                   [](int v) { c.voice_mode = v; }, ini("VoiceChat"));
-        r.back().help = tr("Talk to the other hunters while you play, when their game has voice chat on too. Always: the microphone is open for the whole hunt. Push to talk: it is open while you hold the voice key.");
-        number(r, "voice.mic", "Mic volume", &c.mic_volume, (int)lo("MicVolume"), (int)hi("MicVolume"), 1, ini("MicVolume"));
-        r.back().value += " %";
-        r.back().help = tr("How loud the other hunters hear you.");
-        number(r, "voice.level", "Voice volume", &c.voice_volume, (int)lo("VoiceVolume"), (int)hi("VoiceVolume"), 1, ini("VoiceVolume"));
-        r.back().value += " %";
-        r.back().help = tr("How loud you hear the other hunters. Doubled, as in MHXX: 50 is the game's own sound's level.");
-        add_bool(r, "voice.noise", "Noise suppression", &c.noise_suppression, ini("NoiseSuppression"));
-        r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
-        header(r, "graphics.header", tr("Graphics"));
+        if (s.section == 1) {  // Performance
         add_choice(
             r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > 3 ? 0 : c.low_end,
             {tr("Off"), tr("On"), tr("Toaster"), tr("Brick")},
@@ -2368,6 +2574,8 @@ std::vector<Row> main_rows() {
 #ifndef __ANDROID__  // (a phone: not worth a row)
         add_bool(r, "prewarm", "Shader prewarm", &c.shader_prewarm, ini("ShaderPrewarm"));
 #endif
+        }
+        if (s.section == 2) {  // Quality
         add_choice(r, "msaa", "MSAA",
                    c.msaa == 8   ? 3
                    : c.msaa == 4 ? 2
@@ -2439,6 +2647,8 @@ std::vector<Row> main_rows() {
                ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
+        }
+        if (s.section == 3) {  // Effects
         add_bool(r, "shadows", "Shadows", &c.shadows, ini("ShadowsOn"));
         add_bool(r, "grass", "Grass", &c.draw_grass, ini("GrassOn"));
         add_bool(r, "bloom", "Bloom and depth of field", &c.bloom, ini("BloomOn"));
@@ -2451,6 +2661,8 @@ std::vector<Row> main_rows() {
 #endif
         add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
         add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
+        }
+        if (s.section == 4) {  // HDR
         header(r, "hdr.header", "HDR");
         add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
         if (c.fsr)  // (FSR is turned off for HDR at the next start)
@@ -2486,8 +2698,33 @@ std::vector<Row> main_rows() {
                        [](int v) { s.draft.adreno_fix = v; }, ini("AdrenoFix"));
         }
 #endif
+        }
         break;
-    case 2:
+    case 2:  // Audio: its own page, small enough as it is
+        header(r, "audio.header", tr("Audio"));
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+        add_bool(r, "reverb", "Reverb", &c.reverb, ini("Reverb"));
+#ifndef __ANDROID__  // (a phone: not worth a row)
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
+                   [](int v) { c.audio_output = v; }, ini("Output"));
+        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
+#endif
+        header(r, "voice.header", tr("Voice chat"));
+        add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
+                   [](int v) { c.voice_mode = v; }, ini("VoiceChat"));
+        r.back().help = tr("Talk to the other hunters while you play, when their game has voice chat on too. Always: the microphone is open for the whole hunt. Push to talk: it is open while you hold the voice key.");
+        number(r, "voice.mic", "Mic volume", &c.mic_volume, (int)lo("MicVolume"), (int)hi("MicVolume"), 1, ini("MicVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud the other hunters hear you.");
+        number(r, "voice.level", "Voice volume", &c.voice_volume, (int)lo("VoiceVolume"), (int)hi("VoiceVolume"), 1, ini("VoiceVolume"));
+        r.back().value += " %";
+        r.back().help = tr("How loud you hear the other hunters. Doubled, as in MHXX: 50 is the game's own sound's level.");
+        add_bool(r, "voice.noise", "Noise suppression", &c.noise_suppression, ini("NoiseSuppression"));
+        r.back().help = tr("Turn down the room's echo and steady background noise on your microphone. It uses a little more of the processor.");
+        break;
+    case 3:  // Controls: four sections
+        if (s.section == 1) {  // Controller
         header(r, "ctrl.pad.header", tr("Controller"));
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
@@ -2503,7 +2740,11 @@ std::vector<Row> main_rows() {
 #endif
         action(r, "pad.map", tr("Map a controller"), []() { push(View::PadList, "pad.0"); });
         r.back().help = tr("For a controller the game does not read well: press each button once and it works from then on.");
-#ifndef __ANDROID__
+        }
+        if (s.section == 2) {  // Keyboard & Mouse
+#ifdef __ANDROID__
+        action(r, "ctrl.kbm.none", tr("No keyboard or mouse settings on this device"), []() {});
+#else
         header(r, "ctrl.kbm.header", tr("Keyboard and mouse"));
         add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
@@ -2517,6 +2758,8 @@ std::vector<Row> main_rows() {
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
         r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon, with the controller or the keyboard drawn beside the list. The keys for moving, the item bar and chat are there too (Keys). Off by default.");
 #endif
+        }
+        if (s.section == 3) {  // Touch
         header(r, "ctrl.touch.header", tr("Touch layout"));
         add_choice(r, "touch", "Touch controls", c.touch_controls, {tr("Auto"), tr("On"), tr("Off")},
                    [](int v) { c.touch_controls = v; }, ini("Controls"));
@@ -2550,14 +2793,18 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Open a template slot to save the current layout, icons and six combined buttons. An empty slot has a default name and can be saved immediately. Applying restores its independent snapshot.");
         action(r, "touch.icons", tr("Touch button icons"), []() { push(View::TouchIcons, "ti.0"); });
         r.back().help = tr("Choose default, built-in or custom image icons for each common button and all six combined buttons. Icons are saved immediately with the current layout and copied into templates.");
+        }
+        if (s.section == 4) {  // Camera
         header(r, "ctrl.camera.header", tr("Camera"));
         add_bool(r, "lock.on", "Lock-on", &c.lock_on, ini("LockOn"));
         r.back().help = tr("Tap the target icon to lock on, then tap again to switch monsters. Hold it for half a second, or click a controller's right stick, to toggle the lock. Off: the icon turns the camera to the monster once, as in the original game.");
         add_bool(r, "lock.persistent", "Persistent lock-on", &c.persistent_lock_on, ini("PersistentLockOn"));
         r.back().enabled = c.lock_on != 0;
         r.back().help = tr("Keeps an enabled lock until you turn it off. While aiming a bow or bowgun, the reticle continuously follows the selected monster's body. Tap the target icon to switch monsters; hold it for half a second or click the right stick to unlock. Opening the scope remains manual. Requires Lock-on. Default: Off.");
+        }
         break;
-    case 3:
+    case 4:  // Online: three sections
+        if (s.section == 1) {  // Hub Server
         header(r, "net.hub.header", tr("Hub"));
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
         text(r, "hosts", "Search hosts", c.ldn_join, sizeof c.ldn_join, *c.ldn_join ? c.ldn_join : tr("LAN"), ini("Join"));
@@ -2570,6 +2817,16 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
+        }
+        if (s.section == 2) {  // Session & Friends
+        net_session_codes(r);
+        add_bool(r, "friend.requests", "Friend requests and hub codes", &c.ldn_friend_requests, ini("FriendRequests"));
+        r.back().help = tr("Players can send you friend requests (accept or reject them below), and the other hunters in your hub see your friend code to add you. Off: no requests and no hellos; you can still add friends by their code.");
+        add_bool(r, "friend.online", "Notice when a friend comes online", &c.ldn_friend_online_notices, ini("FriendOnlineNotices"));
+        add_bool(r, "friend.hub", "Notice when a friend opens a hub", &c.ldn_friend_hub_notices, ini("FriendHubNotices"));
+        net_friends(r);
+        }
+        if (s.section == 3) {  // Crossplay
         header(r, "net.crossplay.header", tr("Crossplay"));
         add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
                    [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
@@ -2592,16 +2849,20 @@ std::vector<Row> main_rows() {
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
 #endif
+        }
         break;
-    case 4: {
+    case 5: {  // Gameplay: two sections
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
+        if (s.section == 1) {  // Hub & Quests
         header(r, "hub.header", tr("Hub"));
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
         add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
         add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
+        }
+        if (s.section == 2) {  // Monster HP
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
@@ -2665,6 +2926,7 @@ std::vector<Row> main_rows() {
             if (!row.id.compare(0, 6, "quest.") || row.id == "hp.add")
                 row.help = per_quest;
 #endif
+        }
         break;
     }
     case MODS_PAGE:
@@ -2674,6 +2936,7 @@ std::vector<Row> main_rows() {
         cheat_rows(r);
         break;
     case APP_PAGE:
+        if (s.section == 1) {  // Appearance
         header(r, "app.appearance.header", tr("Appearance"));
         add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
                    [](int v) { c.language = v; }, ini("Language"));
@@ -2682,6 +2945,8 @@ std::vector<Row> main_rows() {
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
 #endif
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
+        }
+        if (s.section == 2) {  // General
         header(r, "app.general.header", tr("General"));
         add_bool(r, "pause.bg", "Pause in the background", &c.pause_background, ini("PauseInBackground"));
 #ifndef __ANDROID__  // (a phone: not worth a row)
@@ -2699,6 +2964,8 @@ std::vector<Row> main_rows() {
         add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
         r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
 #endif
+        }
+        if (s.section == 3) {  // Save Data
         header(r, "save.header", tr("Save data"));
 #ifndef __ANDROID__  // (the PC build keeps its save in a folder of its choice)
         text(r, "save.location", "Save folder", c.save_location, sizeof c.save_location,
@@ -2739,6 +3006,8 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Read the changes in this version.");
         action(r, "licenses", tr("Licenses"), []() { ui_request_licenses(); });
 #endif
+        }
+        if (s.section == 4) {  // Application
         header(r, "app.application.header", tr("Application"));
         if (!touch_ui()) {  // (the phone's menu fills the screen: nothing to move)
             action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"), []() {
@@ -2760,6 +3029,8 @@ std::vector<Row> main_rows() {
         action(r, "restart", tr("Restart"), []() { push(View::Restart, "dialog.cancel"); });
         action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
         break;
+        }
+        }
     }
     if (!touch_ui() || SDL_HasGamepad())  // (a finger has the header's Save; a controller can't reach that one)
         action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
@@ -3559,13 +3830,15 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
     int step = 0;
     for (int i = 0; i < (int)rows.size(); i++) {
         Row &r = rows[i];
-        if (r.header) {  // (a section's title: accent-coloured, a little apart from the rows above it)
+        if (r.header) {  // (a section's title: a rule above, then the title, a rule after on the phone)
             ImVec2 p = ImGui::GetCursorScreenPos();
-            float h = font * (i ? 2.2f : 1.6f);
+            float h = font * (i ? 2.3f : 1.8f);
             ImGui::Dummy(ImVec2(width, h));
-            w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .25f, p.y + h - font * 1.35f),
-                                 theme().accent, r.title.c_str());
-            float end = p.x + font * .75f + ImGui::CalcTextSize(r.title.c_str()).x, y = p.y + h - font * .85f;
+            float y0 = p.y + h * .28f, tx = p.x + font * .25f, ty = p.y + h - font * 1.3f;
+            w->DrawList->AddLine(ImVec2(p.x, y0), ImVec2(p.x + width, y0), fade(theme().accent, .30f),
+                                 std::max(1.f, s.m.line * .5f));
+            w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(tx, ty), theme().accent, r.title.c_str());
+            float end = tx + ImGui::CalcTextSize(r.title.c_str()).x, y = p.y + h - font * .8f;
             if (touch && end < p.x + width)  // (the phone: a rule after it, as the game's section titles)
                 w->DrawList->AddLine(ImVec2(end, y), ImVec2(p.x + width, y), fade(theme().accent, .45f),
                                      std::max(1.f, s.m.line * .5f));
@@ -3667,7 +3940,10 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
                                  2.f);
         w->DrawList->PushClipRect(rect.Min, rect.Max, true);
         ImU32 ink = !r.enabled ? t.text_off : selected && t.bar ? t.accent_bright : t.text;
-        ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255) : ink;
+        ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255)
+                          : !r.enabled ? t.text_off
+                          : selected ? t.text
+                                     : t.text_dim;
         if (r.current)  // (the dropdown's choice now: a bar on its left)
             w->DrawList->AddRectFilled(rect.Min, ImVec2(rect.Min.x + font * .22f, rect.Max.y), t.accent,
                                        t.rounding, ImDrawFlags_RoundCornersLeft);
@@ -4230,7 +4506,10 @@ void touch_panel(bool *open, const Config &before) {
         const char *title = tr("SETTINGS");
         float size = std::floor(f * 1.1f), cy = by + side * .5f;
         ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
-        std::string sub = s.view == View::Main ? tr(page_names[s.page]) : dialog ? "" : view_title();
+        std::string sub = s.view == View::Main
+                              ? (s.section ? std::string(tr(page_names[s.page])) + " · " + tr(section_name(s.page, s.section - 1))
+                                           : std::string(tr(page_names[s.page])))
+                              : dialog ? "" : view_title();
         dl->PushClipRect(ImVec2(x0, y0), ImVec2(std::max(title_x, right), y0 + band), true);
         shadow_text(dl, size, ImVec2(title_x, cy - ts.y * .5f), k.glow, title);
         if (!sub.empty()) {

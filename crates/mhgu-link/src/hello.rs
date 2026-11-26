@@ -1,4 +1,4 @@
-use mhgu_protocol::{LINK_MAGIC, LINK_PROTO_VERSION};
+use mhgu_protocol::{link_version_ok, LINK_MAGIC, LINK_PROTO_VERSION};
 
 /// `sizeof(Hello)` in ldn.c.
 pub const HELLO_SIZE: usize = 52;
@@ -8,6 +8,9 @@ pub const NAME_MAX: usize = 0x21;
 /// The first frame a station sends: who we are, and whether this is only a scan.
 #[derive(Clone, Debug)]
 pub struct Hello {
+    /// The link protocol to say to this host: 3 for a LAN / address host (both speak it), else the
+    /// version the hub server listed (3 or 4).
+    pub version: u16,
     /// True for a Scan: ask for the host's NetworkInfo, do not join.
     pub scan_only: bool,
     /// Local communication version (the game's), checked against the host's.
@@ -20,6 +23,7 @@ pub struct Hello {
 impl Default for Hello {
     fn default() -> Self {
         Hello {
+            version: LINK_PROTO_VERSION,
             scan_only: false,
             lcv: 0,
             mac: [0; 6],
@@ -33,7 +37,7 @@ impl Hello {
     pub fn to_bytes(&self) -> [u8; HELLO_SIZE] {
         let mut b = [0u8; HELLO_SIZE];
         b[..4].copy_from_slice(&LINK_MAGIC);
-        b[4..6].copy_from_slice(&LINK_PROTO_VERSION.to_le_bytes());
+        b[4..6].copy_from_slice(&self.version.to_le_bytes());
         b[6] = self.scan_only as u8;
         // b[7]: pad
         b[8..10].copy_from_slice(&self.lcv.to_le_bytes());
@@ -48,7 +52,8 @@ impl Hello {
         if b.len() < HELLO_SIZE || b[..4] != LINK_MAGIC {
             return None;
         }
-        if u16::from_le_bytes([b[4], b[5]]) != LINK_PROTO_VERSION {
+        let version = u16::from_le_bytes([b[4], b[5]]);
+        if !link_version_ok(version) {
             return None;
         }
         let mut mac = [0u8; 6];
@@ -56,6 +61,7 @@ impl Hello {
         let mut name = [0u8; NAME_MAX];
         name.copy_from_slice(&b[16..16 + NAME_MAX]);
         Some(Hello {
+            version,
             scan_only: b[6] != 0,
             lcv: u16::from_le_bytes([b[8], b[9]]),
             mac,

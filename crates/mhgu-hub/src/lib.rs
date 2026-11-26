@@ -6,10 +6,11 @@
 
 pub mod bucket;
 pub mod config;
+pub mod identity;
 mod server;
 pub mod web;
 
-pub use config::{Config, Live};
+pub use config::{Config, Live, Peer};
 pub use server::Server;
 
 /// The wire formats, re-exported for clients and tests.

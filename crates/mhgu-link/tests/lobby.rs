@@ -129,7 +129,7 @@ fn join_parses_spliced() {
     });
 
     let spliced = Lobby::new(addr)
-        .join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], 0xdead_beef)
+        .join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], 0xdead_beef, None)
         .unwrap();
     assert_eq!(spliced.pair, 0x1122_3344);
     assert_eq!(spliced.secret, 0x5566_7788_99aa_bbcc);
@@ -140,7 +140,7 @@ fn join_parses_spliced() {
 fn host_and_join_against_hub_server() {
     let (addr, _srv) = start_hub();
     let info = make_info();
-    let mut host = Lobby::new(addr).host(&info, proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
+    let mut host = Lobby::new(addr).host(&info, proto::LINK_PROTO_VERSION, [0u8; 16], None).unwrap();
     let hub_id = host.hub_id();
 
     // The player lists and joins on its own thread: JOIN blocks until the host attaches.
@@ -149,7 +149,7 @@ fn host_and_join_against_hub_server() {
         let hubs = lb.list(proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
         assert_eq!(hubs.len(), 1);
         assert_eq!(hubs[0].id, hub_id);
-        lb.join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], hub_id).unwrap()
+        lb.join(mhgu_protocol::LINK_PROTO_VERSION, [0u8; 16], hub_id, None).unwrap()
     });
 
     // The host waits for the server's INCOMING, then opens the ATTACH connection.
@@ -184,4 +184,50 @@ fn host_and_join_against_hub_server() {
     let mut b2 = [0u8; 11];
     host_side.stream.read_exact(&mut b2).unwrap();
     assert_eq!(&b2, b"from player");
+}
+
+#[test]
+fn code_find_join_and_presence() {
+    let (addr, _srv) = start_hub();
+    let info = make_info();
+    let code = *b"KJMN2345";
+    let host = Lobby::new(addr).host(&info, proto::LINK_PROTO_VERSION, [0u8; 16], Some(&code)).unwrap();
+    let hub_id = host.hub_id();
+
+    // HUBS4: the code and the protocol come back with the hub.
+    let hubs = Lobby::new(addr).list(proto::LINK_PROTO_VERSION, [0u8; 16]).unwrap();
+    assert_eq!(hubs.len(), 1);
+    assert_eq!(hubs[0].code, code);
+    assert_eq!(hubs[0].link_proto, proto::LINK_PROTO_VERSION);
+    assert_eq!(hubs[0].code_shown().as_deref(), Some("KJMN-2345"));
+
+    // FIND: the code alone names the hub.
+    let found = Lobby::new(addr).find(proto::LINK_PROTO_VERSION, &code).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, hub_id);
+
+    // A second hub (another session id and BSSID) asking for the same code is refused with ERR_CODE_TAKEN.
+    let mut info2 = info.clone();
+    info2[proto::NI_SESSION_ID] = 1;
+    info2[proto::NI_BSSID..proto::NI_BSSID + 6].fill(1);
+    let err = Lobby::new(addr).host(&info2, proto::LINK_PROTO_VERSION, [0u8; 16], Some(&code)).err().unwrap();
+    assert_eq!(mhgu_link::error_code(&err), Some(proto::ERR_CODE_TAKEN));
+
+    // PRESENCE: two players listing each other see each other online.
+    let secret_a = [0x41u8; proto::FRIEND_SECRET_LEN];
+    let secret_b = [0x42u8; proto::FRIEND_SECRET_LEN];
+    let id_a = proto::friend_id(&secret_a);
+    let id_b = proto::friend_id(&secret_b);
+    let lb = Lobby::new(addr);
+    let a = lb.presence(&secret_a, 1, &code, &[id_b], &[], "Alice").unwrap();
+    assert!(a.online.is_empty());
+    let b = lb.presence(&secret_b, 0, &[0; 8], &[id_a], &[], "Bob").unwrap();
+    assert_eq!(b.online.len(), 1);
+    assert_eq!(b.online[0].id, id_a);
+    assert_eq!(b.online[0].state, 1);
+    assert_eq!(b.online[0].code, code);
+    let a = lb.presence(&secret_a, 1, &code, &[id_b], &[], "Alice").unwrap();
+    assert_eq!(a.online.len(), 1);
+    assert_eq!(a.online[0].id, id_b);
+    assert_eq!(a.online[0].state, proto::FRIEND_STATE_ONLINE);
 }

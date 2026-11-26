@@ -4,6 +4,7 @@
 #include "app_actions.h"
 #include "overlay.h"
 #include "modorder.h"
+#include "net/net.h"
 #include "padmap.h"
 #include "textinput.h"
 #include "touch.h"
@@ -40,6 +41,17 @@ extern "C" int ui_take_picked_folder(char *out, size_t size) {
     return 4;
 }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
+extern "C" bool ldn_session_code(char *, size_t) { return false; }
+extern "C" bool ldn_join_code(const char *, const char *) { return true; }
+extern "C" int ldn_invite_state(char *code, size_t size) { if (code) snprintf(code, size, "ABCD-EFGH"); return 0; }
+extern "C" void ldn_my_friend_code(char *out, size_t size) { snprintf(out, size, "ABCD-EFGH-JKMN-PQRS"); }
+extern "C" int ldn_friends(LdnFriend *, int, int *server_state) { if (server_state) *server_state = 0; return 0; }
+extern "C" const char *ldn_friend_add(const char *) { return nullptr; }
+extern "C" void ldn_friend_remove(const char *) {}
+extern "C" int ldn_friend_requests(LdnRequest *, int) { return 0; }
+extern "C" void ldn_friend_request_answer(const char *, bool) {}
+extern "C" int ldn_hub_hunters(LdnHunter *, int) { return 0; }
+extern "C" int vk_low_memory_device(void) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
 extern "C" bool forge_plugins_have(int) { return false; }  // (no Forge plugins started)
 extern "C" int forge_plugin_titles(const char **, int) { return 0; }
@@ -224,6 +236,7 @@ static void down(int n = 1) {
         press(ImGuiKey_GamepadDpadDown);
 }
 static void tab() { press(ImGuiKey_GamepadR1); }
+static void back_tab() { press(ImGuiKey_GamepadL1); }
 static void back() { press(ImGuiKey_GamepadFaceRight); }
 static void confirm() { press(ImGuiKey_GamepadFaceDown); }
 // Focus through the real rows rather than depending on their current positions in Controls.
@@ -239,6 +252,23 @@ static void seek_row(const char *name) {
     }
     fprintf(stderr, "Could not reach settings row: %s\n", name);
     assert(false);
+}
+// On a page that opens on its sections: move to section n of the list and open it (focus lands on its Back row).
+static void open_section(int n) {
+    static int calls;
+    int call = ++calls;
+    press(ImGuiKey_Home);
+    for (int i = 1; i < n; i++)
+        down();
+    std::string id = "sec." + std::to_string(n);
+    if (!focused_row(id.c_str())) {
+        auto &g = *ImGui::GetCurrentContext();
+        fprintf(stderr, "open_section #%d(%d): want %s, focus %x, window %s\n", call, n, id.c_str(), g.NavId,
+                g.NavWindow ? g.NavWindow->Name : "(none)");
+    }
+    assert(focused_row(id.c_str()));
+    confirm();
+    idle();
 }
 static void click_focused_row() {
     idle(8); // Allow the menu's scroll-to-focus request to finish before the real click.
@@ -258,7 +288,7 @@ static void click_focused_row() {
 }
 static void forge_menu_regression() {
     idle();
-    for (int page = 0; page < 5; ++page) tab();
+    for (int page = 0; page < 7; ++page) tab();
     assert(!settings_panel_take_forge());
     seek_row("mods.forge");  // No plugin titles or callbacks exist in this test.
     confirm();
@@ -314,6 +344,8 @@ static void template_regression() {
     idle();
     tab();
     tab();
+    tab();  // (Graphics, Audio, Controls)
+    open_section(3);  // (Touch)
     assert(!settings_panel_dirty());
     open_templates();
     assert(template_info_queries >= TOUCH_TEMPLATE_COUNT);
@@ -801,6 +833,7 @@ static void auto_r_regression() {
     seek_row("touch.auto_r");
     confirm();
     assert(settings_panel_dirty());
+    back();  // (out of the section first)
     back();
     assert(settings_panel_confirming() && focused_row("dialog.cancel"));
     confirm();
@@ -814,6 +847,7 @@ static void auto_r_regression() {
     frame();
     opened = true;
     idle();
+    open_section(3);
     seek_row("touch.auto_r");
     confirm();
     seek_row("save");
@@ -1044,7 +1078,8 @@ int main(int argc, char **argv) {
     }
 
     idle();
-    selected("display.mode");
+    open_section(1);
+    seek_row("display.mode");
     // A click outside the menu unfocuses every window; the menu takes its focus back (it used to assert in SetNavID)
     io.AddMousePosEvent(4, 4);
     io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
@@ -1064,6 +1099,7 @@ int main(int argc, char **argv) {
            !settings_panel_dirty()); // Numeric activation never opens an editor.
     press(ImGuiKey_GamepadDpadRight);
     assert(settings_panel_dirty());
+    back();  // (out of the section first)
     back();
     selected("dialog.cancel");
     down(2);
@@ -1072,13 +1108,14 @@ int main(int argc, char **argv) {
     frame();
     opened = true;
     idle();
-    selected("display.mode");
-    io.AddKeyEvent(ImGuiKey_GamepadR1, true);
-    idle(35);
+    open_section(1);
+    seek_row("display.mode");
+    tab();  // (Graphics)
+    tab();
     selected("volume");  // (Audio first)
+    back_tab();  // (Graphics)
+    open_section(1);  // (Performance)
     seek_row("fps");
-    io.AddKeyEvent(ImGuiKey_GamepadR1, false);
-    idle();
     // The frame rate: Confirm lists the common ones, left / right go a frame at a time
     confirm();
     selected("choice.1");  // (60, the one it has)
@@ -1107,8 +1144,12 @@ int main(int argc, char **argv) {
     selected("fps");
     assert(!settings_panel_dirty() && opened);
     tab();
-    selected("face");
+    tab();  // (Audio, Controls)
+    open_section(1);  // (Controls: Controller)
+    seek_row("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
+    back();
+    open_section(2);  // (Keyboard & Mouse)
     seek_row("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
@@ -1198,16 +1239,23 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_SPACE && !config_live_bind(BIND_B, 1));
+    back();
     tab();
-    selected("port");
-    press(ImGuiKey_GamepadL1);
-    selected("face");
+    open_section(1);  // (Online: Hub Server)
+    seek_row("port");
+    back_tab();
+    open_section(1);  // (Controls: Controller)
+    seek_row("face");
     tab();
     tab();
-    selected("sync");  // (the Hub heading first)
-    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the HP heading is passed)
-    selected("hp.0");
+    open_section(1);  // (Gameplay: Hub & Quests)
+    seek_row("sync");  // (the Hub heading first)
+    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the section's end)
+    back();
+    open_section(2);  // (Monster HP)
+    seek_row("hp.0");
     tab();
+    tab();  // (System, Mods)
     selected("mod.Aaa");
     // The Mods tab: the conflict scan runs on another thread; Aaa and Bbb both replace a.bin
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -1297,10 +1345,16 @@ int main(int argc, char **argv) {
     fs::remove_all("obj/settings-test/mods/Eee");
     tab();
     selected("cheat.1");  // (the Cheats tab: the master code is always on, the cheat after it takes the focus)
+    back_tab();
+    back_tab();  // (Mods, System)
+    open_section(1);  // (Appearance)
+    seek_row("language");
     tab();
-    selected("language");
     tab();
-    selected("display.mode");
+    tab();  // (Mods, Cheats, Display)
+    open_section(1);
+    seek_row("display.mode");
+    tab();
     tab();
     selected("volume");
     confirm();
@@ -1355,7 +1409,8 @@ int main(int argc, char **argv) {
     selected("volume");
     tab();
     tab();
-    selected("port");
+    open_section(1);  // (Online: Hub Server)
+    seek_row("port");
     confirm();
     selected("port");
     press(ImGuiKey_GamepadDpadRight);
@@ -1376,6 +1431,7 @@ int main(int argc, char **argv) {
 #else
     setenv("MHGU_CONFIG", "obj/settings-test/panel-settings.ini", 1);
 #endif
+    back();  // (out of the section first)
     back();
     selected("dialog.cancel");
     down(2);
@@ -1384,7 +1440,8 @@ int main(int argc, char **argv) {
     frame();
     opened = true;
     idle();
-    selected("port");
+    open_section(1);
+    seek_row("port");
     down();
     selected("hosts");
     confirm();
@@ -1410,11 +1467,12 @@ int main(int argc, char **argv) {
     selected("hosts");
     requested = 0;
     tab();
-    tab();
-    tab();
-    tab();  // (Misc, Mods, Cheats, Menu Options)
-    selected("language");
+    tab();  // (Gameplay, System)
+    open_section(1);  // (Appearance)
+    seek_row("language");
     // The menu's confirm button (Menu controls): saved, it applies to the menu right away
+    back();
+    open_section(2);  // (General)
     seek_row("menu.confirm");
     press(ImGuiKey_GamepadDpadRight);
     press(ImGuiKey_End);
@@ -1430,10 +1488,15 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(config_live_menu_confirm() == MENU_CONFIRM_ORIGINAL);
-    press(ImGuiKey_Home);
-    selected("language");
+    back();
+    open_section(1);  // (Appearance)
+    seek_row("language");
     // Save folder (PC): Choose folder opens the system's picker, whose folder lands in the draft; Save keeps it
+    back();
+    open_section(2);  // (General)
     seek_row("bonus");
+    back();
+    open_section(3);  // (Save Data)
     seek_row("save.location");
     down();
     selected("save.location.pick");
@@ -1457,6 +1520,8 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(!config_editable().save_location[0]);
+    back();
+    open_section(4);  // (Application)
     seek_row("restart");  // (Use the default folder: disabled again, skipped)
     confirm();
     selected("dialog.cancel");
@@ -1494,12 +1559,13 @@ int main(int argc, char **argv) {
     assert(w->Size.x <= io.DisplaySize.x);
     assert(w->ContentSize.x <= w->InnerRect.GetWidth() + 1);
     float top = w->Pos.y;
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
-    selected("sync");  // (the Hub heading first)
-    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the HP heading is passed)
-    selected("hp.0");
+    back_tab();  // (System -> Gameplay)
+    open_section(1);
+    seek_row("sync");  // (the Hub heading first)
+    down(5);  // (lag compensation, village quests, urgent quests, rewards, then the section's end)
+    back();
+    open_section(2);
+    seek_row("hp.0");
     down(5);
     confirm();
     idle();
@@ -1535,6 +1601,8 @@ int main(int argc, char **argv) {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
+    back_tab();  // (Graphics)
+    open_section(2);  // (Quality)
     seek_row("fsr");
     confirm();
     assert(settings_panel_dirty());
@@ -1553,7 +1621,7 @@ int main(int argc, char **argv) {
     g_config.fsr = 1;
     opened = true;
     idle();
-    selected("volume");
+    seek_row("fsr");
     assert(!settings_panel_dirty()); // FSR-owned AA rows are disabled, not misleading live toggles.
     idle(20);
     float pinned_bottom = pinned_content_bottom();
@@ -1569,7 +1637,7 @@ int main(int argc, char **argv) {
     float end_scroll = root->Scroll.y;
     press(ImGuiKey_Home);
     idle(40);
-    selected("volume");
+    seek_row("fsr");
     assert(pinned_content_bottom() == pinned_bottom);
     assert(pinned_content_top() == pinned_top);
     assert(root->Scroll.y < end_scroll);  // (Home scrolls the first row back up under the pinned tabs)
@@ -1583,8 +1651,10 @@ int main(int argc, char **argv) {
     frame();
     io.AddMouseButtonEvent(0, false);
     idle(8);
-    selected("display.mode"); // Pinned tabs remain clickable when the option list is scrolled.
+    open_section(1);
+    seek_row("display.mode"); // Pinned tabs remain clickable when the option list is scrolled.
     press(ImGuiKey_GamepadR1);
+    tab();
     selected("volume");
     opened = false;
     frame();

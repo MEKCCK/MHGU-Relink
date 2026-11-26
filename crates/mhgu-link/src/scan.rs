@@ -5,13 +5,14 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use mhgu_protocol::{LINK_MAGIC, LINK_PROTO_VERSION, NETINFO_SIZE};
+use mhgu_protocol::{link_version_ok, LINK_MAGIC, LINK_PROTO_MIN, NETINFO_SIZE};
 
-/// The probe a station broadcasts: `MHGL` + u16 protocol version.
+/// The probe a station broadcasts: `MHGL` + u16 protocol version (the oldest we speak: every host of 3 or
+/// 4 answers it).
 pub fn probe() -> [u8; 6] {
     let mut p = [0u8; 6];
     p[..4].copy_from_slice(&LINK_MAGIC);
-    p[4..6].copy_from_slice(&LINK_PROTO_VERSION.to_le_bytes());
+    p[4..6].copy_from_slice(&LINK_PROTO_MIN.to_le_bytes());
     p
 }
 
@@ -28,15 +29,12 @@ pub struct ScanReply {
 /// The reply a host sends for a probe: `MHGL` + u16 version + u16 port + NetworkInfo. `None` for a
 /// probe that is not ours.
 pub fn answer(probe: &[u8], port: u16, info: &[u8]) -> Option<Vec<u8>> {
-    if probe.len() < 6
-        || probe[..4] != LINK_MAGIC
-        || u16::from_le_bytes([probe[4], probe[5]]) != LINK_PROTO_VERSION
-    {
+    if probe.len() < 6 || probe[..4] != LINK_MAGIC || !link_version_ok(u16::from_le_bytes([probe[4], probe[5]])) {
         return None;
     }
     let mut r = Vec::with_capacity(8 + info.len());
     r.extend_from_slice(&LINK_MAGIC);
-    r.extend_from_slice(&LINK_PROTO_VERSION.to_le_bytes());
+    r.extend_from_slice(&probe[4..6]); // (in the asker's version: a game of 3 drops any other)
     r.extend_from_slice(&port.to_le_bytes());
     r.extend_from_slice(info);
     Some(r)
@@ -44,10 +42,7 @@ pub fn answer(probe: &[u8], port: u16, info: &[u8]) -> Option<Vec<u8>> {
 
 /// Parses a reply from `from`; `None` if it is not a scan answer.
 pub fn parse_reply(b: &[u8], from: SocketAddr) -> Option<ScanReply> {
-    if b.len() < 8 + NETINFO_SIZE
-        || b[..4] != LINK_MAGIC
-        || u16::from_le_bytes([b[4], b[5]]) != LINK_PROTO_VERSION
-    {
+    if b.len() < 8 + NETINFO_SIZE || b[..4] != LINK_MAGIC || !link_version_ok(u16::from_le_bytes([b[4], b[5]])) {
         return None;
     }
     Some(ScanReply {

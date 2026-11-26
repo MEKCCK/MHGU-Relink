@@ -24,6 +24,8 @@ void mods_make_dir(void);  // creates an empty mods/ (standalone: shows players 
 int mods_romfs_layers(const char **out, int max);  // host folders to layer over the RomFS, in order
 void mods_patch_module(struct Module *m, const uint8_t build_id[32]);  // exefs patches for a loaded module
 void mods_patch_code(void);  // then the patches of main's and sdk's code: once the dispatch tables are set up
+// pc is where a mod's patch jumps to no code (logged by mods_patch_code): a line naming the mod in buf
+bool mods_jump_note(uint32_t pc, char *buf, size_t n);
 // The mods' exefs/<name> (a subsdk): its path in path, and the mod's name (the last mod that has one); NULL: none.
 // skip: a file to pass over (and its mod's name), else NULL.
 const char *mods_exefs_file(const char *name, char *path, size_t n, bool (*skip)(const char *path, const char *mod));
@@ -49,6 +51,9 @@ void netrate_udp(uint32_t len);
 void kotrace_init(void);  // (debug) MHGU_KOTRACE: large monster KO (stun) events (runtime/hle/kotrace.c)
 void dummy_set(float dist_cm, float turn_degrees);  // (debug) the control file's "dummy <cm> <degrees>"
 void hitsync_init(void);  // multiplayer: hits as the hunter who made them saw them (runtime/net/hitsync.c)
+void partsync_init(void);  // multiplayer: part breaks reach the other games at once (runtime/net/partsync.c)
+void emsync_init(void);  // multiplayer: small monsters, with each action's flood capped (runtime/net/emsync.c)
+void shellstep_init(void);  // Pierce shots' spacing at high frame rates (runtime/hle/shellstep.c)
 void dummy_init(void);  // (debug) MHGU_DUMMY: a large monster held in front of the hunter, for testing attacks (runtime/hle/dummy.c)
 
 // Cheat codes (Atmosphere's format) from the .txt files in cheats/, beside mods/ (runtime/cheats.c)

@@ -82,7 +82,11 @@ static char g_learned_path[1200];
 #define FN_MIX_LIST_UPDATE 0x38d018u
 #define FN_MIX_POPUP_VISIBLE 0x7cf7e0u
 #define CALL_MIX_POPUP_VISIBLE 0x38d608u  // the update's vfunc call; two tail calls preserve this return address
+// The Hub's Quest Board (0x97fefc): the four posted quests' banners down the right, the chosen one drawn 16 further left
+// (nothing moves onto it: nothing to learn), measured from the HUD pieces (2026-11-22, two instances in one Hub)
+#define CALL_BOARD_LIST    0x980040u
 static const MenuGeom builtin[] = {
+    {CALL_BOARD_LIST, 706, 142, 574, 100, 0, 102, 0, 0, 0, 0, 0, true},
     {CALL_BISTRO, 868, 51, 364, 45, 0, 48, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_RANK, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
     {CALL_QUEST_STARS, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
@@ -622,6 +626,10 @@ static void probe(Cpu *c, uint32_t cur, uint32_t bits, uint32_t lr, int row0, in
 #define FN_LIST_WIDGET 0x74c130u
 #define CALL_WIDGET_A  0x74c4ecu
 #define CALL_WIDGET_B  0x74c514u
+// The Hub's Quest Board runs the same pair itself: its list (CALL_BOARD_LIST) and, on each frame the list didn't move,
+// the chosen quest's details pages (L / R) - learned (players' menus_learned.txt have it), it took the pointer from the
+// list and from the "Join this Quest?" Yes / No in front of it
+#define CALL_BOARD_DETAILS 0x980064u
 #define WIDGET_SECOND  0x80000000u
 static uint32_t g_widget_lr;  // (game thread: the caller of the widget running now)
 static void list_widget(Cpu *c) {
@@ -667,6 +675,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
     uint32_t cur = c->r[0], lr = c->r[14] & ~1u;
     atomic_store(&g_any_cursor_ns, plat_now_ns());
     if ((lr == CALL_WIDGET_A || lr == CALL_WIDGET_B) && g_widget_lr) lr = g_widget_lr | (lr == CALL_WIDGET_B ? WIDGET_SECOND : 0);
+    if (lr == CALL_BOARD_DETAILS) lr |= WIDGET_SECOND;
     if (lr == CALL_MIX_CURSOR && g_mix_lr == CALL_MIX_CONFIRM) lr = g_mix_lr;
     // (the host's nudge - a short Down that makes a quiet cursor run - never moves anything itself: a jump puts its own
     // step in, and with none, or for another menu than the one that runs, it would walk the selection down)

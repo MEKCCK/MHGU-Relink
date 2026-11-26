@@ -153,6 +153,17 @@ static void quest_targets(uint32_t qd, char *out, size_t size) {
     }
 }
 
+// The hunter's name as the save has it (UTF-8), for friend requests and the hub's friend hellos (runtime/net/ldn.c);
+// kept from the last tick a hunter was loaded. false: none yet.
+static pthread_mutex_t g_name_mu = PTHREAD_MUTEX_INITIALIZER;
+static char g_hunter_name[33];
+bool presence_hunter_name(char *out, size_t size) {
+    pthread_mutex_lock(&g_name_mu);
+    snprintf(out, size, "%s", g_hunter_name);
+    pthread_mutex_unlock(&g_name_mu);
+    return *out != 0;
+}
+
 // ---- once a second, from the game's input polling
 void presence_tick(void) {
     static uint64_t next;
@@ -167,6 +178,13 @@ void presence_tick(void) {
     uint32_t slot = sane(gc) ? LD32(gc + GC_SLOT) : 0;
     uint32_t pl = sane(sp) && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0, pd = sane(pl) ? LD32(pl + PL_DATA) : 0;
     uint32_t sq = LD32(G_SQUEST), qd = sane(sq) ? LD32(sq + 0xa4) : 0;
+    if (sane(pd)) {  // (the name friend requests and hub hellos go by)
+        char nm[33];
+        memcpy(nm, G2H(pd + PD_NAME), 32), nm[32] = 0;
+        pthread_mutex_lock(&g_name_mu);
+        snprintf(g_hunter_name, sizeof g_hunter_name, "%s", nm);
+        pthread_mutex_unlock(&g_name_mu);
+    }
     int town = sane(gc) ? LD8(gc + GC_TOWN) : -1;
     uint32_t quest = town == TOWN_NONE && sane(qd) ? LD32(qd + 8) : 0;
     int place = !sane(pd) ? -1 : town == TOWN_NONE ? (quest ? 100 : -2) : town;  // -1 menus, 100 quest, -2 between
@@ -246,6 +264,8 @@ void presence_tick(void) {
     if (online && party > 0) {
         a.party = party, a.party_max = party_max;
         snprintf(a.party_id, sizeof a.party_id, "%s", party_id);
+        // in the hub (not on a quest: nobody joins one under way), its session code: Discord's "Join" for others
+        if (place != 100 && party < party_max) ldn_join_secret(a.join_secret, sizeof a.join_secret);
     }
     a.start = since;
     discord_set_activity(&a);

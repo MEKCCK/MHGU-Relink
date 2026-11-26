@@ -149,6 +149,9 @@
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
     .ldn_direct = 1,                                                                                \
+    .ldn_friend_requests = 1,                                                                       \
+    .ldn_friend_online_notices = 0,                                                                 \
+    .ldn_friend_hub_notices = 0,                                                                    \
     .crossplay = XP_OFF,                                                                            \
     .ryu_servers = "",                                                                              \
     .ryu_host = 0,                                                                                  \
@@ -690,6 +693,21 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "Direct = On\n"
     "\n"
+    "; FriendRequests = On: players can send you friend requests (you accept or reject them in the settings menu), and\n"
+    "; the other players in your hub see your friend code to add you. A request you reject stays rejected until the\n"
+    "; game restarts, unless you add that player yourself. Off: no requests and your code isn't shared in hubs; you can\n"
+    "; still add friends by their code. Your friend code and friends list are kept in the save folder, not here.\n"
+    "; Default: On\n"
+    "FriendRequests = On\n"
+    "\n"
+    "; FriendOnlineNotices = On: a notice when one of your friends comes online.\n"
+    "; Default: Off\n"
+    "FriendOnlineNotices = Off\n"
+    "\n"
+    "; FriendHubNotices = On: a notice when one of your friends opens a hub. The Friends tab still shows who is hosting.\n"
+    "; Default: Off\n"
+    "FriendHubNotices = Off\n"
+    "\n"
     "; Crossplay mode: Off keeps native hubs; Ryujinx uses RyuLdn servers; Room uses suyu-compatible rooms; Mixed bridges both. Use the same MHGU game version (1.4.0). Port-only features such as small-monster synchronization and HP scaling are disabled in crossplay hubs.\n"
     "; Default: Off\n"
     "Crossplay = Off\n"
@@ -1164,6 +1182,9 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
     ON_OFF("Multiplayer", "Direct", ldn_direct, false),
+    ON_OFF("Multiplayer", "FriendRequests", ldn_friend_requests, false),
+    ON_OFF("Multiplayer", "FriendOnlineNotices", ldn_friend_online_notices, false),
+    ON_OFF("Multiplayer", "FriendHubNotices", ldn_friend_hub_notices, false),
     {"Multiplayer", "Crossplay", SET_CHOICE, F(crossplay), 0, 0, 0, "Off,Ryujinx,Room,Mixed", NULL, false, ERR_XP},
     {"Multiplayer", "RyuServers", SET_TEXT, F(ryu_servers), sizeof g_config.ryu_servers, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "RyuHost", ryu_host, false),

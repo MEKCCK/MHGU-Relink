@@ -399,6 +399,11 @@ struct State {
     direct: DirectState,
     /// The id the hub server gave this host's listing (0: not listed); ldn.c skips it in a LAN/server scan.
     own_hub: u64,
+    /// Protocol 4: this hub's session code, and whether the server took it (an older server lists the hub
+    /// without one); the code of the hub joined through the server when we know it (zeros: none).
+    own_code: [u8; proto::CODE_LEN],
+    code_listed: bool,
+    joined_code: [u8; proto::CODE_LEN],
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -452,6 +457,9 @@ impl State {
             relay: None,
             direct: DirectState::new(false),
             own_hub: 0,
+            own_code: [0; proto::CODE_LEN],
+            code_listed: false,
+            joined_code: [0; proto::CODE_LEN],
         }
     }
 }
@@ -1045,6 +1053,36 @@ impl MhguVPacket {
     }
 }
 
+/// A new session code: 8 characters of the alphabet (32 of them, so bytes mod 32 are even enough).
+fn code_new() -> [u8; proto::CODE_LEN] {
+    let mut b = [0u8; 8];
+    getrandom_fill(&mut b);
+    let mut code = [0u8; proto::CODE_LEN];
+    for (i, v) in b.iter().enumerate().take(proto::CODE_LEN) {
+        code[i] = proto::CODE_ALPHABET[*v as usize % 32];
+    }
+    code
+}
+
+/// OS randomness (getrandom, as the hub server uses).
+fn getrandom_fill(b: &mut [u8]) {
+    use std::io::Read;
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(b).is_ok() {
+            return;
+        }
+    }
+    // Fallback (no /dev/urandom): time and address mixing; a session code only has to be unlikely to
+    // collide, the server refuses a duplicate anyway.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
+    for (i, v) in b.iter_mut().enumerate() {
+        *v = (now.rotate_left((i as u32) * 7) >> 3) as u8 ^ (i as u8).wrapping_mul(97);
+    }
+}
+
 fn rand_u32() -> u32 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
@@ -1389,6 +1427,9 @@ fn parse_server(text: &str) -> Option<SocketAddr> {
 /// Hosts through a hub server (`[Multiplayer] Server`): the server lists this hub for players with the
 /// same matchmaking key, splices each of them to a link we open for it, and relays the packets. The LAN
 /// listener from `mhgu_ldn_host` keeps working.
+///
+/// Protocol 4: the hub gets a session code (a shared one that keeps working across re-listings); a server
+/// older than that takes the listing without one. `mhgu_ldn_own_code` tells the game the code once listed.
 #[no_mangle]
 pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char) -> bool {
     let Some(addr) = parse_server(&cstr(server)) else {
@@ -1402,17 +1443,47 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
         eprintln!("[link] host server: no network yet");
         return false;
     }
-    let mut sess = match Lobby::new(addr).host(&info, proto::LINK_PROTO_VERSION, room) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[link] host server {addr}: {e}");
-            return false;
+    // One code for this network's life; the server refuses one another hub holds (a new one at once) and
+    // an older server asks for the listing without one.
+    let mut code = code_new();
+    let mut with_code = true;
+    let mut sess = loop {
+        let sock = Lobby::new(addr);
+        let r = if with_code {
+            sock.host(&info, proto::LINK_PROTO_VERSION, room, Some(&code))
+        } else {
+            sock.host(&info, proto::LINK_PROTO_VERSION, room, None)
+        };
+        match r {
+            Ok(s) => break s,
+            Err(e) => match mhgu_link::error_code(&e) {
+                Some(proto::ERR_CODE_TAKEN) if with_code => {
+                    eprintln!("[link] host server {addr}: that session code is taken, trying a new one");
+                    code = code_new();
+                }
+                Some(proto::ERR_BAD_REQ) if with_code => {
+                    eprintln!("[link] host server {addr} is older than this game: the hub is listed without a session code");
+                    with_code = false;
+                }
+                _ => {
+                    eprintln!("[link] host server {addr}: {e}");
+                    return false;
+                }
+            },
         }
     };
     let hub_id = sess.hub_id();
-    with(|st| st.own_hub = hub_id);
-    eprintln!("[link] hub {hub_id:#x} listed on {addr}");
-    let stop = with(|st| Arc::clone(&st.stop));
+    let listed_code = if with_code { code } else { [0u8; proto::CODE_LEN] };
+    let stop = with(|st| {
+        st.own_hub = hub_id;
+        st.own_code = listed_code;
+        st.code_listed = with_code;
+        Arc::clone(&st.stop)
+    });
+    eprintln!(
+        "[link] hub {hub_id:#x} listed on {addr}{}",
+        if with_code { format!(" (code {})", proto::code_shown(&code)) } else { String::new() }
+    );
     std::thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {
             match sess.poll(Duration::from_millis(200)) {
@@ -1438,16 +1509,79 @@ pub extern "C" fn mhgu_ldn_host_server(server: *const c_char, key: *const c_char
             let info = with(|st| st.info.clone());
             sess.set_info(info);
         }
+        with(|st| st.code_listed = false);
     });
     true
 }
 
-/// Joins a hub listed on a server: `hub` is its id from the LIST answer.
+/// The hub's session code as "ABCD-EFGH" once the server took it (false: no hub, or an older server).
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_own_code(out: *mut c_char, size: usize) -> bool {
+    if out.is_null() || size == 0 {
+        return false;
+    }
+    let code = with(|st| if st.code_listed { Some(st.own_code) } else { None });
+    match code {
+        Some(c) => {
+            let s = proto::code_shown(&c);
+            let b = s.as_bytes();
+            let n = b.len().min(size - 1);
+            unsafe {
+                std::ptr::copy_nonoverlapping(b.as_ptr(), out as *mut u8, n);
+                *out.add(n) = 0;
+            }
+            true
+        }
+        None => {
+            unsafe { *out = 0 };
+            false
+        }
+    }
+}
+
+/// Whether the link we are on goes through a hub server (a relayed station): what a friends list calls "in a hub".
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_relayed() -> bool {
+    with(|st| st.running && !st.hosting && st.relay.is_some())
+}
+
+/// The session code ("ABCD-EFGH") of the hub we joined through the hub server when we know it (false: none).
+#[no_mangle]
+pub extern "C" fn mhgu_ldn_joined_code(out: *mut c_char, size: usize) -> bool {
+    if out.is_null() || size == 0 {
+        return false;
+    }
+    let code = with(|st| {
+        if st.joined_code.iter().any(|&b| b != 0) { Some(st.joined_code) } else { None }
+    });
+    match code {
+        Some(c) => {
+            let s = proto::code_shown(&c);
+            let b = s.as_bytes();
+            let n = b.len().min(size - 1);
+            unsafe {
+                std::ptr::copy_nonoverlapping(b.as_ptr(), out as *mut u8, n);
+                *out.add(n) = 0;
+            }
+            true
+        }
+        None => {
+            unsafe { *out = 0 };
+            false
+        }
+    }
+}
+
+/// Joins a hub listed on a server: `hub` is its id from the LIST answer. `code` (8 bytes, NULL/zeros:
+/// none) is the hub's session code when known, which lets the server take us from any room. `peer_proto`
+/// is the hub's link protocol from HUBS4 (0: the oldest we speak).
 #[no_mangle]
 pub extern "C" fn mhgu_ldn_join_server(
     server: *const c_char,
     key: *const c_char,
     hub: u64,
+    code: *const u8,
+    peer_proto: u16,
     name: *const c_char,
     info: *const u8,
     info_len: u32,
@@ -1457,7 +1591,19 @@ pub extern "C" fn mhgu_ldn_join_server(
         return false;
     };
     let room = mhgu_link::room_from_key(&cstr(key));
-    let sp = match Lobby::new(addr).join(proto::LINK_PROTO_VERSION, room, hub) {
+    let mut hub_code = [0u8; proto::CODE_LEN];
+    let code_ref = if code.is_null() {
+        None
+    } else {
+        let c = unsafe { std::slice::from_raw_parts(code, proto::CODE_LEN) };
+        if !proto::code_ok(c) {
+            eprintln!("[link] join server: not a session code");
+            return false;
+        }
+        hub_code.copy_from_slice(c);
+        Some(&hub_code)
+    };
+    let sp = match Lobby::new(addr).join(proto::LINK_PROTO_VERSION, room, hub, code_ref) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[link] join server {addr} hub {hub:#x}: {e}");
@@ -1465,6 +1611,7 @@ pub extern "C" fn mhgu_ldn_join_server(
         }
     };
     let mut hello = Hello::default();
+    hello.version = if proto::link_version_ok(peer_proto) { peer_proto } else { proto::LINK_PROTO_MIN };
     hello.lcv = LCV.load(Ordering::Relaxed);
     let nm = cstr(name);
     let k = nm.as_bytes().len().min(hello.name.len() - 1);
@@ -1518,6 +1665,7 @@ pub extern "C" fn mhgu_ldn_join_server(
         st.info = info_blob;
         st.name = nm;
         st.node = node;
+        st.joined_code = if code_ref.is_some() { hub_code } else { [0; proto::CODE_LEN] };
         st.stop = Arc::clone(&stop);
         st.writer = Some(writer); // (the reader thread owns the client; sends write the spliced TCP stream)
     });
@@ -1624,9 +1772,10 @@ pub extern "C" fn mhgu_ldn_join(addr: *const c_char, name: *const c_char, info: 
         unsafe { std::slice::from_raw_parts(info, info_len as usize) }.to_vec()
     };
     let mut hello = Hello::default();
+    hello.version = proto::LINK_PROTO_MIN; // (every host of 3 or 4 answers 3)
     hello.lcv = LCV.load(Ordering::Relaxed);
     let nm = cstr(name);
-    let n = nm.as_bytes().len().min(Hello::default().name.len() - 1);
+    let n = nm.as_bytes().len().min(hello.name.len() - 1);
     hello.name[..n].copy_from_slice(&nm.as_bytes()[..n]);
     hello.mac = join_mac();
     let mut client = match Client::connect(sa, &hello) {
@@ -1683,6 +1832,7 @@ pub extern "C" fn mhgu_ldn_join(addr: *const c_char, name: *const c_char, info: 
         st.name = nm;
         st.node = node;
         st.listen_port = sa.port();
+        st.joined_code = [0; proto::CODE_LEN];
         st.stop = Arc::clone(&stop);
         st.writer = Some(Arc::new(Mutex::new(writer)));
     }
@@ -1765,6 +1915,9 @@ pub extern "C" fn mhgu_ldn_leave() {
             Some(st) => {
                 st.running = false;
                 st.own_hub = 0;
+                st.own_code = [0; proto::CODE_LEN];
+                st.code_listed = false;
+                st.joined_code = [0; proto::CODE_LEN];
                 st.udp = None;
                 st.usock = None;
                 st.udp_up = false;

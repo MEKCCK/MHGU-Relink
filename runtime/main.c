@@ -111,9 +111,13 @@ static void boot(const char *root) {
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)
     hitsync_init();  // (multiplayer: hits as their hunter saw them: runtime/net/hitsync.c)
+    partsync_init();  // (multiplayer: part breaks reach the other games at once: runtime/net/partsync.c)
+    emsync_init();  // (multiplayer: small monsters, with each action's flood capped: runtime/net/emsync.c)
+    shellstep_init();  // (Pierce shots' spacing at high frame rates: runtime/hle/shellstep.c)
     netrate_init();  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
+    { void ldn_friends_start(void); ldn_friends_start(); }  // (friends on the hub server: runtime/net/ldn.c; after ui_init's SaveLocation)
     { void sampler_init(void); sampler_init(); }  // (debug, Windows, MHGU_SAMPLE: runtime/sampler.c)
 
     LOG("[boot] runtime hooks ready in %.3f s\n", (plat_now_ns() - stage) / 1e9);
