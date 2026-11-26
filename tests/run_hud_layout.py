@@ -45,6 +45,7 @@ report = {
         'Synthetic village-panel overlap points and top status-bar endpoints receive no quest HUD offsets; actual quest map, item/ammo, Hunter Arts and target offsets remain active.',
         'Positive and negative offsets for every HUD region at five aspect ratios, hidden and invalid regions.',
         'Zero and single-axis offsets, effective-zero scales, manual feedback ownership and scissor relaxation.',
+        'Cinematic bars at the top/bottom edges are identified by their wide, shallow layer-100 matrix; other layers, positions, sizes and rotated pieces are rejected.',
     ],
     'device_tested': False,
     'limits': [
@@ -123,8 +124,20 @@ try:
     cbuf_copy = renderer.index('memcpy(sp.ptr, m, 64);', cbuf_start)
     cbuf_record = renderer.index(record_call, cbuf_copy)
     cbuf_return = renderer.index('return ubo_span(sp, size);', cbuf_record)
-    if not cbuf_start < renderer.index('m[0] *= s;', cbuf_start) < cbuf_copy < cbuf_record < cbuf_return:
+    transform = renderer.index('float sx = cinematic_bar.horizontal_scale;', cbuf_start)
+    if not cbuf_start < transform < cbuf_copy < cbuf_record < cbuf_return:
         raise RuntimeError('Loading capture must precede transforms; recording must use the final transient copy')
+    for wiring, label in (
+        ('HudCinematicBar cinematic_bar = hud_cinematic_bar(m, s);', 'bar layout'),
+        ('if (cinematic_bar.relax_scissor) ui_relax_scissor = true;', 'bar scissor'),
+        ('ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;', 'scissor reset'),
+    ):
+        if renderer.count(wiring) < 1:
+            raise RuntimeError(f'Missing production cinematic {label}')
+    canvas_anchor = renderer.index('anchor = hud_canvas_anchor(', cbuf_start)
+    bar_anchor = renderer.index('if (cinematic_bar.matched) anchor = ANCHOR_CENTER;', cbuf_start)
+    if not canvas_anchor < bar_anchor < transform:
+        raise RuntimeError('Cinematic bars must override menu anchoring before horizontal transform')
     pass_start = renderer.index('void vk_end_pass(void) {')
     if not pass_start < renderer.index(finish, pass_start) < renderer.index('vkCmdEndRenderPass', pass_start):
         raise RuntimeError('Loading finish must precede render-pass submission')

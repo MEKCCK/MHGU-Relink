@@ -542,6 +542,27 @@ static void production_loading_overflow_and_legacy(void) {
     assert(!ui_loading_pass && !ui_loading_rows);
 }
 
+static void cinematic_bars(void) {
+    float bar[16] = {0};
+    bar[0] = 1280.0f, bar[5] = 64.0f, bar[12] = 640.0f, bar[13] = 0.0f, bar[14] = 100.0f;
+    HudCinematicBar layout = hud_cinematic_bar(bar, 16.0f / 9.0f / 2.2f);
+    assert(layout.matched && layout.relax_scissor && layout.horizontal_scale == 1.0f);
+    bar[13] = 720.0f;
+    layout = hud_cinematic_bar(bar, 16.0f / 9.0f / 2.2f);
+    assert(layout.matched && layout.relax_scissor && layout.horizontal_scale == 1.0f);
+    assert(hud_cinematic_bar(bar, 1.0f).matched && !hud_cinematic_bar(bar, 1.0f).relax_scissor);
+    bar[13] = 0.0f;
+    const unsigned rejects[] = {12, 13, 14, 0, 5, 1, 4};
+    const float values[] = {500.0f, 12.0f, 103.0f, 1099.0f, 129.0f, 1.0f, -1.0f};
+    for (unsigned i = 0; i < sizeof rejects / sizeof *rejects; i++) {
+        float original = bar[rejects[i]];
+        bar[rejects[i]] = values[i];
+        layout = hud_cinematic_bar(bar, 16.0f / 9.0f / 2.2f);
+        assert(!layout.matched && !layout.relax_scissor && layout.horizontal_scale < 1.0f);
+        bar[rejects[i]] = original;
+    }
+}
+
 static void art_rows_off_canvas(void) {
     // The item box leaves the game with three Hunter Arts slots built, two empty and laid out below its 720-line
     // canvas (measured: y 664..696 on it, 731..746 and 781..796 below it). Moving the panel to the top right must
@@ -617,6 +638,7 @@ int main(void) {
     production_loading_rejection();
     production_loading_overflow_and_legacy();
     art_rows_off_canvas();
+    cinematic_bars();
     puts("HUD layout regressions: OK");
     return 0;
 }
