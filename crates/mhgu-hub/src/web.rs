@@ -446,7 +446,13 @@ impl Web {
             let count = if h.count > 0 { h.count as usize } else { h.players };
             let max = if h.max > 0 { h.max } else { 4 };
             let names = h.names.iter().map(|n| html(n)).collect::<Vec<_>>().join(", ");
-            let room = if h.room_name.is_empty() { t(l, "unnamed").to_string() } else { html(&h.room_name) };
+            let room = if h.hunter_search {
+                t(l, "hunter search").to_string()
+            } else if h.room_name.is_empty() {
+                t(l, "unnamed").to_string()
+            } else {
+                html(&h.room_name)
+            };
             let quest = quest_label(h, l);
             let pass = h.passcode.map(|p| format!("#{:04}", p)).unwrap_or_else(|| "—".into());
             let access = if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }

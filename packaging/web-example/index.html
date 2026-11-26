@@ -28,7 +28,7 @@ const T = { room: zh ? '房间' : 'Room', players: zh ? '玩家' : 'Players',
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const names = h => (h.names || []).map(esc).join(', ');
 const quest = h => h.hunter_search ? T.hunterSearch : h.quest_name ? esc(h.quest_name) : h.in_quest ? T.inQuest : '—';
-const roomName = h => esc(h.room_name || T.unnamed);
+const roomName = h => h.hunter_search ? T.hunterSearch : esc(h.room_name || T.unnamed);
 const pass = h => h.passcode == null ? '—' : '#' + String(h.passcode).padStart(4, '0');
 function access(h) {
   if (h.access === 'phone') return '📱 ' + T.phone;

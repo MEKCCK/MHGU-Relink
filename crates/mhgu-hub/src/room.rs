@@ -36,6 +36,10 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     b.get(at..at + 4).map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
 }
 
+fn private_use(c: char) -> bool {
+    matches!(c as u32, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD | 0x100000..=0x10FFFD)
+}
+
 fn utf16_name(b: &[u8]) -> String {
     let mut units = Vec::new();
     for chunk in b.chunks_exact(2) {
@@ -47,7 +51,7 @@ fn utf16_name(b: &[u8]) -> String {
     }
     let text = String::from_utf16_lossy(&units);
     text.chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !private_use(*c) && *c != '\u{fffd}')
         .collect::<String>()
         .trim()
         .to_string()
@@ -65,6 +69,10 @@ pub fn parse(info: &[u8]) -> RoomDetails {
     let adv_len = u16_at(info, proto::NI_ADV_SIZE).unwrap_or(0) as usize;
     let end = (proto::NI_ADV + adv_len).min(info.len());
     let adv = info.get(proto::NI_ADV..end).unwrap_or(&[]);
+    if out.hunter_search {
+        // A Hunter Search network is not a hub: its advertise block has a different layout.
+        return out;
+    }
     out.room_name = adv
         .get(ADV_ROOM_NAME..ADV_ROOM_NAME + ADV_ROOM_NAME_LEN)
         .map(utf16_name)
@@ -129,5 +137,21 @@ mod tests {
         assert!(d.in_quest);
         assert_eq!(d.passcode, Some(1927));
         assert!(!d.hunter_search);
+    }
+
+    #[test]
+    fn hunter_search_does_not_expose_hub_metadata() {
+        let mut info = vec![0u8; proto::NETINFO_SIZE];
+        info[proto::NI_NET_TYPE] = 2;
+        info[proto::NI_NODE_MAX] = 2;
+        info[proto::NI_NODE_COUNT] = 1;
+        let mut adv = vec![0u8; 0x1D];
+        adv[proto::ADV_HUNT_SEARCH] = 0xFF;
+        info[proto::NI_ADV_SIZE..proto::NI_ADV_SIZE + 2].copy_from_slice(&(adv.len() as u16).to_le_bytes());
+        info[proto::NI_ADV..proto::NI_ADV + adv.len()].copy_from_slice(&adv);
+        let d = parse(&info);
+        assert!(d.hunter_search);
+        assert!(d.room_name.is_empty() && d.names.is_empty());
+        assert_eq!((d.quest_id, d.passcode, d.in_quest), (0, None, false));
     }
 }

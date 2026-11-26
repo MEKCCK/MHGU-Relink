@@ -45,7 +45,7 @@ cd build && ./mhgu-relink <游戏目录>
 | 模式 | 做法 |
 |---|---|
 | 局域网 | 主机建房（日志 `[ldn] hosting via mhgu-link on port N`），其他玩家“搜索房间”或 `[Multiplayer] Join = <IP>:<port>` |
-| 互联网（hub 服务器） | 跑 `./target/release/mhgu-hub -addr :39510`；所有玩家 `[Multiplayer] Server = <服务器>:39510`、相同 `Key`；主机建房会自动注册为 hub，其他人从列表进入，服务器只做中转 |
+| 互联网（hub 服务器） | 跑 `./target/release/mhgu-hub -addr :39510`；所有玩家 `[Multiplayer] Server = <服务器>:39510`、相同 `Key`；主机建房会自动注册为 hub，其他人从列表进入，服务器只做中转。只服务 Recomp 时加 `-min-proto 3`（2 及更早的 gu-native 会被拒绝） |
 
 传输层全部在 `crates/mhgu-link*`：主机/加入/中继、TCP/UDP 链路、踢人、NetworkInfo 广播。C 运行时只保留
 `nn::ldn` 的 HLE 包装、局域网扫描（Android 的组播锁与逐网卡探测）以及 hub 列表/检查的控制协议。

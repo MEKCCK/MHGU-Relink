@@ -69,6 +69,8 @@ Android APK 不包含游戏代码。安装后请在所选游戏文件夹中提�
 ## 联机
 
 - **局域网 / 互联网 hub**：游戏内创建或搜索本地通信房间；hub 服务器用 `target/release/mhgu-hub`。
+  联机兼容目标只有 **MHGURecomp**（链路协议 v3/v4）；gu-native 未跟进协议更新，不在支持列表。
+  只服务 Recomp 时建议 hub 加 `-min-proto 3`。
 - **模拟器 Crossplay**：设置菜单选择 `Crossplay = Ryujinx / Room / Mixed`，连接 RyuLdn 服务器、suyu 房间服务器，
   或两者同时使用。详见 [docs/online.md](docs/online.md#crossplayryujinx--suyu)。
 - 公共测试服务器：`114.66.25.224`（RyuLdn `30456/tcp`，suyu 房间 `24872/udp`，hub `39510/tcp`）。
