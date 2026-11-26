@@ -10,8 +10,10 @@ use std::sync::OnceLock;
 pub struct QuestInfo {
     pub name: String,
     pub name_es: String,
-    pub name_ja: String,
+    pub name_zh: String,
     pub goal: String,
+    pub goal_es: String,
+    pub goal_zh: String,
     pub rank: String,
     pub stars: u8,
 }
@@ -36,8 +38,10 @@ fn load() -> HashMap<u32, QuestInfo> {
             QuestInfo {
                 name: text(&v, "name"),
                 name_es: text(&v, "name_es"),
-                name_ja: text(&v, "name_ja"),
+                name_zh: text(&v, "name_zh"),
                 goal: text(&v, "goal"),
+                goal_es: text(&v, "goal_es"),
+                goal_zh: text(&v, "goal_zh"),
                 rank: text(&v, "rank"),
                 stars: v.get("stars").and_then(Value::as_u64).unwrap_or(0).min(255) as u8,
             },
@@ -59,7 +63,9 @@ mod tests {
     fn known_quest_maps_to_its_name() {
         let q = get(10216).expect("quest 10216");
         assert_eq!(q.name, "The New Tenant");
+        assert_eq!(q.name_zh, "雪山之主――雪狮子王");
         assert_eq!(q.goal, "Hunt a Blangonga");
+        assert_eq!(q.goal_zh, "狩猎1头雪狮子王");
         assert_eq!(q.rank, "LR");
         assert_eq!(q.stars, 2);
     }

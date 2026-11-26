@@ -56,6 +56,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "in quest" => s!("in quest", "任务中", "en misión"),
         "hunter search" => s!("hunter search", "猎人搜索", "búsqueda de cazadores"),
         "hunter searches" => s!("Hunter Search", "猎人搜索", "Búsqueda de cazadores"),
+        "room idle" => s!("Room idle", "房间空闲", "Sala libre"),
         "connections" => s!("connections", "连接数", "conexiones"),
         "uptime" => s!("uptime", "运行时长", "tiempo activo"),
         "hub" => s!("hub", "房间", "sala"),
@@ -682,14 +683,19 @@ impl Web {
             let q = crate::quests::get(h.quest_id);
             let quest_name = q.map(|q| json_str(&q.name)).unwrap_or_else(|| "null".into());
             let quest_goal = q.map(|q| json_str(&q.goal)).unwrap_or_else(|| "null".into());
+            let quest_name_es = q.map(|q| json_str(&q.name_es)).unwrap_or_else(|| "null".into());
+            let quest_name_zh = q.map(|q| json_str(&q.name_zh)).unwrap_or_else(|| "null".into());
+            let quest_goal_es = q.map(|q| json_str(&q.goal_es)).unwrap_or_else(|| "null".into());
+            let quest_goal_zh = q.map(|q| json_str(&q.goal_zh)).unwrap_or_else(|| "null".into());
             let quest_rank = q.map(|q| json_str(&q.rank)).unwrap_or_else(|| "null".into());
             let quest_stars = q.map(|q| q.stars.to_string()).unwrap_or_else(|| "null".into());
             let item = format!(
-                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_goal":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
+                r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_name_es":{},"quest_name_zh":{},"quest_goal":{},"quest_goal_es":{},"quest_goal_zh":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
                 h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
                 if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" },
                 json_str(&h.room_name), names, h.count, h.max, h.quest_id,
-                quest_name, quest_goal, quest_rank, quest_stars, h.in_quest,
+                quest_name, quest_name_es, quest_name_zh, quest_goal, quest_goal_es, quest_goal_zh,
+                quest_rank, quest_stars, h.in_quest,
                 h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search,
                 h.count > 0 && h.count >= h.max
             );
@@ -732,18 +738,19 @@ fn quest_label(h: &crate::server::HubView, l: Lang) -> String {
     if h.hunter_search {
         return t(l, "hunter search").to_string();
     }
+    if !h.in_quest {
+        return t(l, "room idle").to_string();
+    }
     let Some(q) = crate::quests::get(h.quest_id) else {
         return if h.quest_id != 0 {
             format!("#{}", h.quest_id)
-        } else if h.in_quest {
-            t(l, "in quest").to_string()
         } else {
-            "—".into()
+            t(l, "in quest").to_string()
         };
     };
     let name = match l {
         Lang::Es if !q.name_es.is_empty() => &q.name_es,
-        Lang::Zh if !q.name_ja.is_empty() => &q.name_ja,
+        Lang::Zh if !q.name_zh.is_empty() => &q.name_zh,
         Lang::Es | Lang::Zh if q.name.is_empty() => return "—".into(),
         _ => &q.name,
     };

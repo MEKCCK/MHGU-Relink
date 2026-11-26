@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Extract the quest ID -> name/goal/rank metadata used by the hub web room list.
+"""Extract the quest ID -> localized name/goal/rank metadata used by the hub web room list.
 
-The input is the MHGU Database APK (com.ghstudios.android.mhgendatabase), whose
+Chinese comes from the APK's `name_zh`/`goal_zh` columns. The input is the MHGU Database APK (com.ghstudios.android.mhgendatabase), whose
 ``assets/databases/mhgu.db.zip`` holds the quest table. Only this small metadata
 subset is written, never the full app/database.
 
@@ -35,19 +35,21 @@ def main():
         f.flush()
         c = sqlite3.connect(f.name)
         rows = c.execute(
-            'SELECT _id, name, name_es, name_ja, goal, goal_es, goal_ja, hub, rank, stars '
+            'SELECT _id, name, name_es, name_zh, name_ja, goal, goal_es, goal_zh, goal_ja, hub, rank, stars '
             'FROM quests ORDER BY _id'
         ).fetchall()
         c.close()
 
     quests = {}
-    for qid, name, name_es, name_ja, goal, goal_es, goal_ja, hub, rank, stars in rows:
+    for qid, name, name_es, name_zh, name_ja, goal, goal_es, goal_zh, goal_ja, hub, rank, stars in rows:
         quests[str(qid)] = {
             'name': name,
             'name_es': name_es,
+            'name_zh': name_zh,
             'name_ja': name_ja,
             'goal': goal,
             'goal_es': goal_es,
+            'goal_zh': goal_zh,
             'goal_ja': goal_ja,
             'hub': hub,
             'rank': rank,

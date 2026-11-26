@@ -141,7 +141,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 `mhgu-hub` 自带一个无依赖的 Web 界面（`-web :39511`，默认开；`off` 关闭）：
 
 - `GET /`：公开页，列房间名、玩家名、任务、密码、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；猎人搜索不算房间，单独列在下方表格；
-- `GET /api/hubs`：`hubs` 只含房间，猎人搜索在单独的 `hunter_searches` 数组；两项的条目都带 `locked`、`access`（`public` / `phone` / `key`）、`room_name`、`names`、`count`/`max`、`quest_id`/`quest_name`/`quest_goal`/`quest_rank`/`quest_stars`、`in_quest`、`passcode`（无密码为 `null`）、`hunter_search`；
+- `GET /api/hubs`：`hubs` 只含房间，猎人搜索在单独的 `hunter_searches` 数组；两项的条目都带 `locked`、`access`（`public` / `phone` / `key`）、`room_name`、`names`、`count`/`max`、`quest_id`/`quest_name`/`quest_goal`/`quest_rank`/`quest_stars`，以及 `quest_name_es`/`quest_name_zh`、`quest_goal_es`/`quest_goal_zh`、`in_quest`、`passcode`（无密码为 `null`）、`hunter_search`；`in_quest=false` 时页面显示「房间空闲」，`quest_id`/`in_quest` 随主机的 UPDATE 实时刷新；
 - `GET /admin?token=…`：管理员页：统计、每个 hub 的 `Close`（`POST /admin/close`，会通知主机并踢掉该房间）、
   IP 封禁（`POST /admin/ban` / `unban`，被禁 IP 的连接立即被重置）、`/admin/log` 看最近 300 条事件；
 - 界面多语言：右上角 🌐 点开是语言列表（English / 中文 / Español），点击即切换；选择写进
@@ -151,7 +151,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
   关掉该玩家两侧的 socket，pipe 线程结束、`joins` 递减）；日志可按 `?only=hubs|admin` 过滤；
 - 令牌来自 `-web-token`，不填则启动时随机生成并打印。
 
-房间名、最多四个猎人名、任务 ID、是否任务中、密码和猎人搜索标志来自游戏的 `NetworkInfo` advertise 块；任务名称/目标/等级/星数由 `crates/mhgu-hub/data/quests.json` 映射。该 JSON 由 `tools/extract_mhgudb_quests.py` 从 MHGU Database 2.4.5 的 `quests` 表提取，只保留显示所需元数据，不含 APK 或完整数据库。
+房间名、最多四个猎人名、任务 ID、是否任务中、密码和猎人搜索标志来自游戏的 `NetworkInfo` advertise 块；任务名称/目标/等级/星数由 `crates/mhgu-hub/data/quests.json` 映射，英文/西班牙文/中文分别来自 APK 的 `name`/`goal`、`name_es`/`goal_es`、`name_zh`/`goal_zh`。等级是任务等级，不是玩家等级；同名任务可能有不同 ID（例如「雪山之主」的 LR 10216 与 HR 10530）。该 JSON 由 `tools/extract_mhgudb_quests.py` 从 MHGU Database 2.4.5 的 `quests` 表提取，只保留显示所需元数据，不含 APK 或完整数据库。
 
 ### 热设置（WebUI，无需重启）
 
