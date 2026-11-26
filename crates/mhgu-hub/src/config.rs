@@ -88,6 +88,8 @@ pub struct Config {
     pub federation_presence: bool,
     /// Extra hops for transitive hub advertisements (0 = direct peers only; joins still go through the chain).
     pub federation_transitive: u8,
+    /// Optional settings file for the four live settings (read at startup and on SIGHUP).
+    pub settings_file: String,
 }
 
 impl Default for Config {
@@ -127,6 +129,7 @@ impl Default for Config {
             federation_state: String::new(),
             federation_presence: true,
             federation_transitive: 0,
+            settings_file: String::new(),
         }
     }
 }

@@ -74,6 +74,7 @@ Hello，局域网探测按对方版本回应；对方是 v3 主机时按 v3 说�
 - `-max-presence N`：好友在线表人数上限（默认 20000）；
 - `-presence-ttl SECS`：好友最后一次 PRESENCE 后保持在线的时间（默认 90 秒）；到期会向联邦 peer 广播下线。
 - `-separate-phones[=false]`：`false` 时 Android 的公共房间与 PC 公共房间合并（游戏默认不再区分）；
+- `-settings FILE`：从文件读取 `min-proto`、`max-proto`、`link-pool`、`separate-phones`；启动时文件值覆盖命令行，SIGHUP 重新读取并热应用，不踢房间；systemd 可配 `ExecReload=/bin/kill -HUP $MAINPID`。
 - `-v`：记录 hub、加入与因协议被拒的请求（不记录 IP）。
 
 ### 服务器联邦（多台 hub 服务器）
@@ -169,7 +170,7 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 | `Bandwidth (bytes/s)` | 每条 pair 每方向带宽 | 新建 pair；已有 pair 保持原值 |
 
 非法值（非数字、0 上限、list > 64、带宽 < 1）整次拒绝，服务器保持原设置。
-修改会写入管理员日志；所有设置也可用启动参数指定，WebUI 只负责**本次进程**的运行中修改——重启后回到启动参数/默认值。需要重启后保持的，请写进 systemd 的启动参数，例如 `-separate-phones false`、`-min-proto 3`。
+修改会写入管理员日志；所有设置也可用启动参数指定，WebUI 只负责**本次进程**的运行中修改——重启后回到启动参数/默认值。需要长期保存的请写进 systemd 启动参数或 `-settings FILE`；`-settings` 的四个热设置可由 SIGHUP 重新加载。
 
 ```sh
 ./target/release/mhgu-hub -addr :39510 -web :39511 -web-token <你的令牌> -key <房间 Key>

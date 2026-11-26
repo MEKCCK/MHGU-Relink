@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/usr/bin/mhgu-hub -addr :39510 -web :39511
+# Reload min-proto / max-proto / link-pool / separate-phones from this file on SIGHUP:
+#ExecStart=/usr/bin/mhgu-hub -addr :39510 -web :39511 -settings /etc/mhgu-hub.conf
+#ExecReload=/bin/kill -HUP $MAINPID
 # Your own web UI: uncomment and point it at your files.
 #ExecStart=/usr/bin/mhgu-hub -addr :39510 -web :39511 -web-dir /etc/mhgu-hub/web
 Restart=on-failure

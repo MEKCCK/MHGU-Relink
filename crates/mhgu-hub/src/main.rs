@@ -1,9 +1,12 @@
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use mhgu_hub::{Config, Server};
+use mhgu_hub::{Config, Live, Server};
 
 fn main() -> ExitCode {
     let cfg = parse_args();
+    let settings_file = cfg.settings_file.clone();
     let server = match Server::new(cfg.clone()) {
         Ok(s) => s,
         Err(e) => {
@@ -63,6 +66,10 @@ fn main() -> ExitCode {
             room[0], room[1], room[2], room[3]
         );
     }
+    let server = Arc::new(server);
+    if !settings_file.is_empty() {
+        install_reload(Arc::clone(&server), settings_file);
+    }
     match server.serve() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -70,6 +77,104 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[derive(Default)]
+struct FileSettings {
+    min_proto: Option<u16>,
+    max_proto: Option<u16>,
+    link_pool: Option<(u16, u16)>,
+    separate_phones: Option<bool>,
+}
+
+fn parse_pool(v: &str) -> Result<(u16, u16), String> {
+    let v = v.trim().to_ascii_lowercase();
+    if matches!(v.as_str(), "off" | "0" | "none") {
+        return Ok((0, 0));
+    }
+    let (lo, hi) = v.split_once('-').ok_or_else(|| "link-pool must be low-high, or off".to_string())?;
+    let lo: u16 = lo.trim().parse().map_err(|_| "link-pool: low must be a number".to_string())?;
+    let hi: u16 = hi.trim().parse().map_err(|_| "link-pool: high must be a number".to_string())?;
+    if lo == 0 || hi < lo {
+        return Err("link-pool must be low-high, low at most high and above zero".into());
+    }
+    Ok((lo, hi))
+}
+
+fn read_settings(path: &str) -> Result<FileSettings, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut out = FileSettings::default();
+    for (n, raw) in text.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (k, v) = line.split_once('=').ok_or_else(|| format!("{path} line {}: expected key = value", n + 1))?;
+        let k = k.trim().to_ascii_lowercase();
+        let v = v.trim().to_ascii_lowercase();
+        match k.as_str() {
+            "min-proto" => out.min_proto = Some(v.parse().map_err(|_| format!("{path} line {}: min-proto must be a number", n + 1))?),
+            "max-proto" => out.max_proto = Some(v.parse().map_err(|_| format!("{path} line {}: max-proto must be a number", n + 1))?),
+            "link-pool" => out.link_pool = Some(parse_pool(&v).map_err(|e| format!("{path} line {}: {e}", n + 1))?),
+            "separate-phones" => out.separate_phones = Some(match v.as_str() {
+                "on" | "true" | "yes" | "1" => true,
+                "off" | "false" | "no" | "0" => false,
+                _ => return Err(format!("{path} line {}: separate-phones must be on or off", n + 1)),
+            }),
+            _ => return Err(format!("{path} line {}: unknown setting {k:?}", n + 1)),
+        }
+    }
+    let min = out.min_proto.unwrap_or(0);
+    if let Some(max) = out.max_proto {
+        if max != 0 && max < min {
+            return Err(format!("{path}: max-proto {} is below min-proto {min}", max));
+        }
+    }
+    Ok(out)
+}
+
+impl FileSettings {
+    fn apply_config(&self, c: &mut Config) {
+        if let Some(v) = self.min_proto { c.min_proto = v; }
+        if let Some(v) = self.max_proto { c.max_proto = v; }
+        if let Some(v) = self.link_pool { c.link_pool_low = v.0; c.link_pool_high = v.1; }
+        if let Some(v) = self.separate_phones { c.separate_phones = v; }
+    }
+    fn apply_live(&self, c: &mut Live) {
+        if let Some(v) = self.min_proto { c.min_proto = v; }
+        if let Some(v) = self.max_proto { c.max_proto = v; }
+        if let Some(v) = self.link_pool { c.link_pool_low = v.0; c.link_pool_high = v.1; }
+        if let Some(v) = self.separate_phones { c.separate_phones = v; }
+    }
+}
+
+static HUP: AtomicBool = AtomicBool::new(false);
+extern "C" fn on_hup(_: libc::c_int) { HUP.store(true, Ordering::Relaxed); }
+
+fn install_reload(server: Arc<Server>, path: String) {
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGHUP, on_hup as *const () as libc::sighandler_t);
+    }
+    #[cfg(unix)]
+    std::thread::spawn(move || loop {
+        if HUP.swap(false, Ordering::Relaxed) {
+            match read_settings(&path) {
+                Ok(f) => {
+                    let mut live = server.live();
+                    f.apply_live(&mut live);
+                    let shown = live.clone();
+                    let closed = server.apply(live);
+                    println!("mhgu-hub: reloaded {path} (min-proto {}, max-proto {}, link-pool {}, separate-phones {}; {closed} hub(s) closed)",
+                        shown.min_proto, shown.max_proto, shown.pool_text(), shown.separate_phones);
+                }
+                Err(e) => eprintln!("mhgu-hub: settings unchanged: {e}"),
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    });
+    #[cfg(not(unix))]
+    let _ = (server, path);
 }
 
 fn parse_args() -> Config {
@@ -173,12 +278,22 @@ fn parse_args() -> Config {
                 cfg.federate.push(mhgu_hub::Peer { addr, token, name, key });
             }
             "-web-dir" => cfg.web_dir = args.next().expect("-web-dir needs a value"),
+            "-settings" => cfg.settings_file = args.next().expect("-settings needs a value"),
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
             }
             other => {
                 eprintln!("mhgu-hub: unknown argument {other} (try --help)");
+                std::process::exit(2);
+            }
+        }
+    }
+    if !cfg.settings_file.is_empty() {
+        match read_settings(&cfg.settings_file) {
+            Ok(f) => f.apply_config(&mut cfg),
+            Err(e) => {
+                eprintln!("mhgu-hub: {e}");
                 std::process::exit(2);
             }
         }
@@ -223,6 +338,7 @@ Usage: mhgu-hub [options]\n\
   -web ADDR             web UI address (default :39511, off: none)\n\
   -web-token TOKEN      the token /admin needs (default: random, printed at startup)\n\
   -web-dir DIR          serve your own web UI from DIR (index.html, admin.html, log.html, assets)\n\
+  -settings FILE        min-proto, max-proto, link-pool and separate-phones; read at start and on SIGHUP\n\
   -key KEY              only serve the matchmaking room of KEY (default: any, public room included)
 \
   -federation-token T   accept federation from servers that prove token T (default: off)
