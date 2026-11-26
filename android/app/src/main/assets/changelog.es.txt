@@ -1,8 +1,6 @@
-MHGU Relink 0.3.0 · 2026-11-27
+MHGU Relink 0.3.1 · 2026-11-27
 
-2026-11-27: cinemáticas panorámicas y limpieza de ajustes
-Las cinemáticas panorámicas mantienen sus barras centradas: las capas anchas y bajas ya no se comprimen con el HUD ni dejan huecos a los lados.
+2026-11-27: la sala permanece listada tras entrar un jugador
+El anfitrión sigue enviando sus PING de mantenimiento mientras un jugador está conectado por retransmisión; la sala ya no desaparece del servidor tras unos 45 segundos.
 
-Ajustes → En línea → Sesión y amigos ya no muestra la fila duplicada Unirse por código. El resultado de la búsqueda aparece después de la única fila editable Unirse con código.
-
-El GameLib ID no cambia (3bfb26af6be3424b): las bibliotecas de código del juego existentes siguen funcionando.
+El GameLib ID sigue siendo 3bfb26af6be3424b; las bibliotecas de 0.3.0 siguen funcionando.

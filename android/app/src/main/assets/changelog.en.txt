@@ -1,8 +1,6 @@
-MHGU Relink 0.3.0 · 2026-11-27
+MHGU Relink 0.3.1 · 2026-11-27
 
-2026-11-27: widescreen cutscenes and settings cleanup
-Widescreen cutscenes now keep their cinematic bars centred: the wide, shallow layers are no longer squeezed with the HUD or split with gaps at the sides.
+2026-11-27: keep the hub listed after a player joins
+A host now keeps sending its keep-alive PINGs while a relayed player is connected, so the room no longer disappears from the hub server after about 45 seconds.
 
-Settings → Online → Session & Friends no longer shows the duplicate Join by code status row. The lookup result appears after the single editable Join with code row.
-
-GameLib ID is unchanged (3bfb26af6be3424b): existing game-code libraries keep working.
+GameLib ID remains 3bfb26af6be3424b; the 0.3.0 game-code libraries still work.
