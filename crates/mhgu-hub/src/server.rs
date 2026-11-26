@@ -1,7 +1,7 @@
 //! The hub server: LIST / HOST / JOIN / ATTACH over TCP, the pair splice, and the MHGR UDP relay.
 //!
-//! Behaviour and wire format mirror MHGURecomp's `server/server.go` (and hence gu-native), so both
-//! clients can find each other's hubs and play through this server without a forwarded port.
+//! Behaviour and wire format mirror MHGURecomp's hub, so its clients can find each other's hubs
+//! and play through this server without a forwarded port. gu-native is not a supported target.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
@@ -33,6 +33,8 @@ struct Hub {
     code: [u8; proto::CODE_LEN],
     info: NetInfo,
     created: Instant,
+    /// When the current quest started, cleared when the host is back in the hub.
+    quest_since: Option<Instant>,
     /// Frames for the host's writer thread (tickets and pings).
     out: SyncSender<Vec<u8>>,
     /// The host's connection, to end it when an admin closes the hub or raises the minimum protocol.
@@ -136,7 +138,23 @@ pub struct Shared {
 }
 
 /// A hub as the web UI shows it.
-pub struct HubView { pub id: u64, pub players: usize, pub link_proto: u16, pub age: u64, pub room: [u8; 4] }
+pub struct HubView {
+    pub id: u64,
+    pub players: usize,
+    pub link_proto: u16,
+    pub age: u64,
+    pub room: [u8; 4],
+    pub room_name: String,
+    pub names: Vec<String>,
+    pub count: u8,
+    pub max: u8,
+    pub quest_id: u32,
+    pub in_quest: bool,
+    /// Seconds since the host entered its current quest (None when not in a quest).
+    pub quest_age: Option<u64>,
+    pub passcode: Option<u16>,
+    pub hunter_search: bool,
+}
 
 /// A federated peer, as the web UI shows it.
 pub struct PeerRow {
@@ -169,14 +187,26 @@ impl Shared {
         let mut hubs: Vec<HubView> = self
             .hubs
             .values()
-            .map(|h| HubView {
-                id: h.id,
-                // The host, plus the players actually spliced to it (a JOIN that is still waiting for the
-                // host's ATTACH is not in the room yet, so it must not show up as a player).
-                players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
-                link_proto: h.link_proto,
-                age: h.created.elapsed().as_secs(),
-                room: [h.room[0], h.room[1], h.room[2], h.room[3]],
+            .map(|h| {
+                let d = crate::room::parse(&h.info);
+                HubView {
+                    id: h.id,
+                    // The host, plus the players actually spliced to it (a JOIN that is still waiting for the
+                    // host's ATTACH is not in the room yet, so it must not show up as a player).
+                    players: 1 + self.pairs.values().filter(|p| p.hub == h.id).count(),
+                    link_proto: h.link_proto,
+                    age: h.created.elapsed().as_secs(),
+                    room: [h.room[0], h.room[1], h.room[2], h.room[3]],
+                    room_name: d.room_name,
+                    names: d.names,
+                    count: d.count,
+                    max: d.max,
+                    quest_id: d.quest_id,
+                    in_quest: d.in_quest,
+                    quest_age: h.quest_since.map(|t| t.elapsed().as_secs()),
+                    passcode: d.passcode,
+                    hunter_search: d.hunter_search,
+                }
             })
             .collect();
         hubs.sort_by(|a, b| b.players.cmp(&a.players).then(a.id.cmp(&b.id)));
@@ -357,11 +387,23 @@ impl Shared {
         for id in &gone {
             self.close_hub(*id);
         }
+        // Turning "separate Android public room" off merges the hubs already in the phone room into
+        // the public room. (Turning it back on cannot identify the Android hubs among the public ones.)
+        let mut merged = 0usize;
+        if old.separate_phones && !next.separate_phones {
+            let phone = proto::phone_room();
+            for h in self.hubs.values_mut() {
+                if h.room == phone {
+                    h.room = [0u8; 16];
+                    merged += 1;
+                }
+            }
+        }
         if old != next {
             self.note(format!(
-                "admin: settings min-proto {} -> {}, max-proto {} -> {}, link-pool {} -> {}, separate-phones {} -> {} ({} hub(s) closed)",
+                "admin: settings min-proto {} -> {}, max-proto {} -> {}, link-pool {} -> {}, separate-phones {} -> {} ({} hub(s) closed, {} merged)",
                 old.min_proto, next.min_proto, old.max_proto, next.max_proto, old.pool_text(), next.pool_text(),
-                old.separate_phones, next.separate_phones, gone.len()
+                old.separate_phones, next.separate_phones, gone.len(), merged
             ));
         }
         gone.len()
@@ -1278,6 +1320,7 @@ fn host(
                 while cand == 0 || hubs.contains_key(&cand) {
                     cand = rand64();
                 }
+                let quest_since = crate::room::parse(&ninfo).in_quest.then(Instant::now);
                 hubs.insert(
                     cand,
                     Hub {
@@ -1287,6 +1330,7 @@ fn host(
                         code,
                         info: ninfo,
                         created: Instant::now(),
+                        quest_since,
                         out: tx,
                         conn: host_conn,
                         ip,
@@ -1369,6 +1413,15 @@ fn host(
                 }
                 let mut s = shared.lock().unwrap();
                 if let Some(h) = s.hubs.get_mut(&id) {
+                    let old = crate::room::parse(&h.info);
+                    let new = crate::room::parse(&p);
+                    if new.in_quest {
+                        if !old.in_quest || old.quest_id != new.quest_id || h.quest_since.is_none() {
+                            h.quest_since = Some(Instant::now());
+                        }
+                    } else {
+                        h.quest_since = None;
+                    }
                     h.info.copy_from_slice(&p);
                 }
             }

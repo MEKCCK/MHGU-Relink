@@ -297,6 +297,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"HUD anchor", "Posición del HUD", "HUD 锚点"},
         {"Fill the screen", "Llenar la pantalla", "铺满屏幕"},
         {"Show FPS and temperature", "Mostrar FPS y temperatura", "显示帧率与温度"},
+        {"Show FPS", "Mostrar FPS", "显示帧率"},
         {"Vibrate on touch", "Vibrar al tocar", "触屏时振动"},
         {"Game rumble on the phone", "Vibración del juego en el teléfono", "手机上的游戏振动"},
         {"Pause in the background", "Pausar en segundo plano", "后台时暂停"},

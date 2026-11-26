@@ -419,6 +419,31 @@ fn live_min_proto_closes_old_hubs() {
     assert_eq!(err_code(&expect(&mut c, proto::T_ERROR)), proto::ERR_VERSION);
 }
 
+#[test]
+fn disabling_separate_phones_merges_existing_phone_hubs() {
+    let ts = start(|_| {});
+    let mut phone = dial(&ts);
+    let h = keyed_header(2, proto::phone_room());
+    let info = test_info(1);
+    send(&mut phone, proto::T_HOST, &[&h[..], &info[..]]);
+    let p = expect(&mut phone, proto::T_HOSTED);
+    let id = u64::from_le_bytes(p[..8].try_into().unwrap());
+
+    let mut live = ts._srv.live();
+    live.separate_phones = false;
+    ts._srv.apply(live);
+
+    // The already listed Android hub is now in the public room, so a public LIST sees it.
+    let mut c = dial(&ts);
+    let public = keyed_header(2, [0u8; 16]);
+    send(&mut c, proto::T_LIST, &[&public[..]]);
+    let p = expect(&mut c, proto::T_HUBS);
+    assert_eq!(u32::from_le_bytes(p[..4].try_into().unwrap()), 1);
+    let seen = u64::from_le_bytes(p[4..12].try_into().unwrap());
+    assert_eq!(seen, id);
+    drop(phone);
+}
+
 /// Direct UDP (hole punching): each end learns the other's public address only after both asked;
 /// queries are never relayed, and the answer carries a per-pair direct key (ported from the Go
 /// server's TestPeerAddress).

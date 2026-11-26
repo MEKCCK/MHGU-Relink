@@ -1,7 +1,7 @@
 //! Wire formats of the MHGU Local Play networking.
 //!
 //! There are two layers, both defined by the original C/Go code
-//! (`runtime/net/ldn.c` and `server/server.go` in MHGURecomp, shared by the gu-native fork):
+//! (`runtime/net/ldn.c` and the hub in MHGURecomp):
 //!
 //! * the **hub-server protocol** — TCP control frames whose first payload is a `MHGS` header,
 //!   plus a `MHGR` UDP relay; this is what `mhgu-hub` implements, and what both game clients speak;
@@ -9,7 +9,7 @@
 //!   exchange through the relay; the server never parses these, it only splices bytes.
 //!
 //! Keeping these constants byte-for-byte identical is what makes a new build interoperate with
-//! gu-native (Android) and MHGURecomp (PC) players.
+//! MHGURecomp players.
 
 use std::io::{self, Read, Write};
 

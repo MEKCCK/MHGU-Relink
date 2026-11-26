@@ -25,6 +25,6 @@ mhgu-hub.exe -addr :39510 -web :39511 [-web-token TOKEN] [-key KEY] [-web-dir we
 The link library (mhgu_link_ffi.lib / libmhgu_link_ffi.a) is what the C base
 (the C runtime at the repository root) links against; build it with the MSYS2 mingw-w64 toolchain.
 
-Wire-compatible with MHGURecomp and gu-native (server protocol 1, link protocol 2).
+Wire-compatible with MHGURecomp.
 TXT
 echo "-> dist/windows"

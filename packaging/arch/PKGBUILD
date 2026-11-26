@@ -2,7 +2,7 @@
 pkgname=mhgu-hub
 pkgver=0.2.9
 pkgrel=1
-pkgdesc="MHGU Relink hub server (Rust, wire-compatible with the game and gu-native)"
+pkgdesc="MHGU Relink hub server (Rust, wire-compatible with MHGURecomp)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/MEKCCK/MHGU-Relink"
 license=('MIT')

@@ -2,6 +2,12 @@
 
 ## 0.2.9（2026-11-26）
 
+- Hub WebUI 重新设计：Hunter 留言板风格的纸张/墨绿/金色主题、房间卡片、任务与猎人信息、密码/访问/状态徽章、中英西切换和手机响应式布局；房间达到人数上限时显示「已满」而不是「可加入」；猎人搜索不再算作房间，单独列在下方表格，`/api/hubs` 用 `hunter_searches` 返回。任务名/目标支持中文（从 MHGU Database 的 `name_zh`/`goal_zh` 拆出）；不在任务中显示「房间空闲」；切换/开始/结束任务按主机的 UPDATE 实时刷新；任务中显示已出发时长（`quest_age`）；数据库没有的占位/模组任务显示「未知任务 #ID」。继续支持自定义 `-web-dir` 与 `/api/hubs`。
+- 联机兼容范围：只以 MHGURecomp 为目标；gu-native 未跟进 Recomp 的协议更新，不再列入联机兼容列表（历史来源说明保留）。
+- Hub 公共房间：关闭「仅手机」时把已存在的 Android 公共房间立即合并进公共房间；`-separate-phones=false` 与 `-separate-phones false` 都支持。WebUI 热设置只对当前进程生效，重启后请保留启动参数。
+- Hub Web/API 房间详情：显示房间名、猎人名、任务（ID → 名称/目标/等级/星数）、密码、是否任务中与猎人搜索；任务元数据由 MHGU Database 2.4.5 的 quests 表提取为 `crates/mhgu-hub/data/quests.json`，不含 APK/完整数据库。
+- 设置菜单：按平台隐藏 HDR/键盘鼠标/触控/手机振动等不适用的 section/row；补齐 `share_urgent`、好友通知开关的未保存判断；移除 0.2.9 子页重构留下的重复标题。
+
 - 兼容 ID 更新为 `3bfb26af6be3424b`：0.2.9 的 `libmhgugame.so`／`mhgugame.so`／`mhgugame.dll` 必须用本版工具重新生成；旧游戏代码库会在启动时被明确拒绝。
 - 联邦传递 PRESENCE 与自然离线：presence 流默认尝试 `FED_PRESENCE_EXT`/`UPDATE_EXT`（老 peer 退回普通流），每条在线记录带 origin/hops，中间服务器按 depth 转发本服与其它 peer 的在线玩家、好友请求和删除列表；快照与增量都支持，断开或自然离线（`-presence-ttl`，默认 90 秒）时发 tombstone 清理；中间服务器远端到期也继续转发，较短的直达记录优先。
 - 联邦传递广告：`-federation-transitive N`（默认 0）让 hub 广告逐跳转发，列表带 origin/hops、路径与 30 秒缓存；选中非直连的 hub 时用 `FED_JOIN_EXT` 沿同一路径逐跳加入，TCP 拼接与 UDP 前缀翻译嵌套进行。会话代码 `FIND` 也按同一 depth/path 递归（`FED_FIND_EXT`），两跳外的代码可直接搜索并沿 `FED_JOIN_EXT` 加入；老 peer 自动退回普通 `FIND`。中间服务器缓存广告并在过期时重新查询；hops 预算与路径防止环路，超过自身配置的转发被拒绝。

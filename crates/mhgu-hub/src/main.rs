@@ -108,6 +108,9 @@ fn parse_args() -> Config {
                     _ => true,
                 };
             }
+            a if a.starts_with("-separate-phones=") => {
+                cfg.separate_phones = !matches!(&a["-separate-phones=".len()..], "false" | "0" | "off");
+            }
             "-bandwidth" => {
                 cfg.bandwidth = args
                     .next()
@@ -147,6 +150,10 @@ fn parse_args() -> Config {
                     args.next().as_deref(),
                     Some("false") | Some("0") | Some("off")
                 );
+            }
+            a if a.starts_with("-federation-presence=") => {
+                cfg.federation_presence =
+                    !matches!(&a["-federation-presence=".len()..], "false" | "0" | "off");
             }
             "-federate" => {
                 let v = args.next().expect("-federate needs a value");
@@ -240,6 +247,6 @@ Usage: mhgu-hub [options]\n\
 \
   -h, --help            this help\n\
 \n\
-Wire-compatible with gu-native and MHGURecomp clients."
+Online support: MHGURecomp clients."
     );
 }
