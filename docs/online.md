@@ -140,8 +140,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 
 `mhgu-hub` 自带一个无依赖的 Web 界面（`-web :39511`，默认开；`off` 关闭）：
 
-- `GET /`：公开页，列房间名、玩家名、任务、密码、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；
-- `GET /api/hubs`：同样的 JSON，带 `locked`、`access`（`public` / `phone` / `key`）、`room_name`、`names`、`count`/`max`、`quest_id`/`quest_name`/`quest_goal`/`quest_rank`/`quest_stars`、`in_quest`、`passcode`（无密码为 `null`）、`hunter_search`；
+- `GET /`：公开页，列房间名、玩家名、任务、密码、人数、访问类型（公开 / 仅手机 / Key 房间，不显示内部 id / key 哈希）及可加入状态，另有总人数/连接数/运行时长，5 秒自动刷新；猎人搜索不算房间，单独列在下方表格；
+- `GET /api/hubs`：`hubs` 只含房间，猎人搜索在单独的 `hunter_searches` 数组；两项的条目都带 `locked`、`access`（`public` / `phone` / `key`）、`room_name`、`names`、`count`/`max`、`quest_id`/`quest_name`/`quest_goal`/`quest_rank`/`quest_stars`、`in_quest`、`passcode`（无密码为 `null`）、`hunter_search`；
 - `GET /admin?token=…`：管理员页：统计、每个 hub 的 `Close`（`POST /admin/close`，会通知主机并踢掉该房间）、
   IP 封禁（`POST /admin/ban` / `unban`，被禁 IP 的连接立即被重置）、`/admin/log` 看最近 300 条事件；
 - 界面多语言：右上角 🌐 点开是语言列表（English / 中文 / Español），点击即切换；选择写进
