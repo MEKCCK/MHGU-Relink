@@ -114,7 +114,7 @@ h1 { margin: 2px 0 2px; font: 600 clamp(24px, 3vw, 38px)/1.05 Georgia, "Times Ne
 .langs button.active { background: var(--gold); color: #2b241a; border-color: var(--gold-soft); font-weight: 700; }
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 16px 0;
 }
@@ -148,6 +148,18 @@ h1 { margin: 2px 0 2px; font: 600 clamp(24px, 3vw, 38px)/1.05 Georgia, "Times Ne
 .board-head h2 { margin: 1px 0 0; font: 600 clamp(22px, 2.4vw, 30px)/1.1 Georgia, "Times New Roman", "Noto Serif CJK SC", serif; color: var(--forest); }
 .board-head .eyebrow { color: var(--gold); opacity: 1; }
 .updated { margin: 0 0 3px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.search-board { margin-top: 16px; }
+.search-board[hidden] { display: none; }
+.table-wrap { overflow-x: auto; }
+.search-table { width: 100%; border-collapse: collapse; }
+.search-table th { padding: 0 10px 8px; color: var(--gold); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; text-align: left; border-bottom: 1px solid var(--line-strong); }
+.search-table td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; color: var(--forest); }
+.search-table tr:last-child td { border-bottom: 0; }
+.search-table td:first-child { font: 600 14px/1.2 Georgia, "Times New Roman", serif; }
+.search-age { display: block; margin-top: 2px; color: var(--muted); font: 400 10px/1 system-ui, sans-serif; }
+.search-count { font: 600 20px/1 Georgia, serif; }
+.search-count i { color: var(--muted); font: 500 11px/1 system-ui, sans-serif; font-style: normal; }
+.search-names { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: 8px; vertical-align: 2px; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
 .room {
   position: relative;
@@ -172,7 +184,6 @@ h1 { margin: 2px 0 2px; font: 600 clamp(24px, 3vw, 38px)/1.05 Georgia, "Times Ne
 }
 .room.key::before { background: linear-gradient(var(--gold), #8f642a); }
 .room.phone::before { background: linear-gradient(#b78b4b, #7d5b30); }
-.room.search::before { background: linear-gradient(var(--muted), #b7a994); }
 .room.full::before { background: linear-gradient(var(--red), #6f2f26); }
 .room:hover { border-color: var(--line-strong); box-shadow: 0 13px 30px rgba(55, 37, 18, .14); transform: translateY(-1px); transition: .18s ease; }
 @keyframes rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }

@@ -55,6 +55,7 @@ fn t(l: Lang, key: &str) -> &'static str {
         "unnamed" => s!("unnamed", "未命名", "sin nombre"),
         "in quest" => s!("in quest", "任务中", "en misión"),
         "hunter search" => s!("hunter search", "猎人搜索", "búsqueda de cazadores"),
+        "hunter searches" => s!("Hunter Search", "猎人搜索", "Búsqueda de cazadores"),
         "connections" => s!("connections", "连接数", "conexiones"),
         "uptime" => s!("uptime", "运行时长", "tiempo activo"),
         "hub" => s!("hub", "房间", "sala"),
@@ -439,21 +440,17 @@ impl Web {
 
     fn public_page(&self, l: Lang) -> String {
         let v = self.view();
+        let rooms: Vec<&crate::server::HubView> = v.hubs.iter().filter(|h| !h.hunter_search).collect();
+        let searches: Vec<&crate::server::HubView> = v.hubs.iter().filter(|h| h.hunter_search).collect();
         let mut rows = String::new();
-        for (i, h) in v.hubs.iter().enumerate() {
+        for (i, h) in rooms.iter().enumerate() {
             let public = h.room == [0u8; 4];
             let phone = h.room == proto::room_from_key("public-phone")[..4];
             let keyed = !public && !phone;
             let count = if h.count > 0 { h.count as usize } else { h.players };
             let max = if h.max > 0 { h.max } else { 4 };
             let names = h.names.iter().map(|n| html(n)).collect::<Vec<_>>().join(", ");
-            let room = if h.hunter_search {
-                t(l, "hunter search").to_string()
-            } else if h.room_name.is_empty() {
-                t(l, "unnamed").to_string()
-            } else {
-                html(&h.room_name)
-            };
+            let room = if h.room_name.is_empty() { t(l, "unnamed").to_string() } else { html(&h.room_name) };
             let quest = quest_label(h, l);
             let pass = h.passcode.map(|p| format!("#{:04}", p)).unwrap_or_else(|| "—".into());
             let access = if keyed { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) }
@@ -475,17 +472,43 @@ impl Web {
         if rows.is_empty() {
             rows = format!("<tr><td colspan=6>{}</td></tr>", t(l, "no hubs"));
         }
+        let mut search_rows = String::new();
+        for h in &searches {
+            let count = if h.count > 0 { h.count as usize } else { h.players };
+            let max = if h.max > 0 { h.max } else { 2 };
+            let public = h.room == [0u8; 4];
+            let phone = h.room == proto::room_from_key("public-phone")[..4];
+            let access = if public { format!("<span class=ok>🌐 {}</span>", t(l, "public room")) }
+                else if phone { format!("<span class=warn>📱 {}</span>", t(l, "phone room")) }
+                else { format!("<span class=warn>🔒 {}</span>", t(l, "key room")) };
+            let status = if count >= max as usize { format!("<span class=warn>{}</span>", t(l, "full")) }
+                else if count > 1 { format!("<span class=ok>{}</span>", t(l, "open")) }
+                else { format!("<span class=warn>{}</span>", t(l, "waiting")) };
+            search_rows.push_str(&format!(
+                "<tr><td>{}</td><td>{} / {}</td><td>{}</td><td>{}</td></tr>",
+                h.link_proto, count, max, access, status
+            ));
+        }
+        let search_block = if search_rows.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<h2>{}</h2><table><tr><th>Link</th><th>{}</th><th>{}</th><th>{}</th></tr>{}</table>",
+                t(l, "hunter searches"), t(l, "players"), t(l, "access"), t(l, "status"), search_rows
+            )
+        };
         let body = format!(
             r#"<div class=stats>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div><div class=stat><b>{}</b>{}</div>
 <div class=stat><b>{}</b>{}</div></div>
 <table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>{rows}</table>
+{}
 <p style="color:#9a8a76">{}</p>"#,
-            v.hubs.len(), t(l, "hubs"), v.players, t(l, "players"),
-            v.conns, t(l, "connections"), uptime(v.uptime), t(l, "uptime"), traffic(v.bytes), t(l, "traffic"),
+            rooms.len(), t(l, "hubs"), v.players, t(l, "players"),
+            searches.len(), t(l, "hunter searches"), v.conns, t(l, "connections"), uptime(v.uptime), t(l, "uptime"),
             t(l, "room name"), t(l, "players"), t(l, "quest"), t(l, "password"), t(l, "access"), t(l, "status"),
-            t(l, "refresh")
+            search_block, t(l, "refresh")
         );
         layout(l, "hubs", &body, false)
     }
@@ -652,7 +675,8 @@ impl Web {
 
     fn api(&self) -> String {
         let v = self.view();
-        let mut hubs = Vec::new();
+        let mut rooms = Vec::new();
+        let mut searches = Vec::new();
         for h in &v.hubs {
             let names = h.names.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
             let q = crate::quests::get(h.quest_id);
@@ -660,7 +684,7 @@ impl Web {
             let quest_goal = q.map(|q| json_str(&q.goal)).unwrap_or_else(|| "null".into());
             let quest_rank = q.map(|q| json_str(&q.rank)).unwrap_or_else(|| "null".into());
             let quest_stars = q.map(|q| q.stars.to_string()).unwrap_or_else(|| "null".into());
-            hubs.push(format!(
+            let item = format!(
                 r#"{{"id":"{:#x}","players":{},"link":{},"age":{},"locked":{},"access":"{}","room_name":{},"names":[{}],"count":{},"max":{},"quest_id":{},"quest_name":{},"quest_goal":{},"quest_rank":{},"quest_stars":{},"in_quest":{},"passcode":{},"hunter_search":{},"full":{}}}"#,
                 h.id, h.players, h.link_proto, h.age, h.room != [0u8; 4],
                 if h.room == [0u8; 4] { "public" } else if h.room == proto::room_from_key("public-phone")[..4] { "phone" } else { "key" },
@@ -668,7 +692,8 @@ impl Web {
                 quest_name, quest_goal, quest_rank, quest_stars, h.in_quest,
                 h.passcode.map(|p| p.to_string()).unwrap_or_else(|| "null".into()), h.hunter_search,
                 h.count > 0 && h.count >= h.max
-            ));
+            );
+            if h.hunter_search { searches.push(item); } else { rooms.push(item); }
         }
         let mut candidates = Vec::new();
         for c in &v.candidates {
@@ -687,11 +712,12 @@ impl Web {
             ));
         }
         format!(
-            r#"{{"uptime":{},"conns":{},"players":{},"hubs":[{}],"peers":[{}],"candidates":[{}],"federated_joins":{},"federated_bytes":{},"federated_presence":{}}}"#,
+            r#"{{"uptime":{},"conns":{},"players":{},"hubs":[{}],"hunter_searches":[{}],"peers":[{}],"candidates":[{}],"federated_joins":{},"federated_bytes":{},"federated_presence":{}}}"#,
             v.uptime,
             v.conns,
             v.players,
-            hubs.join(","),
+            rooms.join(","),
+            searches.join(","),
             peers.join(","),
             candidates.join(","),
             v.fed_joins,
