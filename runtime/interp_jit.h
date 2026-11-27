@@ -47,6 +47,8 @@ void jit_mem_free(void *base, size_t n, void *rf);
 #define JO_TLINK 160  // link out of an interpreter op the block called
 #define JO_END   164
 _Static_assert(offsetof(Cpu, _pad) == 128 && sizeof(((Cpu *)0)->_pad) >= JO_END - 128, "jit fields");
+// dispatch.c keeps its per-thread cache and hook bypass in _pad offsets 48 and 56: after these fields.
+_Static_assert(JO_END - 128 <= 40, "JIT fields before dispatch's _pad offsets");
 #define JF(c, o) (*(uint32_t *)((uint8_t *)(c) + (o)))
 
 #define JIT_ARENA (8u << 20)

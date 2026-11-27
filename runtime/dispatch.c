@@ -216,7 +216,8 @@ static int nhooks, ntramps;
 static pthread_mutex_t hook_lock = PTHREAD_MUTEX_INITIALIZER;
 // The next entry of this function runs it (the hook's original). Kept in the Cpu's spare bytes, not in a __thread
 // variable (emulated TLS on Android 9): each guest thread has its own Cpu.
-#define CPU_BYPASS 8
+#define CPU_BYPASS 48  // (_pad offset: 0..39 are the JIT's own fields, interp_jit.h JO_RET..JO_END)
+_Static_assert(CPU_BYPASS >= 40 && CPU_BYPASS + 4 <= 128, "hook bypass clear of JIT fields");
 static inline uint32_t hook_bypass(const Cpu *c) { uint32_t v; memcpy(&v, c->_pad + CPU_BYPASS, 4); return v; }
 static inline void set_hook_bypass(Cpu *c, uint32_t v) { memcpy(c->_pad + CPU_BYPASS, &v, 4); }
 
@@ -379,7 +380,8 @@ static void interp_entry(Cpu *c) { interp_run(c); }
 // cache is only the fallback for a Cpu that has none.
 #define DCACHE 4096
 typedef struct { uint32_t addr; GuestFn fn; } DEntry;
-#define CPU_DCACHE 0  // _pad offset: this thread's cache (DEntry *); CPU_BYPASS (above) is at 8
+#define CPU_DCACHE 56  // _pad offset: this thread's cache (DEntry *); CPU_BYPASS (above) is at 48
+_Static_assert(CPU_DCACHE >= 40 && CPU_DCACHE + (int)sizeof(DEntry *) <= 128, "dispatch cache clear of JIT fields");
 static __thread DEntry dcache_tls[DCACHE];
 static __attribute__((noinline)) DEntry *dc_tls(void) { return dcache_tls; }
 static inline DEntry *dc_of(Cpu *c) {
