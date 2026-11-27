@@ -1,4 +1,4 @@
 MHGU Relink 0.3.4 · 2026-11-27
 
-2026-11-27: Pause binding, logs and hub settings
-Pause/Suspend now has a settings-menu binding row. Hub host failures log the address, session-code state, error kind and text. The Rust hub accepts -settings FILE and reloads min-proto, max-proto, link-pool and separate-phones on SIGHUP.
+2026-11-27: upstream sync rebuild
+Deviant quests count for all who clear them. The MHXX bottom screen runs on a second display; JIT for interpreted code; automatic save backups; exit codes; anisotropic filtering; audio output device; menu mouse and title Back switches; window place memory; updater Update only and in-menu release notes. High-frame-rate fixes for Steam Deck input, RADV shadows and Pierce critical distance.
