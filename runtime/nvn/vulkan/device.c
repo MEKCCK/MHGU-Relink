@@ -189,7 +189,10 @@ static void pick_device(void) {
         if ((int)i == want) score = 100;
         if (score > best_score) { best_score = score; best = (int)i; }
     }
-    if (best < 0) FATAL("no Vulkan 1.1 device\n");
+    if (best < 0) {
+        rt_blame(EXIT_CANT_START);
+        FATAL("no Vulkan 1.1 device\n");
+    }
     g_vk.phys = pd[best];
     free(pd);
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);

@@ -14,6 +14,7 @@
 - **双屏下屏**（`aeea702`、`1b35a88`、`d736388`、`4f07235`、`1b90f93`、`3924696`）：Android 第二屏（`DualScreen.java` + Presentation）与 PC 第二显示器窗口；MHXX 风格面板（道具栏、地图、狩技、目标、状态、随从猫、方向键），触摸映射到动作层；`[Dual Screen] SecondDisplay / Panels / Background / Wallpaper`。无第二屏时设置项置灰。
 - **高帧率修复**：Steam Deck 设置菜单被屏幕键盘抢手柄（`e930992`）；RADV 深度 pass 多边形偏移处加屏障，修复地形/贴花黑闪（`535f5c9`，`MHGU_VK_BIAS_SYNC`）；贯通弹会心距离按 Switch 的 age 网格判定（`f29581c`，已在前次补入）。
 - **其他**：`HubHP` 默认值改为 1.5（`c2e6676`）；调试 `MHGU_START_AREA`（`555f067`）与 `MHGU_SUMMON_KEEPHP` / `MHGU_SUMMON_STICK`（`1438f38`）。
+- **同步审查修复**：双屏触摸先进入动作层再 `act_update`（`d736388`）；各向异性只作用于 3D 绘制，HUD/菜单/加载画面保持游戏原设置（`8223622`）；更新说明兼容 `v0.3.4` 标签；更新器补上 `1e88289` 的重试复位、`--update-no-launch` 自动关闭与左方向键；无 Vulkan 1.1 设备退出码 30；JIT 基本块入口写 `g_ip_pc`，崩溃归因不再误报移植层。
 
 ## 0.3.4（2026-11-27）
 

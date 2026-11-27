@@ -964,6 +964,8 @@ const std::string &changelog() {
             std::string version = all.substr(0, nl);
             if (!version.empty() && version.back() == '\r')
                 version.pop_back();
+            if (!version.empty() && (version[0] == 'v' || version[0] == 'V'))
+                version.erase(0, 1);  // (this fork's release tags are v-prefixed)
             if (nl != std::string::npos && version == MHGU_VERSION)
                 notes = all.substr(nl + 1);
         }

@@ -767,7 +767,7 @@ static void jit_emit_block(J *j, const Op *ops, const uint32_t *mem, uint32_t n)
         }
     }
     if (stats_on > 0) alu_mi64(e, X_ADD, FL(JO_INSNS), n);
-    if (!j->test) mov_mi(e, MB(R13, 0), pc);
+    if (!j->test) mov_mi(e, MB(R14, 0), pc), mov_mi(e, MB(R13, 0), pc);
     for (uint32_t i = 0; i < n; i++) emit_insn(j, &ops[i], pc + 4 * i, i + 1 == n);
     exit_direct(j, pc + 4 * n, 0, pc + 4 * (n - 1));
     if (!j->test) {  // changed: rebuild (edx: this entry, to send its callers on to the new block)

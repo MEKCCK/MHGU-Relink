@@ -763,7 +763,7 @@ static void jit_emit_block(J *j, const Op *ops, const uint32_t *mem, uint32_t n)
         addsub_i(e, 0, 0, 1, 16, 16, n, 0);
         ldst(e, M_STRX, 16, XC, JO_INSNS);
     }
-    if (!j->test) mov_w(e, 16, pc), ldst(e, M_STRW, 16, XIPL, 0);
+    if (!j->test) mov_w(e, 16, pc), ldst(e, M_STRW, 16, XIP, 0), ldst(e, M_STRW, 16, XIPL, 0);
     for (uint32_t i = 0; i < n; i++) emit_insn(j, &ops[i], pc + 4 * i, i + 1 == n);
     exit_direct(j, pc + 4 * n, 0, pc + 4 * (n - 1));
     if (!j->test) {

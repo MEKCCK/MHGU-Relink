@@ -1554,10 +1554,14 @@ void host_input_update(void) {
         else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(BTN_B));
     }
+#ifdef MHGU_DUAL_SCREEN
+    if (g_bottom_hud_on) {  // (the bottom screen's touch: bottom_hud.c)
+        uint64_t untouched = b;
+        bottom_hud_touch_input(&b, &rx, &ry);
+        script_b |= b & ~untouched;  // (its presses have no key behind them: the actions take them as scripted input)
+    }
+#endif
     // Touch buttons have no physical source; carry them through action rebinding after the input suppressions.
     b = act_update(b, script_b | (touch_b & b), menu || (typing && !chat_active()), mix_cancel);
-#ifdef MHGU_DUAL_SCREEN
-    if (g_bottom_hud_on) bottom_hud_touch_input(&b, &rx, &ry);  // (the bottom screen's touch: bottom_hud.c)
-#endif
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }
