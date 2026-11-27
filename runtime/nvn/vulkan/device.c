@@ -21,6 +21,10 @@
 #include "../../engine_module.h"
 #include "../../overlay.h"
 #include "fsr.h"
+#ifdef MHGU_DUAL_SCREEN
+#include "bottom_hud.h"
+#include "second_display.h"
+#endif
 #include "fsr4.h"
 #include "hdr.h"
 #include "vk.h"
@@ -138,7 +142,10 @@ static void create_instance(void) {
         validate = false;
         r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     }
-    if (r != VK_SUCCESS) FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
+    if (r != VK_SUCCESS) {
+        rt_blame(EXIT_CANT_START);
+        FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
+    }
 #ifdef __ANDROID__
     volkLoadInstance(g_vk.inst);  // (through the instance, as the library's own exports go; the device's are not bypassed)
 #endif
@@ -164,7 +171,10 @@ static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name) {
 static void pick_device(void) {
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(g_vk.inst, &n, NULL);
-    if (!n) FATAL("no Vulkan device\n");
+    if (!n) {
+        rt_blame(EXIT_CANT_START);
+        FATAL("no Vulkan device\n");
+    }
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     vkEnumeratePhysicalDevices(g_vk.inst, &n, pd);
     int want = getenv("MHGU_GPU") ? atoi(getenv("MHGU_GPU")) : -1, best = -1, best_score = -1;
@@ -265,6 +275,17 @@ static void create_device(void) {
     }
 #endif
     if (getenv("MHGU_VK_NO_POLL")) g_vk.no_poll = atoi(getenv("MHGU_VK_NO_POLL")) != 0;
+    // RADV (Mesa's AMD driver: the Steam Deck): the draws of a depth-only pass (shadow cascades, depth pre-pass) overlap
+    // where the polygon offset changes between them, and a shadow cascade at a time came out wrong: terrain and its
+    // decals flickering black (Deserted Island area 6, exec.c draw). MHGU_VK_BIAS_SYNC=1 / 0 turns it on / off anywhere.
+    if (g_vk.api12) {
+        VkPhysicalDeviceDriverProperties drv = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 drv_p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &drv};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &drv_p2);
+        g_vk.bias_sync = drv.driverID == VK_DRIVER_ID_MESA_RADV;
+    }
+    if (getenv("MHGU_VK_BIAS_SYNC")) g_vk.bias_sync = atoi(getenv("MHGU_VK_BIAS_SYNC")) != 0;
+    if (g_vk.bias_sync) LOG("[vk] depth-only passes: a barrier where the polygon offset changes (RADV)\n");
     if (g_vk.no_poll) {
         g_vk.has_timeline = false;  // (the fence thread waits for them: no status poll reaches the driver)
         LOG("[vk] no completion checks: a fence per submission, waited for by a thread of its own\n");
@@ -303,6 +324,7 @@ static void create_device(void) {
     b->logicOp = h->logicOp;
     b->fillModeNonSolid = h->fillModeNonSolid;
     b->samplerAnisotropy = h->samplerAnisotropy;
+    g_vk.max_aniso = h->samplerAnisotropy ? fmaxf(1, g_vk.props.limits.maxSamplerAnisotropy) : 1;
     b->textureCompressionBC = g_vk.bc = h->textureCompressionBC && !(getenv("MHGU_NO_BC") && atoi(getenv("MHGU_NO_BC")));
     b->textureCompressionASTC_LDR = h->textureCompressionASTC_LDR;
     b->shaderInt64 = !maxwell_no_int64;
@@ -1223,7 +1245,7 @@ static void exit_handler(void) {
     engine_modules_shutdown();  // (its own atexit handler was registered before this one, so it would never run)
     fflush(stdout);
     fflush(stderr);
-    _exit(0);
+    _exit(rt_exit_status());  // (rt_exit's code: exit()'s own status never reaches here)
 }
 
 void backend_init(void) {
@@ -1245,6 +1267,11 @@ void backend_init(void) {
     vk_shaders_init();
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
+#ifdef MHGU_DUAL_SCREEN
+    // ([Dual Screen] SecondDisplay: the bottom screen on Android's second display, second_display_android.c; or, test,
+    // MHGU_BOTTOM_HUD_TEST: its picture saved in shots/ without one)
+    if (!bottom_hud_test_init()) second_display_apply();
+#endif
     atexit(exit_handler);
     SDL_SetAtomicInt(&vk_up, 1);
 }

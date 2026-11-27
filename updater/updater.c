@@ -250,6 +250,8 @@ enum { ST_CHECKING, ST_ASK, ST_DOWNLOADING, ST_INSTALLING, ST_DONE, ST_FAILED, S
 static SDL_AtomicInt state, answer, cancel, kb_done, kb_total;  // answer: 1 update, 2 not now
 static char latest[64], failure[300];
 static bool no_launch;  // (the game is running: don't start another)
+static bool launch_game = true;  // false: --update-no-launch, or the player chose "Update only"
+static bool ask_launch;          // the question offers "Update & launch" and "Update only" (not with --update-no-launch)
 static bool closed;
 static char part[1100], part_tag[64];  // the checked download, kept when the game stopped the install
 static bool part_ready;
@@ -460,6 +462,63 @@ static const Asset *pick_asset(const Release *r) {
     return best;
 }
 
+// The installed release's notes for the game's settings menu (Application: What's new, runtime/settings_panel.cpp):
+// update/changelog.txt, the version on its first line, then the notes as plain text up to "## Installation". The
+// release title (a "# " heading), the pre-release line, ** and ` marks are left out; "* " bullets become "- ". Only an
+// install writes it, from the release JSON it was installed from (update/latest.json).
+static void save_changelog(const char *tag) {
+    char p[1100];
+    size_t n;
+    path(p, sizeof p, "update/latest.json");
+    char *json = SDL_LoadFile(p, &n);
+    char *body = json ? json_body(json, n) : NULL;
+    SDL_free(json);
+    path(p, sizeof p, "update/changelog.txt");
+    char *out = body ? malloc(strlen(tag) + strlen(body) + 3) : NULL;
+    if (!out) {
+        free(body);
+        SDL_RemovePath(p);  // (an older version's: not this one's)
+        ulog("[update] the release has no notes\n");
+        return;
+    }
+    char *o = out + sprintf(out, "%s\n", tag), *notes = o;
+    for (char *line = body, *next; line; line = next) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = 0;
+        next = nl ? nl + 1 : NULL;
+        size_t len = strlen(line);
+        while (len && (line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = 0;
+        if (!strncmp(line, "## Installation", 15)) break;
+        if (!strncmp(line, "**This is a pre-release", 23) || !strncmp(line, "# ", 2)) continue;
+        const char *s = line;
+        if (*s == '#') {  // ("## Fixes": its words)
+            while (*s == '#') s++;
+            while (*s == ' ') s++;
+        }
+        if (!*s && (o == notes || (o - notes >= 2 && o[-1] == '\n' && o[-2] == '\n'))) continue;  // (one blank line at most)
+        const char *t = s;
+        while (*t == ' ' || *t == '\t') t++;
+        bool star_bullet = t[0] == '*' && t[1] == ' ';
+        for (const char *c = s; *c; c++) {
+            if (c == t && star_bullet) *o++ = '-';
+            else if (*c != '`' && *c != '*') *o++ = *c;
+        }
+        *o++ = '\n';
+    }
+    free(body);
+    while (o > notes && o[-1] == '\n') o--;
+    if (o == notes) {
+        free(out);
+        SDL_RemovePath(p);
+        ulog("[update] the release has no notes\n");
+        return;
+    }
+    *o++ = '\n';
+    if (SDL_SaveFile(p, out, (size_t)(o - out))) ulog("[update] release notes saved: update/changelog.txt\n");
+    else ulog("[update] can't save the release notes: %s\n", SDL_GetError());
+    free(out);
+}
+
 static int SDLCALL worker(void *arg) {
     (void)arg;
     no_launch = false;
@@ -582,6 +641,7 @@ static int SDLCALL worker(void *arg) {
     char bak[1100];
     path(bak, sizeof bak, "update/backup");
     rm_tree(bak);  // (Windows keeps the running updater's own files: they go at the next start)
+    save_changelog(latest);
     ulog("[update] updated to %s\n", latest);
     set_state(ST_DONE);
     return 0;
@@ -617,9 +677,17 @@ static float wrap(SDL_Renderer *rd, float x, float y, const char *s, int cols) {
     return y;
 }
 
-static SDL_FRect button_rect(int i, int n) {
-    float w = 200, gap = 24, x0 = (W - (n * w + (n - 1) * gap)) / 2;
-    return (SDL_FRect){x0 + i * (w + gap), H - 70, w, 44};
+// (each as wide as its label needs, 200 at least: "Update & launch" doesn't fit 200)
+static float button_w(const Button *b) {
+    float w = 16.0f * (float)strlen(b->label) + 32;
+    return w < 200 ? 200 : w;
+}
+static SDL_FRect button_rect(const Button *b, int i, int n) {
+    float gap = n > 2 ? 16 : 24, total = (n - 1) * gap;
+    for (int k = 0; k < n; k++) total += button_w(&b[k]);
+    float x = (W - total) / 2;
+    for (int k = 0; k < i; k++) x += button_w(&b[k]) + gap;
+    return (SDL_FRect){x, H - 70, button_w(&b[i]), 44};
 }
 
 static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
@@ -641,7 +709,10 @@ static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
                  SDL_GetAtomicInt(&kb_total) / 1024.0);
         break;
     case ST_INSTALLING: snprintf(msg, sizeof msg, "Installing %s...", latest); break;
-    case ST_DONE: snprintf(msg, sizeof msg, "Updated to %s. Starting the game...", latest); break;
+    case ST_DONE:
+        if (launch_game) snprintf(msg, sizeof msg, "Updated to %s. Starting the game...", latest);
+        else snprintf(msg, sizeof msg, "Updated to %s.", latest);
+        break;
     case ST_FAILED: snprintf(msg, sizeof msg, "The update was not installed: %s", failure); break;
     default: msg[0] = 0;
     }
@@ -657,7 +728,7 @@ static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
         SDL_RenderFillRect(rd, &fill);
     }
     for (int i = 0; i < nb; i++) {
-        SDL_FRect r = button_rect(i, nb);
+        SDL_FRect r = button_rect(b, i, nb);
         if (i == sel) SDL_SetRenderDrawColor(rd, 240, 180, 60, 255);
         else SDL_SetRenderDrawColor(rd, 60, 64, 76, 255);
         SDL_RenderFillRect(rd, &r);
@@ -672,11 +743,19 @@ static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
 static int buttons(int st, Button *b) {
     switch (st) {
     case ST_CHECKING: b[0] = (Button){"Skip", 2}; return 1;
-    case ST_ASK: b[0] = (Button){"Update", 1}, b[1] = (Button){"Not now", 2}; return 2;
+    case ST_ASK:
+        if (!ask_launch) { b[0] = (Button){"Update", 1}, b[1] = (Button){"Not now", 2}; return 2; }
+        b[0] = (Button){"Update & launch", 1}, b[1] = (Button){"Update only", 5}, b[2] = (Button){"Not now", 2};
+        return 3;
     case ST_DOWNLOADING: b[0] = (Button){"Cancel", 2}; return 1;
+    case ST_DONE:
+        if (launch_game) return 0;  // (it starts the game by itself)
+        b[0] = (Button){"Close", 3};
+        return 1;
     case ST_FAILED:
         b[0] = (Button){"Try again", 4};
-        b[1] = no_launch ? (Button){"Close", 3} : (Button){"Start game", 3};  // (the game runs: not another one)
+        // (the game runs: not another one; or the player asked for no game)
+        b[1] = no_launch || !launch_game ? (Button){"Close", 3} : (Button){"Start game", 3};
         return 2;
     default: return 0;
     }
@@ -684,7 +763,12 @@ static int buttons(int st, Button *b) {
 
 // a button's action: 0 go on, 1 leave the window
 static int act(int st, int action) {
-    if (st == ST_ASK) { SDL_SetAtomicInt(&answer, action); return 0; }
+    if (st == ST_ASK) {
+        if (action == 5) launch_game = false, action = 1;  // (update only: the same install, no game after it)
+        SDL_SetAtomicInt(&answer, action);
+        return 0;
+    }
+    if (st == ST_DONE) return 1;
     if (st == ST_CHECKING && action == 2) return 1;  // (the check goes on unheard: its answer no longer matters)
     if (st == ST_DOWNLOADING && action == 2) { SDL_SetAtomicInt(&cancel, 1); return 0; }
     if (st == ST_FAILED && action == 4) return 0;  // (run_window runs the worker again)
@@ -734,7 +818,7 @@ static bool run_window(SDL_Thread *th) {
         int st = SDL_GetAtomicInt(&state);
         if (st != last) last = st, state_at = SDL_GetTicks(), sel = 0;
         if (st == ST_LAUNCH) break;
-        if (st == ST_DONE && SDL_GetTicks() - state_at > 1500) break;
+        if (st == ST_DONE && launch_game && SDL_GetTicks() - state_at > 1500) break;  // (else: Close)
         if (!rd) {
             if (st == ST_FAILED || st == ST_DONE) break;
             SDL_Delay(50);
@@ -742,7 +826,7 @@ static bool run_window(SDL_Thread *th) {
         }
         // shown when there is something to say: not for a quick "up to date"
         if (!shown && (st != ST_CHECKING || SDL_GetTicks() - start > 700)) SDL_ShowWindow(win), shown = true;
-        Button b[2];
+        Button b[3];
         int nb = buttons(st, b), action = 0;
         if (sel >= nb) sel = 0;
         SDL_Event e;
@@ -764,7 +848,7 @@ static bool run_window(SDL_Thread *th) {
                 SDL_FPoint m = {e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.x : e.button.x,
                                 e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.y : e.button.y};
                 for (int i = 0; i < nb; i++) {
-                    SDL_FRect r = button_rect(i, nb);
+                    SDL_FRect r = button_rect(b, i, nb);
                     if (SDL_PointInRectFloat(&m, &r)) {
                         sel = i;
                         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) action = b[i].action;
@@ -867,12 +951,12 @@ static int launch(int argc, char **argv) {
 int main(int argc, char **argv) {
     char **pass = calloc((size_t)argc + 1, sizeof *pass);
     int npass = 0;
-    bool launch_game = true;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--update-force")) force = true;
         else if (!strcmp(argv[i], "--update-no-launch")) launch_game = false;
         else pass[npass++] = argv[i];
     }
+    ask_launch = launch_game;
     lock = SDL_CreateMutex();
     const char *base = SDL_GetBasePath();
     if (!base) return 1;

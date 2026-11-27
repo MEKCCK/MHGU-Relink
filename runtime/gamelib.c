@@ -51,7 +51,7 @@ static void check_cpu(const char *path, const uint32_t *needs) {
         snprintf(msg, sizeof msg, "This PC's processor lacks features the game was built for (missing: %s). The game "
                  "can't run on this processor.", list);
     plat_error_box(msg);
-    exit(1);
+    rt_exit(EXIT_CANT_START);
 #else
     (void)path, (void)needs;
 #endif

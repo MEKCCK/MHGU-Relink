@@ -39,7 +39,7 @@ extern "C" bool vk_low_memory_device(void);  // (nvn/vulkan/textures.c)
 
 namespace {
 enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, TouchButtons, TouchTemplates, TemplateDetail, TemplateChanges, TemplateOverwrite, ComboEdit, TouchIcons, TouchIconEdit,
-                  PadList, PadMap };
+                  PadList, PadMap, Changelog };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -47,6 +47,7 @@ struct Row {
     bool enabled = true, cold = false, action = false, warn = false;
     bool header = false, current = false;  // a section title (not a row to select); the choice a dropdown has now
     bool menu = false;                     // Confirm opens a dropdown of its choices
+    int pair = 0;                          // one of two buttons side by side on one line (button_pair): 1 the left, 2 the right
     int toggle = -1;                       // On / Off (1 / 0; -1: not a switch): the phone draws a switch
     bool number = false;                   // a number: left / right step it (the phone: - and + buttons on the row)
     std::function<void(int)> adjust;
@@ -551,6 +552,9 @@ bool equal(const Config &a, const Config &b) {
     SAME(vsync);
     SAME(shader_prewarm);
     SAME(draw_distance);
+    SAME(second_display);
+    SAME(bottom_background);
+    SAME(aniso);
     SAME(smooth_gradients);
     SAME(fix_kerning);
     SAME(bold_text);
@@ -600,6 +604,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_invert_y);
     SAME(mouse_smoothing);
     SAME(mouse_capture);
+    SAME(menu_mouse);
     SAME(aspect_ratio);
     SAME(fov);
     SAME(ui_anchor);
@@ -627,11 +632,15 @@ bool equal(const Config &a, const Config &b) {
     SAME(confirm_exit);
     SAME(show_fps);
     SAME(menu_chord);
+    SAME(title_back_exit);
     SAME(show_battery);
     SAME(updates);
+    SAME(backups_on);
+    SAME(save_backups);
     SAME(hp.village);
     SAME(hp.quests);
     SAME(share_urgent);
+    SAME(share_deviant);
     SAME(ldn_friend_requests);
     SAME(ldn_friend_online_notices);
     SAME(ldn_friend_hub_notices);
@@ -650,7 +659,10 @@ bool equal(const Config &a, const Config &b) {
         strcmp(a.ryu_servers, b.ryu_servers) || strcmp(a.ryu_password, b.ryu_password) ||
         strcmp(a.room_server, b.room_server) ||
         strcmp(a.room_name, b.room_name) || strcmp(a.room_password, b.room_password) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) ||
+        strcmp(a.backup_location, b.backup_location) || strcmp(a.game_dir, b.game_dir) ||
+        strcmp(a.bottom_panels, b.bottom_panels) || strcmp(a.bottom_wallpaper, b.bottom_wallpaper) ||
+        strcmp(a.audio_device, b.audio_device))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -926,6 +938,37 @@ void action(std::vector<Row> &rows, const std::string &id, const std::string &na
     r.activate = std::move(fn);
     r.enabled = enabled;
     rows.push_back(std::move(r));
+}
+// Two buttons side by side on one line: left / right move between them, up / down leave the line
+void button_pair(std::vector<Row> &rows, const std::string &id, const std::string &left, std::function<void()> a,
+                 const std::string &right, std::function<void()> b, const std::string &help) {
+    action(rows, id + ".1", left, std::move(a));
+    rows.back().pair = 1, rows.back().help = help;
+    action(rows, id + ".2", right, std::move(b));
+    rows.back().pair = 2, rows.back().help = help;
+}
+// This version's release notes (Application: What's new): update/changelog.txt, which the updater writes when it installs
+// a release (updater/updater.c save_changelog), as plain text after the version on its first line. Empty: there are
+// none, or they are another version's (a release installed by hand). Read once: only the updater changes the file.
+const std::string &changelog() {
+    static std::string notes;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        size_t n = 0;
+        char *data = (char *)SDL_LoadFile("update/changelog.txt", &n);
+        if (data) {
+            std::string all(data, n);
+            SDL_free(data);
+            size_t nl = all.find('\n');
+            std::string version = all.substr(0, nl);
+            if (!version.empty() && version.back() == '\r')
+                version.pop_back();
+            if (nl != std::string::npos && version == MHGU_VERSION)
+                notes = all.substr(nl + 1);
+        }
+    }
+    return notes;
 }
 void refresh_touch_templates() {
     for (int i = 0; i < TOUCH_TEMPLATE_COUNT; i++) {
@@ -2128,6 +2171,11 @@ void reset_section() {
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
         c.draw_distance = f.draw_distance;
+        c.second_display = f.second_display;
+        c.bottom_background = f.bottom_background;
+        SDL_strlcpy(c.bottom_panels, f.bottom_panels, sizeof c.bottom_panels);
+        SDL_strlcpy(c.bottom_wallpaper, f.bottom_wallpaper, sizeof c.bottom_wallpaper);
+        c.aniso = f.aniso;
         c.smooth_gradients = f.smooth_gradients;
         c.fix_kerning = f.fix_kerning;
         c.bold_text = f.bold_text;
@@ -2156,6 +2204,7 @@ void reset_section() {
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         c.audio_output = f.audio_output;
+        SDL_strlcpy(c.audio_device, f.audio_device, sizeof c.audio_device);
         c.voice_mode = f.voice_mode;
         c.mic_volume = f.mic_volume;
         c.voice_volume = f.voice_volume;
@@ -2173,6 +2222,7 @@ void reset_section() {
         c.mouse_invert_y = f.mouse_invert_y;
         c.mouse_smoothing = f.mouse_smoothing;
         c.mouse_capture = f.mouse_capture;
+        c.menu_mouse = f.menu_mouse;
         c.touch_controls = f.touch_controls;
         c.touch_hud = f.touch_hud;
         c.touch_auto_r = f.touch_auto_r;
@@ -2217,6 +2267,7 @@ void reset_section() {
         c.quest_hold_send = f.quest_hold_send;
         c.quest_hold_send = f.quest_hold_send;
         c.share_urgent = f.share_urgent;
+        c.share_deviant = f.share_deviant;
         c.hp = f.hp;
         quest_keys();
         break;
@@ -2235,12 +2286,16 @@ void reset_section() {
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
         SDL_strlcpy(c.save_location, f.save_location, sizeof c.save_location);
+        c.backups_on = f.backups_on;
+        c.save_backups = f.save_backups;
+        SDL_strlcpy(c.backup_location, f.backup_location, sizeof c.backup_location);
         c.confirm_exit = f.confirm_exit;
         c.pause_background = f.pause_background;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
         c.menu_confirm = f.menu_confirm;
         c.menu_chord = f.menu_chord;
+        c.title_back_exit = f.title_back_exit;
         break;
     }
     pop();
@@ -2485,6 +2540,26 @@ void aspect_rows(std::vector<Row> &r) {
         number(r, "aspect", tr("Custom aspect ratio"), &c.aspect_ratio, lo("AspectRatio"), hi("AspectRatio"), .05f, ini("AspectRatio"));
     }
 }
+// The playback devices plugged in now, by the names [Audio] Device keeps (looked up once a second: the rows are
+// rebuilt every frame). Left out: a name the file couldn't hold or read back.
+std::vector<std::string> playback_devices() {
+    static std::vector<std::string> list;
+    static Uint64 when;
+    if (when && SDL_GetTicks() - when < 1000)
+        return list;
+    when = SDL_GetTicks();
+    list.clear();
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);  // (none before the game opens its audio)
+    for (int i = 0; ids && i < n; ++i) {
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        if (name && *name && strlen(name) < sizeof s.draft.audio_device && !strpbrk(name, "\r\n;#") &&
+            SDL_strcasecmp(name, "Default") && std::find(list.begin(), list.end(), name) == list.end())
+            list.push_back(name);
+    }
+    SDL_free(ids);
+    return list;
+}
 std::vector<Row> main_rows() {
     std::vector<Row> r;
     Config &c = s.draft;
@@ -2528,6 +2603,18 @@ std::vector<Row> main_rows() {
             }
 #endif
             add_bool(r, "fill", "Fill the screen", &c.fill_screen, ini("FillScreen"));
+#ifdef MHGU_DUAL_SCREEN
+            add_bool(r, "second.display", "Second display", &c.second_display, ini("SecondDisplay"));
+            r.back().enabled = config_second_display_available() != 0;
+            r.back().help = tr("MHXX's bottom screen on a second display: the item bar, map, Hunter Arts, target, status, Palico and D-pad panels leave the main screen and are drawn there, where touching them works as MHXX's panels do. Off, or greyed out when the device has no second display.");
+            text(r, "second.panels", tr("Bottom screen panels"), c.bottom_panels, sizeof c.bottom_panels, c.bottom_panels, ini("Panels"));
+            r.back().help = tr("The bottom screen's panels, as MHXX's Panel Customize places them on its 4 x 3 grid: name@column,row. arts3v 2x3, arts3h 4x1, map 2x2, itembar 2x1, status 4x1, palico 4x1, target 2x1, dpad 2x2.");
+            add_choice(r, "second.background", tr("Bottom screen background"), c.bottom_background, {tr("Wallpaper"), tr("Dark"), tr("Black")},
+                       [](int v) { c.bottom_background = v; }, ini("Background"));
+            text(r, "second.wallpaper", tr("Wallpaper"), c.bottom_wallpaper, sizeof c.bottom_wallpaper,
+                 *c.bottom_wallpaper ? c.bottom_wallpaper : tr("Each in turn"), ini("Wallpaper"));
+            r.back().help = tr("A 24-bit BMP in the wallpapers folder beside the game, scaled to cover the screen. Empty: each BMP there in turn, 30 seconds each.");
+#endif
         }
         if (s.section == 2) {  // 3D Picture
 #ifndef __ANDROID__
@@ -2722,6 +2809,13 @@ std::vector<Row> main_rows() {
                ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
+        add_choice(r, "aniso", "Anisotropic filtering",
+                   c.aniso >= 16  ? 4
+                   : c.aniso >= 8 ? 3
+                   : c.aniso >= 4 ? 2
+                   : c.aniso >= 2 ? 1
+                                  : 0,
+                   {tr("Off"), "2x", "4x", "8x", "16x"}, [](int v) { c.aniso = 1 << v; }, ini("AnisotropicFiltering"));
         }
         if (s.section == 3) {  // Effects
         add_bool(r, "shadows", "Shadows", &c.shadows, ini("ShadowsOn"));
@@ -2782,6 +2876,26 @@ std::vector<Row> main_rows() {
         add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
                    [](int v) { c.audio_output = v; }, ini("Output"));
         r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
+        {  // [Audio] Device: Default, the devices plugged in now, and the chosen one also while it isn't
+            std::vector<std::string> devs = playback_devices();
+            const char *now = SDL_GetAudioDeviceName(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK);
+            std::vector<std::string> names{now && *now ? std::string(tr("Default")) + " (" + now + ")" : tr("Default")};
+            for (const std::string &d : devs)
+                names.push_back(d);
+            int sel = 0;
+            if (*c.audio_device && SDL_strcasecmp(c.audio_device, "Default")) {
+                auto it = std::find(devs.begin(), devs.end(), std::string(c.audio_device));
+                sel = 1 + (int)(it - devs.begin());
+                if (it == devs.end()) {
+                    devs.push_back(c.audio_device);
+                    names.push_back(std::string(c.audio_device) + " (" + tr("not plugged in") + ")");
+                }
+            }
+            add_choice(r, "audio.device", "Device", sel, names,
+                       [devs](int v) { SDL_strlcpy(c.audio_device, v > 0 ? devs[v - 1].c_str() : "", sizeof c.audio_device); },
+                       ini("Device"));
+            r.back().help = tr("Where the game's sound plays. Default follows the system's default device, also when it changes while the game runs. A device chosen here is always used: while it is unplugged there is no sound, and it comes back when the device does.");
+        }
 #endif
         header(r, "voice.header", tr("Voice chat"));
         add_choice(r, "voice.mode", "Voice chat mode", c.voice_mode, {tr("Off"), tr("Always"), tr("Push to talk")},
@@ -2820,6 +2934,8 @@ std::vector<Row> main_rows() {
         number(r, "mouse.y", tr("Vertical sensitivity"), &c.mouse_sensitivity_y, lo("MouseSensitivityY"), hi("MouseSensitivityY"), .05f, ini("MouseSensitivityY"));
         add_bool(r, "mouse.invert", "Invert mouse Y", &c.mouse_invert_y, ini("MouseInvertY"));
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
+        add_bool(r, "mouse.menus", "Mouse in menus", &c.menu_mouse, ini("MenuMouse"));
+        r.back().help = tr("The mouse in the game's menus: the pointer shows, the option under it is selected, a left click picks it and a right click backs out (in towns too: left click talks). Off: as before version 0.17, the mouse only turns the camera, no pointer shows up by itself, and the mouse buttons do what the Keybinds give them everywhere.");
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
@@ -2926,9 +3042,20 @@ std::vector<Row> main_rows() {
         add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
+        add_bool(r, "deviant", "Deviant quests count for all", &c.share_deviant, ini("ShareDeviantCredit"));
         add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
         }
         if (s.section == 2) {  // Monster HP
+            const char *presets =
+                tr("Original: the game's own monster HP for any number of hunters. Rebalanced: HP grows with the number of hunters as in Monster Hunter Rise, with the game's own HP as the 2-hunter value. In a hub, the values of the player who created the hub are used.");
+            button_pair(
+                r, "hp.preset", tr("Original"), []() { std::fill(s.draft.hp.scale, s.draft.hp.scale + 4, 1.f); },
+                tr("Rebalanced"),
+                []() {
+                    const float rise[4] = {.74f, 1.f, 1.26f, 1.48f};
+                    std::copy(rise, rise + 4, s.draft.hp.scale);
+                },
+                presets);
             for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
                    lo("1Player"), hi("1Player"), .05f, ini("1Player"));
@@ -3020,6 +3147,10 @@ std::vector<Row> main_rows() {
 #ifndef __ANDROID__  // (the PC build's updater)
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
+        if (!changelog().empty()) {
+            action(r, "changelog", fmt("What's new in %s", MHGU_VERSION), []() { push(View::Changelog, "changelog.back"); });
+            r.back().help = tr("This version's changes, from its release notes. The updater saved them when it installed this version.");
+        }
 #endif
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
 #ifndef __ANDROID__
@@ -3028,6 +3159,8 @@ std::vector<Row> main_rows() {
                    [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
         add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
         r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
+        add_bool(r, "title.back", "Back on the Main Menu asks to quit", &c.title_back_exit, ini("TitleBackExit"));
+        r.back().help = tr("Pressing Back on the title screen's Main Menu asks whether to quit the game. Turn it off if a mod swaps the menus' Confirm and Back, so that confirming there no longer asks. Closing the window still asks.");
 #endif
         }
         if (s.section == 3) {  // Save Data
@@ -3045,6 +3178,15 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
         action(r, "save.export", tr("Export save"), []() { ui_request_save_export(); });
         r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
+#endif
+        add_bool(r, "backups", "Save backups", &c.backups_on, ini("Backups"));
+        r.back().help = tr("Each time the game saves, a copy of save_0's files goes in a folder named after the date and time. To restore one, close the game and copy its files into save_0. Off: no backups (those made stay).");
+        number(r, "backups.kept", tr("Backups to keep"), &c.save_backups, 1, 100, 1, ini("BackupsKept"));
+        r.back().help = tr("How many backups are kept: past this many, the oldest is deleted.");
+#ifndef __ANDROID__
+        text(r, "backup.location", tr("Backup folder"), c.backup_location, sizeof c.backup_location,
+             *c.backup_location ? c.backup_location : tr("Default folder"), ini("BackupLocation"));
+        r.back().help = tr("The folder the save backups go in. Empty: a backups folder in the save folder, beside save_0. Press Save, then restart the game.");
 #endif
 #ifdef __ANDROID__
         header(r, "files.header", tr("App files"));
@@ -3116,6 +3258,9 @@ bool save() {
         s.error = settings_text(s.draft.language, error);
         return false;
     }
+#ifdef MHGU_DUAL_SCREEN
+    config_second_display_request();  // (the UI thread applies SecondDisplay and its options at its next turn)
+#endif
     if (mods_dirty()) {
         if (!mods_save_order(mods.draft.data(), (int)mods.draft.size(), error, sizeof error)) {
             s.error = settings_text(s.draft.language, error);
@@ -3471,6 +3616,23 @@ std::vector<Row> rows_for_view(bool *open) {
         keybind_rows(r);
     } else if (s.view == View::Actions) {
         action_rows(r);
+    } else if (s.view == View::Changelog) {
+        const std::string &notes = changelog();
+        int line = 0;
+        for (size_t i = 0; i < notes.size();) {
+            size_t j = notes.find('\n', i);
+            if (j == std::string::npos) j = notes.size();
+            std::string text = notes.substr(i, j - i);
+            i = j + 1;
+            while (!text.empty() && (text.back() == '\r' || text.back() == ' ')) text.pop_back();
+            size_t lead = text.find_first_not_of(" \t");
+            if (lead == std::string::npos) continue;
+            text = text.substr(lead);
+            if (text.rfind("- ", 0) == 0) text = "• " + text.substr(2);
+            action(r, "cl." + std::to_string(line++), text, nullptr, false);
+            r.back().enabled = false;
+        }
+        action(r, "changelog.back", tr("Back"), []() { pop(); });
     } else if (s.view == View::KeyCapture && acts().capture >= 0) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
@@ -3760,13 +3922,19 @@ void navigate(std::vector<Row> &rows, bool list = false) {
             return;
         }
     }
+    // (two buttons on one line, button_pair: up / down go past its other button, and come to its left one)
+    bool line = dy && !dx && !pressed(ImGuiKey_Tab, true);
     if (dx)
         delta = dx;
     if (delta) {
+        if (line && ((dy > 0 && it->pair == 1) || (dy < 0 && it->pair == 2)))
+            index += dy;
         int next = std::clamp(index + delta, 0, (int)rows.size() - 1);
         int step = delta > 0 ? 1 : -1;
         while (next >= 0 && next < (int)rows.size() && !rows[next].enabled)
             next += step;
+        if (line && next > 0 && next < (int)rows.size() && rows[next].pair == 2 && rows[next - 1].enabled)
+            --next;
         if (next >= 0 && next < (int)rows.size())
             focus(rows[next].id);
     }
@@ -3928,8 +4096,8 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
         bool key = keyboard_view && i < keys;
         bool grid = key || (touch && keyboard_view);
         int per_line = key ? 10 : 6, column = key ? i : i - keys;
-        float rw = !grid ? width : !touch ? cell : (width - (per_line - 1) * gap) / per_line;
-        if (grid && column % per_line)
+        float rw = r.pair ? (width - gap) / 2 : !grid ? width : !touch ? cell : (width - (per_line - 1) * gap) / per_line;
+        if ((grid && column % per_line) || r.pair == 2)
             ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
         bool stepper = touch && r.number && r.adjust && !grid;
@@ -4028,7 +4196,8 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
         if (r.current)  // (the dropdown's choice now: a bar on its left)
             w->DrawList->AddRectFilled(rect.Min, ImVec2(rect.Min.x + font * .22f, rect.Max.y), t.accent,
                                        t.rounding, ImDrawFlags_RoundCornersLeft);
-        w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .5f, p.y + (h - label.y) * .5f), ink,
+        float label_x = r.pair ? p.x + std::max(font * .5f, (rw - label.x) * .5f) : p.x + font * .5f;  // (a pair's: centred)
+        w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(label_x, p.y + (h - label.y) * .5f), ink,
                              r.title.c_str(), nullptr, wrap);
         float arrow = 0;
         if (r.menu && r.enabled) {  // (Confirm opens a dropdown: an arrow after the value)
@@ -4264,6 +4433,7 @@ std::string view_title() {
                                      : "Press a key or mouse button for: %s (Esc: cancel)",
                      tr(acts().capture_row >= 0 ? act_row(acts().capture_row)->label : act_label(acts().capture)))
            : s.view == View::Actions ? fmt("Game actions: %s", scheme_name(acts().dev))
+           : s.view == View::Changelog ? fmt("What's new in %s", MHGU_VERSION)
            : s.view == View::KeyCapture && s.capture_bind >= 0
                ? fmt("Press a key or mouse button for %s (Esc: cancel)", tr(bind_titles[s.capture_bind]))
                : tr(s.view == View::Exit         ? "Exit game?"

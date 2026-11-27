@@ -27,6 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../exitcode.h"
 #include "../platform.h"
 
 #ifndef MAP_FIXED_NOREPLACE
@@ -268,6 +269,11 @@ bool plat_use_folder(const char *utf8, char *buf, size_t size) {
     return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+bool plat_plain_entry(const char *path, bool dir) {
+    struct stat st;
+    return lstat(path, &st) == 0 && (dir ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+}
+
 static int count_files(const char *dir, int depth) {
     DIR *dd = depth > 32 ? NULL : opendir(dir);
     if (!dd) return 0;
@@ -382,7 +388,7 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);
     rt_fault_report(what, fa, pc, lr);
-    _exit(139);  // (rt_fault_report does not return)
+    _exit(EXIT_CRASH_RECOMP);  // (rt_fault_report does not return)
 }
 
 void plat_crash_handler_install(void) {

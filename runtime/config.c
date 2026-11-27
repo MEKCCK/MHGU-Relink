@@ -74,6 +74,7 @@
     /* [Graphics] */                                                                                \
     .stats_x = 0.62f, .stats_y = 0.01f,                                                            \
     .draw_distance = 1.0f,                                                                          \
+    .aniso = 1,                                                                                     \
     .smooth_gradients = 0,                                                                          \
     .fix_kerning = 1,                                                                               \
     .bold_text = BOLD_TEXT_DEFAULT,                                                                 \
@@ -121,6 +122,7 @@
     .chat_key = "/",                                                                                \
     .pause_key = "Pause",                                                                          \
     .menu_chord = 1,                                                                                \
+    .title_back_exit = 1,                                                                           \
     .lock_on = 1,                                                                                   \
     .persistent_lock_on = 0,                                                                        \
     .phone_rumble = 1,                                                                              \
@@ -142,6 +144,7 @@
     .mouse_invert_y = 0,                                                                            \
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
+    .menu_mouse = 1,                                                                                \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -166,8 +169,9 @@
     .sync_small_monsters = 1,                                                                       \
     .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
+    .share_deviant = 1,                                                                             \
     /* [Monster HP, Village Quests] */                                                              \
-    .hp = {{1, 1, 1, 1}, 2},                                                                        \
+    .hp = {{1, 1, 1, 1}, 1.5f},                                                                     \
     .village_in_hub = 1,                                                                            \
     /* [Quest Rewards] */                                                                           \
     .quest_hold_send = 1,                                                                           \
@@ -195,8 +199,15 @@
     .menu_scale = 100,                                                                              \
     .updates = UPDATES_ASK,                                                                         \
     .save_location = "",                                                                            \
+    .backups_on = 1,                                                                                \
+    .save_backups = 10,                                                                             \
+    .backup_location = "",                                                                          \
     .save_dir = "",                                                                                 \
-    .game_dir = ""
+    .game_dir = "",                                                                                 \
+    .second_display = 0,                                                                            \
+    .bottom_panels = BOTTOM_PANELS_DEFAULT,                                                         \
+    .bottom_background = BOTTOM_BG_DARK,                                                            \
+    .bottom_wallpaper = ""
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -312,6 +323,12 @@ static const char DEFAULT_INI[] =
     "; Between 0 and 10\n"
     "; Default: 1.0\n"
     "DrawDistance = 1.0\n"
+    "\n"
+    "; Anisotropic filtering: keeps textures seen at a slant (the ground, walls, roads) sharp into the distance.\n"
+    "; Off: as the game draws them\n"
+    "; Off, 2x, 4x, 8x, 16x\n"
+    "; Default: Off\n"
+    "AnisotropicFiltering = Off\n"
     "\n"
     "; Renders the picture with 16 bits per colour instead of 8, so dark skies and soft glows show no colour bands.\n"
     "; Costs GPU time: about 1 ms a frame at 1600x1000, more at higher resolutions\n"
@@ -481,6 +498,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "MenuChord = On\n"
     "\n"
+    "; B (the menus' Back) on the title screen's Main Menu asks to quit the game. Turn it off when a mod swaps the\n"
+    "; menus' Confirm and Back, so that confirming there no longer asks\n"
+    "; Default: On\n"
+    "TitleBackExit = On\n"
+    "\n"
     "; The key that opens a line of chat, anywhere (in a quest too): a key's name as the settings menu shows it, or\n"
     "; nothing for none\n"
     "; Default: /\n"
@@ -522,6 +544,12 @@ static const char DEFAULT_INI[] =
     "; hunt camera is yours, and free in menus and cutscenes\n"
     "; Default: Click\n"
     "MouseCapture = Click\n"
+    "\n"
+    "; The mouse in the game's menus: the pointer shows, the option under it is selected, a left click picks it and a\n"
+    "; right click backs out (in towns too: left click talks). Off: as before version 0.17, the mouse only turns the\n"
+    "; camera, no pointer shows up by itself, and the mouse buttons do what the Keybinds give them everywhere\n"
+    "; Default: On\n"
+    "MenuMouse = On\n"
     "\n"
     "[Touch]\n"
     "; The controls on the screen (a phone): Auto shows them while no controller is connected\n"
@@ -765,6 +793,13 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "ShareUrgentCredit = On\n"
     "\n"
+    "; Clearing a Deviant (Special Permit) quest posted by someone else also counts for you, if you have\n"
+    "; unlocked it yourself, so the next level unlocks as if you had posted it. The original game only counts\n"
+    "; it for the hunter who posted it. This only changes your own save, the others in the quest have their\n"
+    "; own setting.\n"
+    "; Default: On\n"
+    "ShareDeviantCredit = On\n"
+    "\n"
     "[Monster HP]\n"
     "; Playercount-specific HP multipliers for monsters in Hub quests.\n"
     "; Only affects large monster health.\n"
@@ -785,8 +820,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; When playing a Village Quest from the Hub, first multiply the monster HP by this amount.\n"
     "; This amount is then scaled again by the [Monster HP] settings.\n"
-    "; Default: 2.0\n"
-    "HubHP = 2.0\n"
+    "; Default: 1.5\n"
+    "HubHP = 1.5\n"
     "\n"
     "[Quest Rewards]\n"
     "; At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.\n"
@@ -824,6 +859,11 @@ static const char DEFAULT_INI[] =
     "; The game mixes its sound in 5.1 either way; Stereo folds it down to two channels.\n"
     "; Default: Stereo\n"
     "Output = Stereo\n"
+    "\n"
+    "; Playback device, by its name as the settings menu lists it (\"Speakers (Realtek(R) Audio)\"...): always that\n"
+    "; device, no sound while it is unplugged. Empty or Default: the system's default device, followed when it changes.\n"
+    "; Default: empty\n"
+    "Device =\n"
     "\n"
     "; The echo of caves and rooms (the game's reverb). Off: the sound is dry, and a weak phone's processor does less\n"
     "; Default: On\n"
@@ -890,6 +930,21 @@ static const char DEFAULT_INI[] =
     "; Your save is not moved: copy save_0 there yourself. Takes effect at the next start\n"
     "SaveLocation =\n"
     "\n"
+    "[Save Backups]\n"
+    "; Each time the game saves, a copy of save_0's files goes in a folder named after the date and time.\n"
+    "; To restore one, close the game and copy its files into save_0. Off: no backups (those made stay)\n"
+    "; Default: On\n"
+    "Backups = On\n"
+    "\n"
+    "; How many backups are kept: past this many, the oldest is deleted\n"
+    "; Between 1 and 100\n"
+    "; Default: 10\n"
+    "BackupsKept = 10\n"
+    "\n"
+    "; PC only. The folder the save backups go in. Empty means: a backups folder in the save folder, beside save_0.\n"
+    "; Takes effect at the next start\n"
+    "BackupLocation =\n"
+    "\n"
     "[Android]\n"
     "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
     "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
@@ -899,7 +954,26 @@ static const char DEFAULT_INI[] =
     "; Android only. The folder holding the game's exefs and romfs folders, used where it is (for example on a USB drive or SD\n"
     "; card), so they don't have to fit in the app's own folder. Empty: the data folder in the app's own folder. Set it with\n"
     "; Game files folder in the settings menu (Android tab): the app needs Android's \"All files access\". Takes effect at the next start\n"
-    "GameFolder =\n";
+    "GameFolder =\n"
+    "\n"
+    "[Dual Screen]\n"
+    "; MHXX's bottom screen on a second display (a dual-screen handheld, or another monitor on PC).\n"
+    "; Default: Off\n"
+    "SecondDisplay = Off\n"
+    "\n"
+    "; The bottom screen's panels, as MHXX's Panel Customize places them on its 4 x 3 grid: name@column,row, columns 0..3\n"
+    "; from the left, rows 0..2 from the top. arts3v 2x3, arts3h 4x1, map 2x2, itembar 2x1, status 4x1, palico 4x1,\n"
+    "; target 2x1, dpad 2x2.\n"
+    "; Default: " BOTTOM_PANELS_DEFAULT "\n"
+    "Panels = " BOTTOM_PANELS_DEFAULT "\n"
+    "\n"
+    "; What the bottom screen shows under its panels: Dark, Black, Wallpaper (a picture of your own: below)\n"
+    "; Default: Dark\n"
+    "Background = Dark\n"
+    "\n"
+    "; The wallpaper: a 24-bit BMP in the wallpapers folder, scaled to cover the screen. Empty: each BMP in turn, 30 s each\n"
+    "; Default: (empty)\n"
+    "Wallpaper =\n";
 
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -1037,11 +1111,16 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_HDR "Invalid HDR setting."
 #define ERR_KEYS "Invalid keybind."
 #define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
+#define ERR_BACKUPS "Backups to keep must be 1-100."
+#define ERR_BACKUP_FOLDER "Invalid backup folder (one line, no ';' or '#')."
 #define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
+#define ERR_PANELS "Invalid bottom screen panel list (one line, no ';' or '#')."
+#define ERR_WALLPAPER "Invalid wallpaper file name (one line, no ';' or '#')."
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
-static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8},
+                 aniso_values[] = {1, 2, 4, 8, 16};
 const ConfigSetting g_settings[] = {
     {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
@@ -1066,6 +1145,8 @@ const ConfigSetting g_settings[] = {
     {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
+    {"Graphics", "AnisotropicFiltering|Anisotropy|AF", SET_CHOICE, F(aniso), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8,16x|16",
+     aniso_values, false, ERR_MISC},
     {"Performance", "StatsX", SET_FLOAT, F(stats_x), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_MISC},
     {"Performance", "StatsY", SET_FLOAT, F(stats_y), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_MISC},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
@@ -1111,6 +1192,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "KeyboardPrompts", kbm_prompts, false),
     {"Controls", "PromptIcons", SET_CHOICE, F(prompt_icons), 0, 0, 0, "Switch,Xbox,PlayStation", NULL, false, ERR_ICONS},
     ON_OFF("Controls", "MenuChord", menu_chord, false),
+    ON_OFF("Controls", "TitleBackExit", title_back_exit, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Controls", "PauseKey", SET_TEXT, F(pause_key), sizeof g_config.pause_key, 0, 0, NULL, NULL, false, ERR_MISC},
@@ -1119,6 +1201,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
+    ON_OFF("Mouse", "MenuMouse", menu_mouse, false),
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
     ON_OFF("Controls", "LockOn", lock_on, false),
     ON_OFF("Controls", "PersistentLockOn", persistent_lock_on, false),
@@ -1180,6 +1263,12 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, false, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
+#ifdef MHGU_DUAL_SCREEN
+    ON_OFF("Dual Screen", "SecondDisplay", second_display, false),
+    {"Dual Screen", "Panels", SET_TEXT, F(bottom_panels), sizeof g_config.bottom_panels, 0, 0, NULL, NULL, false, ERR_PANELS},
+    {"Dual Screen", "Background", SET_CHOICE, F(bottom_background), 0, 0, 0, "Wallpaper,Dark,Black", NULL, false, ERR_MISC},
+    {"Dual Screen", "Wallpaper", SET_TEXT, F(bottom_wallpaper), sizeof g_config.bottom_wallpaper, 0, 0, NULL, NULL, false, ERR_WALLPAPER},
+#endif
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
@@ -1200,6 +1289,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
+    ON_OFF("Multiplayer", "ShareDeviantCredit", share_deviant, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
@@ -1213,6 +1303,7 @@ const ConfigSetting g_settings[] = {
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     {"Audio", "Output", SET_CHOICE, F(audio_output), 0, 0, 0, "Stereo|2.0,5.1|surround|5.1surround", NULL, false, ERR_MISC},
+    {"Audio", "Device", SET_TEXT, F(audio_device), sizeof g_config.audio_device, 0, 0, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "Reverb", reverb, false),
     {"Voice", "VoiceChat", SET_CHOICE, F(voice_mode), 0, 0, 0, "Off,Always,PushToTalk|ptt|push",
      NULL, false, ERR_MISC},
@@ -1228,6 +1319,9 @@ const ConfigSetting g_settings[] = {
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
     {"Application", "SaveLocation", SET_TEXT, F(save_location), sizeof g_config.save_location, 0, 0, NULL, NULL, true, ERR_FOLDER},
+    ON_OFF("Save Backups", "Backups", backups_on, false),
+    {"Save Backups", "BackupsKept", SET_INT, F(save_backups), 0, 1, 100, NULL, NULL, false, ERR_BACKUPS},
+    {"Save Backups", "BackupLocation", SET_TEXT, F(backup_location), sizeof g_config.backup_location, 0, 0, NULL, NULL, true, ERR_BACKUP_FOLDER},
 };
 #undef ON_OFF
 #undef KEYS
@@ -1733,6 +1827,7 @@ void config_load(void) {
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
+    if ((e = getenv("MHGU_AF"))) g_config.aniso = atoi(e) >= 16 ? 16 : atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_RT16"))) g_config.smooth_gradients = atoi(e) != 0;
     if ((e = getenv("MHGU_FIX_KERNING"))) g_config.fix_kerning = atoi(e) != 0;
     if ((e = getenv("MHGU_BOLD_TEXT"))) g_config.bold_text = atoi(e) != 0;

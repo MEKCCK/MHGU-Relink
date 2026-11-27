@@ -165,6 +165,17 @@ void textinput_update(void) {
 #ifdef __ANDROID__
     // Only a text editor opens the phone's input method; the rest of the menu still accepts physical typing.
     if (want) SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, want == 2 ? "0" : "1");
+#else
+    // A Steam Deck's on-screen keyboard (SteamOS opens it when Steam started the game: SDL_ENABLE_STEAM_SCREEN_KEYBOARD,
+    // X11) takes the controller while it is up and types Escape and the like into the game: the menu shut as Plus + Minus
+    // let go, and Confirm on Save / Exit came back as Back. Only a real text box opens it; the settings menu has its own
+    // on-screen keys, and a physical keyboard still types in it.
+    if (want) {
+        if (want == 2) SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
+        else SDL_ResetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD);  // (SDL's own choice again: Steam's hint, the environment)
+    } else {
+        SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
+    }
 #endif
     if (want) SDL_StartTextInput(w);
     g_window_on = want;

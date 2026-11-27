@@ -150,7 +150,7 @@ static const ActBinding kbm_left = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_LEFT}}
 static const ActBinding kbm_right = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_RIGHT}}}};
 static const ActBinding kbm_space = {true, 1, {{1, {SDL_SCANCODE_SPACE}}}};
 const ActBinding *act_default_binding(int id, int dev) {
-    if (dev != 1) return NULL;
+    if (dev != 1 || !config_live_menu_mouse()) return NULL;
     switch (id) {
     case ACT_TOWN_INTERACT: case ACT_MENU_CONFIRM: return &kbm_left;
     case ACT_TOWN_CANCEL: case ACT_MENU_CANCEL: return &kbm_right;

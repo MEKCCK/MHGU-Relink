@@ -39,6 +39,11 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+
+bool plat_plain_entry(const char *path, bool dir) {
+    struct stat st;
+    return lstat(path, &st) == 0 && (dir ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+}
 #include <sys/ucontext.h>
 #include <asm/sigcontext.h>
 #include <time.h>

@@ -57,6 +57,7 @@ public class GameActivity extends SDLActivity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         pickRefreshRate();
+        DualScreen.init(this);
     }
 
     @Override
@@ -64,10 +65,12 @@ public class GameActivity extends SDLActivity {
         super.onResume();
         stopService(new Intent(this, OnlineSessionService.class));
         pickRefreshRate();
+        DualScreen.resumed(true);
     }
 
     @Override
     protected void onPause() {
+        DualScreen.resumed(false);
         if (isMultiplayerActive()) {
             Intent service = new Intent(this, OnlineSessionService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);

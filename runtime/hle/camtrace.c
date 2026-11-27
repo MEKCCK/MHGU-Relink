@@ -354,9 +354,8 @@ static void cam_470(Cpu *c) {
 }
 
 // The area loader (0x20fc1c, r0 its object, state +0xdc) and sGameControl's area bytes (+0x48 stage, +0x49 area,
-// +0x4a.. +0x4f), logged as they change. MHGU_CAMTRACE_START_AREA=<n>: the hunt's first area load goes to area n.
+// +0x4a.. +0x4f), logged as they change. (A hunt started in a given area: MHGU_START_AREA, quickhunt.c.)
 #define FN_AREA_LOAD 0x20fc1cu
-static int g_start_area = -1;
 
 static void area_load(Cpu *c) {
     uint32_t obj = c->r[0], gc = LD32(G_GAMECONTROL);
@@ -375,10 +374,7 @@ static void area_load(Cpu *c) {
 #define FN_TOWN_MOVE 0x8bdfd0u
 static void town_move(Cpu *c) {
     uint32_t t = c->r[0];
-    if (LD32(t + 0xcc) == 2) {
-        LOG("[camtrace] %.2f departing: start area %u%s\n", secs(), LD8(t + 0xc9), g_start_area >= 0 ? ", replaced" : "");
-        if (g_start_area >= 0) ST8(t + 0xc9, (uint32_t)g_start_area);
-    }
+    if (LD32(t + 0xcc) == 2) LOG("[camtrace] %.2f departing: start area %u\n", secs(), LD8(t + 0xc9));
     fnhook_call_original(c, FN_TOWN_MOVE);
 }
 
@@ -390,11 +386,10 @@ void camtrace_init(void) {
     const char *l = getenv("MHGU_CAMTRACE_LEDGE");
     if (l && *l && sscanf(l, "%d:%d:%i:%lf:%d", &g_ledge_area, &g_ledge_id, &g_ledge_cmd, &g_ledge_at, &g_ledge_n) < 4)
         g_ledge_area = -1;
-    const char *sa = getenv("MHGU_CAMTRACE_START_AREA");
-    if (sa && *sa) g_start_area = atoi(sa);
+    const char *sa = getenv("MHGU_START_AREA");
     fnhook_set(FN_AREA_LOAD, hle_register("camtrace:area_load", area_load));
     fnhook_set(FN_EM_LEDGE, hle_register("camtrace:em_ledge", em_ledge));
-    fnhook_set(FN_TOWN_MOVE, hle_register("camtrace:town_move", town_move));
+    if (!sa || !*sa) fnhook_set(FN_TOWN_MOVE, hle_register("camtrace:town_move", town_move));
     fnhook_set(FN_CAM_MOVE, hle_register("camtrace:cam_move", cam_move));
     fnhook_set(FN_CAM_PLAY, hle_register("camtrace:cam_play", cam_play));
     fnhook_set(FN_CAM_STOP, hle_register("camtrace:cam_stop", cam_stop));

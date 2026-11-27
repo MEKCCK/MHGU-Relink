@@ -1,5 +1,20 @@
 # 更新日志
 
+## 上游同步（0.3.4 之后，未发布）
+
+- **二名（特殊许可）任务全队计入**（`f6aa2dc`、`0a05c40`）：新增 `[Multiplayer] ShareDeviantCredit`，默认开启。非发布者通关且本存档已解锁时，清除标记照常写入自己的存档，下一等级解锁；只改本地存档，不改任务伤害倍率，也不需要联机协议变化。设置 → 玩法 → 集会所与任务。
+- **各向异性过滤**（`d9fe60c`、`8223622`）：`[Graphics] AnisotropicFiltering`，关 / 2x / 4x / 8x / 16x；只提升带 mipmap、线性缩小的采样器，不降低游戏自身设置，受显卡上限限制；采样器按设置缓存。`MHGU_AF` 可覆盖。
+- **音频输出设备**（`7204baa`）：`[Audio] Device`，默认跟随系统默认设备；指定设备后拔出无声、插回自动恢复，运行中每 0.5 秒检查。
+- **菜单鼠标开关**（`b8d28dd`）与标题画面 B 退出开关（`99f62c8`）：`[Mouse] MenuMouse`、`[Controls] TitleBackExit`。
+- **存档自动备份**（`2f0af98`、`5df0101`、`4565783`、`8fed639`）：每次 save_0 提交后复制到 `backups/<日期_时间>/`，默认保留 10 份；`[Save Backups] Backups / BackupsKept / BackupLocation`；只统计和删除只含存档文件的真实文件夹，不跟随符号链接/junction。
+- **窗口位置记忆**（`b9ff7b1`、`ee576a6`）：`window.txt` 记住位置、大小、最大化、显示器和全屏状态；Wayland/Android/`MHGU_HIDDEN`/`MHGU_WINDOW` 除外。
+- **更新器「仅更新」**（`9f48720`、`1e88289`）与**设置内更新说明**（`221f237`）：更新问题提供“更新并启动 / 仅更新 / 稍后”；安装后保存 `update/changelog.txt`，设置 → 系统 → 应用显示“本版本更新内容”。
+- **退出码**（`7f30ac6`）：0 正常、20 移植层崩溃、21 游戏崩溃/放弃、22 Forge 插件、23 mod subsdk、24 engine module、30 无法启动、31 重启；`log.txt` 末尾写 `[exit]`，详见 `docs/EXIT-CODES.md`。
+- **JIT 解释器**（`fe2d11a`、`6b048fa`、`4c070e3`）：x86-64 与 AArch64 主机把解释执行的 guest 基本块编译成宿主代码；`MHGU_JIT=0` 关闭。`tools/test_jit.py` 与解释器对比通过。
+- **双屏下屏**（`aeea702`、`1b35a88`、`d736388`、`4f07235`、`1b90f93`、`3924696`）：Android 第二屏（`DualScreen.java` + Presentation）与 PC 第二显示器窗口；MHXX 风格面板（道具栏、地图、狩技、目标、状态、随从猫、方向键），触摸映射到动作层；`[Dual Screen] SecondDisplay / Panels / Background / Wallpaper`。无第二屏时设置项置灰。
+- **高帧率修复**：Steam Deck 设置菜单被屏幕键盘抢手柄（`e930992`）；RADV 深度 pass 多边形偏移处加屏障，修复地形/贴花黑闪（`535f5c9`，`MHGU_VK_BIAS_SYNC`）；贯通弹会心距离按 Switch 的 age 网格判定（`f29581c`，已在前次补入）。
+- **其他**：`HubHP` 默认值改为 1.5（`c2e6676`）；调试 `MHGU_START_AREA`（`555f067`）与 `MHGU_SUMMON_KEEPHP` / `MHGU_SUMMON_STICK`（`1438f38`）。
+
 ## 0.3.4（2026-11-27）
 
 - 设置 → 按键绑定/游戏操作：接上 Pause/Suspend 绑定行，可选择、清空、重置；PauseKey 仍可写 ini。

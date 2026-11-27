@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "cpu.h"
+#include "exitcode.h"
 #include "platform.h"
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -161,6 +162,7 @@ uint32_t guest_sym(const char *name);     // cached loader_find_symbol, fatal if
 uint32_t hle_alloc(uint32_t size);        // zeroed guest memory owned by the host (never freed): guest address
 extern const char *g_game_dir;            // folder holding exefs/ and romfs/
 extern const char *g_save_dir;            // host folder for save data (services/fs.c; MHGU_SAVE_DIR overrides)
+extern const char *g_backup_dir;          // [Save Backups] BackupLocation, set in ui.c (services/fs.c; MHGU_BACKUP_DIR overrides)
 void rt_unwind_point(void);
 extern volatile int g_rt_unwind;
 

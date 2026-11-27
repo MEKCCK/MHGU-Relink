@@ -887,6 +887,11 @@ HLE_FUNC("forge_fs_fileExists", f_file_exists) {
     RET(r == 0);
 }
 
+// The file call a plugin is in, for a crash's exit code and the abort's log (runtime/hle/abort.c): set while the game's
+// own nn::fs call runs, so an abort inside it is the plugin's.
+static __thread const char *t_fs_call;
+const char *forge_abort_context(void) { return t_fs_call; }
+
 HLE_FUNC("forge_fs_openFile", f_file_open) {
     uint32_t path = ARG(0), mode = ARG(1), out = ARG(2), sp = c->r[13];
     uint32_t fn = gsym("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci");
@@ -894,7 +899,9 @@ HLE_FUNC("forge_fs_openFile", f_file_open) {
     if (!fn || !path || !out || !kernel_mapped(path, 1) || !kernel_mapped(out, 4) ||
         sp < 16 || !kernel_mapped(handle, 16)) { RET(0); return; }
     c->r[13] = handle;
+    t_fs_call = "forge_fs_openFile";
     uint32_t r = gcall(c, fn, handle, path, mode, 0);
+    t_fs_call = NULL;
     if (!r) ST32(out, LD32(handle));  // nn::fs::FileHandle is one u32 on AArch32.
     c->r[13] = sp;
     RET(r == 0);
@@ -904,7 +911,10 @@ HLE_FUNC("forge_fs_getFileSize", f_file_size) {
     uint32_t handle = ARG(0), out = ARG(1);
     uint32_t fn = gsym("_ZN2nn2fs11GetFileSizeEPxNS0_10FileHandleE");
     if (!fn || !out || !kernel_mapped(out, 8)) { RET(0); return; }
-    RET(gcall(c, fn, out, handle, 0, 0) == 0);
+    t_fs_call = "forge_fs_getFileSize";
+    uint32_t r = gcall(c, fn, out, handle, 0, 0);
+    t_fs_call = NULL;
+    RET(r == 0);
 }
 
 HLE_FUNC("forge_fs_readFile", f_file_read) {
@@ -913,11 +923,16 @@ HLE_FUNC("forge_fs_readFile", f_file_read) {
     uint32_t fn = gsym("_ZN2nn2fs8ReadFileENS0_10FileHandleExPvj");
     if (!fn || (size && (!buffer || !kernel_mapped(buffer, size)))) { RET(0); return; }
     // Both APIs take handle in r0, the aligned s64 offset in r2:r3, then buffer/size on the unchanged stack.
-    RET(gcall(c, fn, ARG(0), 0, ARG(2), ARG(3)) == 0);
+    t_fs_call = "forge_fs_readFile";
+    uint32_t r = gcall(c, fn, ARG(0), 0, ARG(2), ARG(3));
+    t_fs_call = NULL;
+    RET(r == 0);
 }
 
 HLE_FUNC("forge_fs_closeFile", f_file_close) {
+    t_fs_call = "forge_fs_closeFile";
     gcall(c, gsym("_ZN2nn2fs9CloseFileENS0_10FileHandleE"), ARG(0), 0, 0, 0);
+    t_fs_call = NULL;
 }
 
 // ------------------------------------------------------------------ nn::os wrappers (same arguments as the SDK's)

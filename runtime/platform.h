@@ -65,6 +65,9 @@ int plat_count_files(const char *dir);
 // A folder the player named (UTF-8, as the settings file has it), created if missing, as a path the runtime's file
 // functions can open: Windows' narrow ones take the ANSI code page, so one it can't spell becomes its 8.3 short form.
 bool plat_use_folder(const char *utf8, char *buf, size_t size);
+// Whether path is a folder (dir) or a regular file (!dir) itself, not a symlink, junction or other link to one
+// (services/fs.c: save backups only ever delete what really is in the backup folder).
+bool plat_plain_entry(const char *path, bool dir);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
 

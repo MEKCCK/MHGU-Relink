@@ -43,10 +43,12 @@ typedef struct {
     VkPipelineCache pcache;
     VkSemaphore timeline;      // value = last completed submission number (none on a Vulkan 1.1 driver: fences, exec.c)
     bool api12, has_timeline;  // the device works as Vulkan 1.2 or later; it has timeline semaphores
+    bool bias_sync;            // RADV: a barrier where a depth-only pass's polygon offset / polygon state changes (exec.c draw)
     bool no_poll;              // never ask the driver whether work is done (submissions use fences: exec.c fence thread)
     bool mirror_clamp;         // the mirror-clamp sampler mode can be used
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    float max_aniso;           // samplers' anisotropy limit: 1 without the samplerAnisotropy feature (textures.c vk_sampler)
     // VK_EXT_depth_bias_control (exec.c): a DEPTH24_STENCIL8 the GPU makes as D32_SFLOAT_S8_UINT (AMD) gets the game's
     // polygon offsets in D24 steps, as on the Switch; without it the float format's steps can be smaller and decals flicker
     // (a Vulkan header older than 1.3.268 has no such extension: never set then)

@@ -73,6 +73,7 @@ typedef struct {
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
     int quest_hold_send;      // [Quest Rewards] HoldASend: A held on the Reward Box sends the items one after another (runtime/hle/rewardbox.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)
+    int share_deviant;        // the same for an unlocked Deviant (Special Permit) quest (runtime/hle/urgentcredit.c)
     HpScale hp;               // large monster HP in Hub-type quests (runtime/hle/hpscale.c)
     float mouse_sensitivity;  // mouse look: times the hunt camera's angle per count (runtime/hle/mousecam.c), and
                               // the speed for full right stick tilt elsewhere is divided by it (runtime/host_input.c)
@@ -80,6 +81,9 @@ typedef struct {
     int mouse_invert_y;       // [Mouse] MouseInvertY: up / down turned round, on top of the game's own invert option
     float mouse_smoothing;    // [Mouse] MouseSmoothing: 0 none, towards 1 the turn trails the mouse (hunt camera only)
     int mouse_capture;        // [Mouse] MouseCapture: MOUSE_CAPTURE_*
+    int menu_mouse;           // [Mouse] MenuMouse: the mouse points at the game's menus (hle/menuptr.c) and its buttons
+                              // confirm / back out in menus and towns (actions.c act_default_binding); 0: as before 0.17,
+                              // the mouse is the camera / right stick only and its buttons are the [Keybinds]
     float aspect_ratio;       // the picture's shape (width / height), 0: the window's; never below 16:10 (config.c)
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
@@ -102,8 +106,12 @@ typedef struct {
     int loading_indicator;    // [Performance] LoadingIndicator: the start-up's "Loading" corner (overlay.cpp); ini only
     float stats_x, stats_y;   // [Performance] StatsX / StatsY: where the frame rate plate sits, 0..1 of the screen
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
+    int aniso;                // [Graphics] AnisotropicFiltering: 1 (off: the game's own), 2, 4, 8, 16: at least that much on
+                              // the game's mipmapped textures (nvn/vulkan/textures.c vk_sampler)
     int mute_in_background;   // [Audio] MuteInBackground: no sound while the window is not focused (config_audio_gain)
     int audio_output;         // [Audio] Output: AUDIO_OUT_*, the game's 5.1 mix folded to stereo or played as it is
+    char audio_device[256];   // [Audio] Device: the playback device's name as SDL gives it; "" (or "Default") the system's
+                              // default, followed when it changes (runtime/services/audio.c)
     int voice_mode;           // [Voice] VoiceChat: VOICE_*, talking to the other hunters (runtime/voice.c)
     int mic_volume;           // [Voice] MicVolume: your microphone's gain, 0..100 (config_voice_mic_gain)
     int voice_volume;         // [Voice] VoiceVolume: the other hunters' voices, 0..100 (config_voice_play_gain: twice this)
@@ -190,14 +198,28 @@ typedef struct {
     int touch_weapon_combo_pad[TOUCH_LAYOUT_PROFILES][TOUCH_COMBOS];
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
     int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
+    int title_back_exit;      // [Controls] TitleBackExit: B on the title screen's Main Menu asks to quit (runtime/hle/title_exit.c)
     int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int prompt_icons;         // [Controls] PromptIcons: 0 Switch, 1 Xbox, 2 PlayStation (in-game prompts, hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
+    int backups_on;           // [Save Backups] Backups: a copy of the save at each save (services/fs.c)
+    int save_backups;         // [Save Backups] BackupsKept: how many of those copies are kept, 1-100
+    char backup_location[256]; // [Save Backups] BackupLocation (PC): the folder the backups go in, "" <save folder>/backups
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
+    // (MHGU_DUAL_SCREEN: MHXX's bottom screen on a second display; nvn/vulkan/bottom_hud.c, second_display*.c)
+    int second_display;       // [Dual Screen] SecondDisplay: on when the device has a second display to show it on
+    char bottom_panels[256];  // [Dual Screen] Panels: the bottom screen's panels and their cells (bottom_hud.c)
+    int bottom_background;    // [Dual Screen] Background: BOTTOM_BG_*, under the panels
+    char bottom_wallpaper[64]; // [Dual Screen] Wallpaper: a BMP in the wallpapers folder, "" each in turn
 } Config;
+#ifndef MHGU_NULL_BACKEND
+#define MHGU_DUAL_SCREEN 1
+#endif
+enum { BOTTOM_BG_WALLPAPER, BOTTOM_BG_DARK, BOTTOM_BG_BLACK };
+#define BOTTOM_PANELS_DEFAULT "itembar@0,0 map@0,1 arts3v@2,0"  // (MHXX's quest screen: item, map below, Hunter Arts right)
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 enum { XP_OFF, XP_RYU, XP_ROOM, XP_MIXED };
@@ -295,6 +317,7 @@ float config_live_mouse_sensitivity_y(void);
 int config_live_mouse_invert_y(void);
 float config_live_mouse_smoothing(void);
 int config_live_mouse_capture(void);
+int config_live_menu_mouse(void);  // [Mouse] MenuMouse (any thread)
 enum { MOUSE_CAPTURE_CLICK, MOUSE_CAPTURE_HUNT };  // a click in the window captures the mouse; or a hunt does as well
 float config_live_draw_distance(void);
 int config_live_fxaa(void);
@@ -305,6 +328,13 @@ int config_live_kbm_prompts(void);  // [Controls] KeyboardPrompts (any thread)
 int config_live_prompt_icons(void);  // [Controls] PromptIcons (any thread)
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
+// [Dual Screen]: is there a display for the bottom screen (the backend tells, nvn/vulkan/second_display*.c; the settings
+// menu greys the row out without one), and SecondDisplay / its options changed in g_config (the settings menu's Save):
+// the UI thread applies it at its next turn (second_display_tick). Any thread.
+int config_second_display_available(void);
+void config_set_second_display_available(int yes);
+void config_second_display_request(void);
+int config_second_display_take_request(void);  // (1 once per request)
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
 int config_live_pause_key(void);  // [Controls] PauseKey as an SDL scancode (0: none)
@@ -316,6 +346,9 @@ bool config_mod_bound(int bind);  // a mod has the row for now: config_live_bind
 int config_player_bind(int bind, int slot);  // the settings' own (what config_live_bind has with no mod's)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);
+int config_live_aniso(void);        // [Graphics] AnisotropicFiltering, read as samplers are bound (the GPU thread)
+void config_set_live_aniso(int af); // (debug: the control file's "af"; 1, 2, 4, 8, 16, or 0: none, not even the
+                                    // game's own; not saved)
 int config_live_fix_kerning(void);  // [Graphics] FixKerning, read as each text is set (game threads)
 int config_live_bold_text(void);    // [Graphics] BoldText, read as each glyph is drawn (game threads)
 int config_live_hdr(void);                // [HDR] HDR (nvn/vulkan/device.c: the window image is made again when it changes)
@@ -348,7 +381,9 @@ int config_live_friend_requests(void);  // [Multiplayer] FriendRequests (net/ldn
 int config_live_friend_online_notices(void);  // [Multiplayer] FriendOnlineNotices (net/ldn.c)
 int config_live_friend_hub_notices(void);     // [Multiplayer] FriendHubNotices (net/ldn.c)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
+int config_live_save_backups(void);     // [Save Backups] BackupsKept while Backups is on, else 0 (services/fs.c)
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit (hle/urgentcredit.c)
+int config_live_share_deviant(void);   // [Multiplayer] ShareDeviantCredit (hle/urgentcredit.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
@@ -385,6 +420,7 @@ void config_live_crossplay(Config *out);  // coherent snapshot of saved Crosspla
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 int config_audio_output(void);  // [Audio] Output as saved (AUDIO_OUT_*), atomic: the audio thread reopens the device
+void config_audio_device(char *name, size_t size);  // [Audio] Device as saved ("" the default), for the audio threads
 // [Voice]: atomic, safe on the voice chat's audio threads (runtime/voice.c). Mic gain is MicVolume / 100; the other
 // hunters' voices are VoiceVolume / 100 x 2 (MHXX's boost), so 50 in the file is unity against the game's own sound.
 int config_voice_mode(void);        // VOICE_OFF, VOICE_ALWAYS or VOICE_PTT
@@ -395,6 +431,7 @@ void config_window_focus(bool focused);  // the window got / lost the focus (run
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
+bool config_title_back_exit(void);  // [Controls] TitleBackExit as saved, atomic (the game's thread reads it)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 

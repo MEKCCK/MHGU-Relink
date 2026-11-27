@@ -32,6 +32,9 @@
 #include "hud_layout.h"
 #include "shaders.h"
 #include "vk.h"
+#ifdef MHGU_DUAL_SCREEN
+#include "bottom_hud.h"
+#endif
 #include "../../touch.h"
 #include "../../overlay.h"
 
@@ -1042,6 +1045,10 @@ static VkFormat pass_color[8], pass_depth;
 static bool pass_d24_as_float;  // the depth attachment is a DEPTH24_STENCIL8 made as D32S8 (polygon offsets in D24 steps)
 static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
+#ifdef MHGU_DUAL_SCREEN
+static int ui_bottom = -1;  // the draw being set up is a HUD piece of this bottom group (bottom_hud.c), -1 none
+static float ui_bottom_m[16];  // its model matrix (the piece's outline from its vertices: bottom_piece_outline)
+#endif
 static int ui_scissor_h = -1;  // a menu's partial scissor follows its entire canvas horizontally
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
@@ -1519,6 +1526,11 @@ void vk_end_pass(void) {
     if (ui_nrecent != ui_pass_recent) ui_results_last = ui_results_pass;
     vkCmdEndRenderPass(vk_cmd());
     in_pass = false;
+#ifdef MHGU_DUAL_SCREEN
+    if (!g_bottom_hud_on) bottom_hud_discard();  // (turned off during the pass: its draws are never replayed later)
+    else if (bottom_hud_flush(vk_cmd(), pass_rp, pass_color, pass_ncolor, pass_depth, pass_samples, submit_seq + 1))
+        ss_forget();  // (the bottom pass bound pipelines and buffers of its own)
+#endif
     if (gp_active) {
         char l[64];
         snprintf(l, sizeof l, "pass %d %ux%u%s, %llu draws%s%s", gp_pass++, pass_w, pass_h, pass_msaa ? " MSAA" : "",
@@ -3152,6 +3164,31 @@ typedef struct {
     uint8_t sample_shading;  // (MSAA) every sample shaded (exec.c pass_models)
 } PipeKey;
 
+#ifdef MHGU_DUAL_SCREEN
+// A bottom piece's outline on the 1280x720 canvas: its vertices (attribute 0, the position: 2 or more 32-bit floats)
+// through its model matrix, the first 64 at most. All zero when the position isn't a float pair or more.
+static void bottom_piece_outline(const PipeKey *k, uint32_t from, uint32_t to, float out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    uint32_t f = k->attr_fmt[0];
+    if (!(k->attr_mask & 1) || (f != VK_FORMAT_R32G32_SFLOAT && f != VK_FORMAT_R32G32B32_SFLOAT && f != VK_FORMAT_R32G32B32A32_SFLOAT))
+        return;
+    uint32_t b = k->attr_bind[0];
+    Range v = b < 16 ? st.vbuf[b] : (Range){0, 0};
+    uint64_t stride = k->stride[b];
+    if (!v.addr || !stride || to <= from) return;
+    if (to - from > 64) to = from + 64;
+    if (!guest_range_ok(v.addr + k->attr_off[0] + (uint64_t)from * stride, (uint64_t)(to - from) * stride)) return;
+    const float *m = ui_bottom_m;
+    float x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+    for (uint32_t i = from; i < to; i++) {
+        const float *p = (const float *)G2H((uint32_t)(v.addr + k->attr_off[0] + (uint64_t)i * stride));
+        float x = m[0] * p[0] + m[4] * p[1] + m[12], y = m[1] * p[0] + m[5] * p[1] + m[13];
+        x0 = fminf(x0, x), x1 = fmaxf(x1, x), y0 = fminf(y0, y), y1 = fmaxf(y1, y);
+    }
+    out[0] = x0, out[1] = y0, out[2] = x1, out[3] = y1;
+}
+#endif
+
 typedef struct Pipe {
     PipeKey k;
     VkPipeline pipe;
@@ -3740,6 +3777,18 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = ui_scissor_h = -1;
     // (a pass the size of the game's picture, in the guest's units: FSR's stand-ins and scaled targets are larger)
     bool screen_pass = stage == 0 && k == 3 && roundf((float)pass_h / pass_sy) == (float)g_render_size[1];
+#ifdef MHGU_DUAL_SCREEN
+    // (by the place the game gave it, before the 16:10 / ultrawide rules below move it)
+    if (stage == 0 && k == 3) ui_bottom = -1;
+    if (g_bottom_hud_on && screen_pass && !st.ds[0] && size >= 64) {
+        float m[16];
+        memcpy(m, G2H((uint32_t)r.addr), 64);
+        ui_bottom = bottom_hud_group(m[14], m[12], m[13]);
+        memcpy(ui_bottom_m, m, sizeof ui_bottom_m);
+        // (drawn on the bottom panel only: as the game placed it, without the main screen's 16:10 / ultrawide moves)
+        if (ui_bottom >= 0) return ubo_span(guest_copy(r.addr, size), size);
+    }
+#endif
     if (screen_pass && !st.ds[0] && size >= 64) {
         void menulearn_piece(const float *m);  // (the HUD pieces of the frame, at any shape: where menus' rows are)
         menulearn_piece((const float *)G2H((uint32_t)r.addr));
@@ -4927,6 +4976,21 @@ static void draw(CmdRec *r, bool indexed) {
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
     models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
+    // RADV (g_vk.bias_sync, device.c): in a depth-only pass a draw whose polygon offset or polygon state (offset enable,
+    // culling, winding) differs from the draw before starts a new pass, behind a full barrier. Without it the Steam Deck's
+    // shadow cascades came out wrong one at a time (the terrain and its decals flickering black, mostly with shadow
+    // casters at ground level: small monsters, the area 6 rock sunk into the ground). Found on the Deck: RADV_DEBUG=
+    // syncshaders hid it; barriers in colour passes, or the state sent again without a barrier, did not; these did, at
+    // about 0.6 ms of a 5.3 ms frame there. Within a pass draws get no barrier otherwise.
+    if (g_vk.bias_sync) {
+        static float last_offset[3];
+        static uint8_t last_poly[4];
+        if (in_pass && pass_ncolor == 0 &&
+            (memcmp(last_offset, st.poly_offset, sizeof last_offset) || memcmp(last_poly, st.poly, sizeof last_poly)))
+            st.rt_dirty = true;
+        memcpy(last_offset, st.poly_offset, sizeof last_offset);
+        memcpy(last_poly, st.poly, sizeof last_poly);
+    }
     if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
     ms_resolve_sampled(0, pr->vi);
     ms_resolve_sampled(1, pr->fi);
@@ -5273,6 +5337,26 @@ static void draw(CmdRec *r, bool indexed) {
         }
     }
     if (trace_active) trace_draw(pr, &k, use_index, use_index ? icount : count, inst);
+#ifdef MHGU_DUAL_SCREEN
+    if (ui_bottom >= 0 && !k.stencil_test) {
+        BottomDraw bd = {.group = ui_bottom, .pipe = pp->pipe, .layout = pr->layout, .sets = {sets[0], sets[1]},
+                         .indexed = use_index, .ib = ib.buf, .io = ib.off, .it = itype_vk, .count = use_index ? icount : count,
+                         .inst = inst, .first = first, .base_inst = base_inst, .base_vertex = base_vertex};
+        for (int s = 0; s < 17; s++)
+            if (k.used_streams & (1u << s)) bd.vb_mask |= 1u << s, bd.vb[s] = ss.vb[s], bd.vo[s] = ss.vo[s];
+        memcpy(bd.blend, st.blend_color, sizeof bd.blend);
+        float pw, ph;
+        pass_guest_size(&pw, &ph);
+        bd.clip[0] = (float)st.scissor[0][0] * 1280.0f / pw, bd.clip[1] = (float)st.scissor[0][1] * 720.0f / ph;
+        bd.clip[2] = (float)(st.scissor[0][0] + st.scissor[0][2]) * 1280.0f / pw;
+        bd.clip[3] = (float)(st.scissor[0][1] + st.scissor[0][3]) * 720.0f / ph;
+        bottom_piece_outline(&k, first, use_index ? max_index : first + count, bd.outline);
+        bottom_hud_record(&bd);
+        ui_bottom = -1;
+        return;  // (on the bottom panel only, as MHXX's top screen has none of these)
+    }
+    ui_bottom = -1;
+#endif
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     if (k.depth_write) grass_shadow_drawn(r, indexed, prog_fs_hash(pr));  // (tall grass: its main pass, grass_depth_laid)

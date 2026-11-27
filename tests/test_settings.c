@@ -506,6 +506,13 @@ int main(int argc, char **argv) {
     Config fsr_config=config_editable();
     assert(config_defaults().sync_small_monsters==1);
     assert(config_defaults().share_urgent==1);
+    assert(config_defaults().share_deviant==1);
+    assert(config_defaults().aniso==1);
+    assert(config_defaults().backups_on==1 && config_defaults().save_backups==10);
+    assert(config_defaults().second_display==0);
+    assert(config_setting("ShareDeviantCredit") && config_setting("AnisotropicFiltering"));
+    assert(config_setting("Backups") && config_setting("BackupsKept") && config_setting("BackupLocation"));
+    assert(config_setting("MenuMouse") && config_setting("TitleBackExit") && config_setting("Device"));
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().loading_indicator==1);
     assert(config_defaults().draw_distance==1.0f);

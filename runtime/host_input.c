@@ -38,6 +38,9 @@
 #include "hle/menuptr.h"
 #include "hle/mousecam.h"
 #include "keymap.h"
+#ifdef MHGU_DUAL_SCREEN
+#include "nvn/vulkan/bottom_hud.h"
+#endif
 #include "mods.h"
 #include "overlay.h"
 #include "pause.h"
@@ -1090,7 +1093,8 @@ static void mouse_update(int *rx, int *ry) {
     static bool menu_tree;
     if (menuptr_open()) menu_tree = true;
     else if (!input_view_hunt_menu_open()) menu_tree = false;
-    bool menu = menu_tree && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // ([Mouse] MenuMouse = Off: never - the mouse stays the camera / right stick and its clicks the keybinds' buttons)
+    bool menu = menu_tree && config_live_menu_mouse() && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     if (menu && !menu_ptr) menu_ptr_live = menu_ptr_warp = mouse_captured, menu_ptr_hover = MENUPTR_NONE;
     if (!menu) menu_ptr_live = menu_ptr_warp = false;
     menu_ptr = menu;
@@ -1552,5 +1556,8 @@ void host_input_update(void) {
     }
     // Touch buttons have no physical source; carry them through action rebinding after the input suppressions.
     b = act_update(b, script_b | (touch_b & b), menu || (typing && !chat_active()), mix_cancel);
+#ifdef MHGU_DUAL_SCREEN
+    if (g_bottom_hud_on) bottom_hud_touch_input(&b, &rx, &ry);  // (the bottom screen's touch: bottom_hud.c)
+#endif
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }
