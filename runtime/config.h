@@ -12,6 +12,10 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };
 enum { TOUCH_AUTO, TOUCH_ON, TOUCH_OFF };  // [Touch] Controls (runtime/touch.cpp)
+// [Touch] MoveHUD: native HUD moved for touch, the port's six-slot item bar, the eight-direction shortcut wheel, or both.
+enum { HUD_OFF, HUD_ON, HUD_BAR, HUD_WHEEL, HUD_BAR_WHEEL };
+static inline int hud_has_bar(int mode) { return mode == HUD_BAR || mode == HUD_BAR_WHEEL; }
+static inline int hud_has_wheel(int mode) { return mode == HUD_WHEEL || mode == HUD_BAR_WHEEL; }
 enum { AUDIO_OUT_STEREO, AUDIO_OUT_51 };  // [Audio] Output (runtime/services/audio.c)
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };  // [Performance] ShowBattery
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
@@ -165,7 +169,7 @@ typedef struct {
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int fill_screen;          // [Display] FillScreen: movies and menu backdrops cover a wider screen (nvn/vulkan/exec.c)
     int touch_controls;       // [Touch] Controls: TOUCH_*, the controls on the screen (runtime/touch.cpp)
-    int touch_hud;            // [Touch] MoveHUD: the HUD moves out of the thumbs' way while they show (nvn/vulkan/exec.c)
+    int touch_hud;            // [Touch] MoveHUD: HUD_*: native HUD moved for touch, or the six-slot bar (nvn/vulkan/exec.c)
     int touch_auto_r;         // [Touch] AutoR: full movement-stick travel requests running only; default Off
     int touch_floating;       // [Touch] FloatingStick: start the left stick at the finger's landing point
     float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)

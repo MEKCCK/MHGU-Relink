@@ -184,6 +184,18 @@ void mousecam_bow_drag_reset(void) {
 void itembar_scroll(int dir) { item_steps.push_back(dir); }
 void itembar_touch_scroll(int dir) { item_steps.push_back(dir); touch_item_pending=dir>0?1:-1; }
 void itembar_touch_cancel(void) { touch_item_pending=0; }
+// The six-slot bar's snapshot/use queue and icon atlas: no game memory in this host test.
+int hudbar_copy(HudSlot *,int) { return 0; }
+int hudbar_window(int *out,int max) { for(int i=0;i<max&&i<5;i++) out[i]=-1; return max<5?max:5; }
+void hudbar_use_slot(int) {}
+void hudbar_queue_item(uint16_t) {}
+void hudbar_notify_nav(void) {}
+void hudbar_refresh(void) {}
+const char *hud_name_lookup(int) { return nullptr; }
+bool perfstats_visible(void) { return false; }
+bool perfstats_panel_rect(float *,float *,float *,float *) { return false; }
+void perfstats_set_pos(float,float,float,float) {}
+void perfstats_save_pos(void) {}
 void haptics_tap(void) {}
 bool overlay_menu_open(void) { return settings_open; }
 void overlay_toggle_settings(void) { settings_open = !settings_open; }
@@ -273,6 +285,11 @@ void config_combo_text(uint32_t buttons, char *out, size_t n) {
     if(n) snprintf(out,n,"%s",label.c_str());
 }
 }
+// (runtime/overlay.cpp in the game) the bar's icon atlas: empty in this host test.
+int g_icon_id=-1, g_icon_w=0, g_icon_h=0, g_hud_id_max=0;
+const short *g_hud_rect=nullptr, *g_hud_cell=nullptr;
+const unsigned char *g_hud_rgb=nullptr;
+ImFont *g_hud_font=nullptr;
 struct Input { uint64_t b{}, touch_b{}; int lx{}, ly{}, rx{}, ry{}; float dx{}, dy{}; bool run{}; };
 static Input update(uint64_t controller = 0, bool pad = false, bool typing = false) {
     Input v; v.b = controller;
@@ -1954,7 +1971,7 @@ static void editor_isolate_hud() {
     for(int c=0;c<C_LAID;++c) g_s.layout.x[c]=3.9f;
 }
 static void map_editable_scenes() {
-    assert(TZ_MAP==3 && TZ_COUNT==4);
+    assert(TZ_MAP==3 && TZ_SHORTCUT==4 && TZ_COUNT==5);
     for(const ImVec2 size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(2520,1080),ImVec2(720,1280)})
     for(int moved:{0,1}) for(bool quest:{false,true}) {
         fresh((int)size.x,(int)size.y); cfg.touch_hud=moved; in_quest=quest; update(); editor_isolate_hud();
@@ -3278,7 +3295,7 @@ static void map_fixed_storage() {
         const size_t begin=text.find(key); assert(begin!=std::string::npos);
         const size_t end=text.find('\n',begin); assert(end!=std::string::npos); return text.replace(begin,end-begin+1,value);
     };
-    assert(active.find("layout_version 5")!=std::string::npos && active.find("hud_map 123.0 -87.0 1")!=std::string::npos);
+    assert(active.find("layout_version 7")!=std::string::npos && active.find("hud_map 123.0 -87.0 1")!=std::string::npos);
     assert(active.find("editor_panel 0.1234 0.8765 1")!=std::string::npos);
     for(int version:{1,2,3,4}) {
         const std::string common=legacy_template(active,version);
@@ -3499,7 +3516,7 @@ static void icon_template_isolation() {
         assert(read_text(a.path.c_str())==a.bytes && read_text(b.path.c_str())==b.bytes);
     }
     touch_reset(); g_s={}; update(); same_layout(g_s.layout,layout_b);
-    assert(file_a.rfind("layout_version 5",0)==0);
+    assert(file_a.rfind("layout_version 7",0)==0);
     const std::string v2=legacy_template(file_a,2);
     write_text("touch_template_03.txt",v2); assert(touch_template_use(2));
     Layout v2_expected=layout_a; v2_expected.icons[C_AMMO_UP]=v2_expected.icons[C_AMMO_DOWN]=v2_expected.icons[C_LOCK]={};

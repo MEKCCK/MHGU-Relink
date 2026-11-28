@@ -35,9 +35,13 @@ public final class UpdateChecker {
     private UpdateChecker() {}
 
     public static void check(final Activity act) {
-        if (running) return;
-        running = true;
         final boolean zh = Locale.getDefault().getLanguage().startsWith("zh");
+        if (running) {
+            toast(act, zh ? "正在检查更新，请稍候…" : "Already checking for updates…");
+            return;
+        }
+        running = true;
+        toast(act, zh ? "正在检查更新…" : "Checking for updates…");
         new Thread(() -> {
             String version = null, apk = null, notes = "", error = null;
             try {

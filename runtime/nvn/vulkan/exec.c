@@ -36,6 +36,7 @@
 #include "bottom_hud.h"
 #endif
 #include "../../touch.h"
+extern volatile int g_touch_bar;
 #include "../../overlay.h"
 
 int presence_in_quest(void);
@@ -162,7 +163,8 @@ void vk_trace_frame(NvnTexture *t) {
 #define ARTS_TOP 41.0f              // the top row's first piece goes to this y (two rows: 631 -> 41; three: the same)
 #define TARGET_DX (-250.0f)         // (x 1200 -> 950, from the right edge: left of the arts)
 _Static_assert(HUD_TOUCH_ITEM == TZ_ITEM && HUD_TOUCH_ARTS == TZ_ARTS && HUD_TOUCH_TARGET == TZ_TARGET &&
-               HUD_TOUCH_MAP == TZ_MAP && HUD_TOUCH_COUNT == TZ_COUNT, "HUD touch zones must match the touch editor");
+               HUD_TOUCH_MAP == TZ_MAP && HUD_TOUCH_SHORTCUT == TZ_SHORTCUT && HUD_TOUCH_COUNT == TZ_COUNT,
+               "HUD touch zones must match the touch editor");
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_snapshots;
 // (MHGU_VK_STATS) time spent: translating command lists, waiting for the GPU, guest memory copied per submission
@@ -4137,6 +4139,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     new_pos_y += offset.y;
                     ui_relax_scissor = hud_touch_relax_scissor(ui_relax_scissor, offset);
                     if (item_bar_part) touch_hud_piece(TZ_ITEM, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
+                    // HUD_BAR: the port draws the whole strip itself; keep the game's pieces off the canvas.
+                    if (item_bar_part && g_touch_bar && pos_y >= 600.0f) new_pos_x = new_pos_y = -100000.0f;
                     if (arts_part && hud_art_row_on_canvas(pos_y)) {  // (rows below the canvas are not on the screen)
                         touch_hud_piece(TZ_ARTS, pos_x, pos_y, new_pos_x, new_pos_y, offset.x, offset.y);
                         ui_art_piece = true, ui_art_game_y = pos_y;

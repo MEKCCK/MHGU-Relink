@@ -6,7 +6,8 @@
 enum { HUD_LEFT, HUD_RIGHT, HUD_CENTER };
 enum { HUD_V_TOP, HUD_V_BOTTOM, HUD_V_CENTER };
 
-enum { HUD_TOUCH_NONE = -1, HUD_TOUCH_ITEM, HUD_TOUCH_ARTS, HUD_TOUCH_TARGET, HUD_TOUCH_MAP, HUD_TOUCH_COUNT };
+enum { HUD_TOUCH_NONE = -1, HUD_TOUCH_ITEM, HUD_TOUCH_ARTS, HUD_TOUCH_TARGET, HUD_TOUCH_MAP, HUD_TOUCH_SHORTCUT,
+       HUD_TOUCH_COUNT };
 
 static inline bool hud_touch_map_piece(float x, float y, float z) {
     bool ammo_layer = fabsf(z - 103.0f) < 0.5f && x >= 900.0f;

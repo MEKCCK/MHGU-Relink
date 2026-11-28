@@ -20,8 +20,12 @@
 #include <pthread.h>
 
 #include "../hle.h"
+#include "../config.h"
 #include "itembar.h"
 #include "mousecam.h"
+
+void custom_itembar_frame(Cpu *c);
+void custom_itembar_scroll(int steps);
 
 #define FN_ITEM_BAR      0x4f7f38u  // the player's item bar handler (r0 = the player)
 #define FN_PL_IS_LOCAL   0x47bcd0u  // (player) 1: the handler goes on
@@ -53,6 +57,7 @@ bool itembar_active(void) {
 }
 
 void itembar_scroll(int steps) {
+    if (hud_has_bar(config_live_touch_hud())) { custom_itembar_scroll(steps); return; }
     uint64_t seen = g_seen_ns, now = plat_now_ns();
     if (!seen || now - seen >= ACTIVE_NS) return;  // (no item bar now)
     pthread_mutex_lock(&g_lock);
@@ -150,6 +155,13 @@ static void turn(Cpu *c, uint32_t pl, const Bar *b) {
 
 static void item_bar(Cpu *c) {
     uint32_t pl = c->r[0];
+    uint32_t cvt = sane(pl) ? LD32(pl) : 0;
+    if ((hud_has_bar(config_live_touch_hud()) || hud_has_wheel(config_live_touch_hud())) &&
+        pl == weapon_hunter() && cvt && LD32(cvt + VF_PROWLER_BAR) != FN_PROWLER_BAR) {
+        g_seen_ns = plat_now_ns();
+        custom_itembar_frame(c);
+        return;
+    }
     fnhook_call_original(c, FN_ITEM_BAR);
     if (pl == weapon_hunter()) {
         mousecam_bow_charge_tick(c);

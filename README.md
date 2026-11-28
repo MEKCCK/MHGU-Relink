@@ -20,6 +20,7 @@ Ryujinx / suyu 模拟器互通。
 | [docs/HDR.md](docs/HDR.md) | 原生 HDR 输出与 HDR 分析 |
 | [docs/MODS-zh-CN.md](docs/MODS-zh-CN.md) | Android 模组导入格式与兼容范围 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 项目结构、构建、测试与开发约定 |
+| [docs/ENCYCLOPEDIA.md](docs/ENCYCLOPEDIA.md) | 内置 MHGU 百科：怪物、道具、任务、装备资料与图标，中英文查看 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 两个原项目的合并来源与验证记录 |
 
 ## 目录

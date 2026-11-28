@@ -180,7 +180,7 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 # release built before its tag is made.
 VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '\r\n' | grep . || echo unknown)
 
-RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(O)/rt/binding_view.o $(IMGUI_OBJ) $(FONT_OBJ) \
+RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(O)/rt/binding_view.o $(O)/rt/encyclopedia_ui.o $(IMGUI_OBJ) $(FONT_OBJ) \
            $(O)/updater/sha256.o $(ICON_RES)
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
@@ -331,11 +331,11 @@ $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 $(O)/rt/forge_imgui.o: runtime/forge_imgui_thunks.inc $(IMGUI)/cimgui.h
 $(O)/rt/forge_imgui.o: RTFLAGS += -DCIMGUI_NO_EXPORT -Wno-unused-variable
 
-$(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h runtime/forge_canvas.h runtime/forge_textures.h runtime/forge_texture_command.h
+$(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h runtime/forge_canvas.h runtime/forge_textures.h runtime/forge_texture_command.h runtime/hud_icons.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) $(if $(filter 1,$(NULL_GPU)),-DMHGU_NULL_BACKEND) -Wall -Iruntime -c $< -o $@
 
-$(O)/rt/touch.o: runtime/touch.cpp runtime/touch.h runtime/config.h runtime/hle/input.h runtime/hle/mousecam.h updater/updater.h
+$(O)/rt/touch.o: runtime/touch.cpp runtime/touch.h runtime/config.h runtime/hud_names.h runtime/hle/hudbar.h runtime/hle/itembar.h runtime/hle/input.h runtime/hle/mousecam.h updater/updater.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
 
@@ -348,6 +348,10 @@ $(O)/rt/settings_panel.o: runtime/settings_panel.cpp runtime/settings_panel.h ru
 	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
 
 $(O)/rt/binding_view.o: runtime/binding_view.cpp runtime/binding_view.h runtime/config.h runtime/keymap.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
+
+$(O)/rt/encyclopedia_ui.o: runtime/encyclopedia_ui.cpp runtime/encyclopedia.h runtime/config.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
 

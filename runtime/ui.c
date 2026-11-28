@@ -134,6 +134,20 @@ static bool activity_call_language(const char *method) {
     (*env)->DeleteLocalRef(env, act);
     return ok;
 }
+// GameActivity's own void methods (no language argument).
+static bool activity_call_void(const char *method) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return false;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, method, "()V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+    bool ok = m != NULL && !(*env)->ExceptionCheck(env);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+    return ok;
+}
 #endif
 #ifdef __ANDROID__
 static void frame_cap_to_activity(float fps) {
@@ -653,7 +667,10 @@ int ui_run(void) {
             touch_icon_result(-2, NULL);
         if (action == 3) activity_call_language("showLicenses");
         if (action == 15) activity_call_language("showChangelog");
-        if (action == 16) activity_call_language("checkUpdates");
+        if (action == 16) {
+            if (!activity_call_void("checkUpdates"))
+                LOG("[ui] checkUpdates: GameActivity.checkUpdates() not found\n");
+        }
         if (action == 4) activity_call_language("showGameFolder");
         if (action == 5) activity_call_language("showSaveImport");
         if (action == 6) activity_call_language("showShareLog");

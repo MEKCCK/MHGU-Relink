@@ -1,5 +1,6 @@
 // The mouse wheel on the item bar (runtime/hle/itembar.c)
 #pragma once
+#include <stdbool.h>
 
 void itembar_init(void);         // hooks the item bar handlers (hunter and Prowler)
 bool itembar_active(void);       // its handler ran lately: the wheel is the item bar's, not a menu's

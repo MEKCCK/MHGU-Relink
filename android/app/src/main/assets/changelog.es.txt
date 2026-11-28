@@ -1,4 +1,4 @@
-MHGU Relink 0.3.4 · 2026-11-27
+MHGU Relink 0.3.5 · 2026-11-28
 
-2026-11-27: reconstrucción con la sincronización upstream
-Las misiones de permiso especial cuentan para todos los que las completan. La pantalla inferior de MHXX en una segunda pantalla; JIT para el código interpretado; copias de seguridad automáticas; códigos de salida; filtrado anisotrópico; dispositivo de audio; ratón en menús y Atrás en el título; memoria de la posición de la ventana; actualizador «solo actualizar» y notas en el menú. Correcciones de alta frecuencia para Steam Deck, sombras RADV y distancia crítica de perforantes.
+2026-11-28: enciclopedia y HUD
+Enciclopedia MHGU integrada (chino/inglés, listas completas); barra de seis objetos y rueda de atajos de ocho direcciones; navegación de ajustes reorganizada; HUD de estado alineado a la izquierda; comprobación de actualizaciones de Android corregida; entrada de driver de GPU de Android restaurada.

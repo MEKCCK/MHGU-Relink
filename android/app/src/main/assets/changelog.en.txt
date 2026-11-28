@@ -1,4 +1,4 @@
-MHGU Relink 0.3.4 · 2026-11-27
+MHGU Relink 0.3.5 · 2026-11-28
 
-2026-11-27: upstream sync rebuild
-Deviant quests count for all who clear them. The MHXX bottom screen runs on a second display; JIT for interpreted code; automatic save backups; exit codes; anisotropic filtering; audio output device; menu mouse and title Back switches; window place memory; updater Update only and in-menu release notes. High-frame-rate fixes for Steam Deck input, RADV shadows and Pierce critical distance.
+2026-11-28: encyclopedia and HUD update
+Built-in MHGU encyclopedia (Chinese/English, full long lists); six-slot item bar and eight-way shortcut wheel; reworked settings navigation; status HUD back to automatic left alignment; Android update check fixed; Android GPU driver entry restored.

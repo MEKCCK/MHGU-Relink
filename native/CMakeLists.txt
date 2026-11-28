@@ -58,7 +58,7 @@ add_custom_command(OUTPUT ${FONT_OBJ}
 add_custom_target(font_obj DEPENDS ${FONT_OBJ})
 
 add_library(main SHARED ${RT_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
-                        ${S}/runtime/perfstats.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
+                        ${S}/runtime/encyclopedia_ui.cpp ${S}/runtime/perfstats.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
 
 # (Opus's own pkg-config, which the PC build uses, gives -I<prefix>/include/opus: keep both forms resolvable, so
 #  #include <opus.h> and #include <opus/opus.h> compile the same here and there)
@@ -76,7 +76,7 @@ if(MHGU_DEV)  # (test builds: files/env.txt, files/control.txt; a public build r
 endif()
 # Dear ImGui / FSR: as the Makefile's IMGUIFLAGS / FSRFLAGS
 set_source_files_properties(${IMGUI_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
-  ${S}/runtime/perfstats.cpp PROPERTIES
+  ${S}/runtime/encyclopedia_ui.cpp ${S}/runtime/perfstats.cpp PROPERTIES
   COMPILE_OPTIONS "-O2;-fvisibility=hidden;-w")
 set_source_files_properties(${S}/runtime/nvn/vulkan/vma.cpp PROPERTIES COMPILE_OPTIONS "-O2;-w")
 set_source_files_properties(${FSR_C} PROPERTIES COMPILE_OPTIONS "-O2;-w;-std=c11")

@@ -47,12 +47,16 @@ void touch_background(void);  // also retain whether an in-game menu was open fo
 // while shown, the HUD moves out of the thumbs' way: the status to the left edge, the item bar to the bottom middle,
 // the Hunter Arts and the target camera to the top right (nvn/vulkan/exec.c)
 extern volatile int g_touch_hud;
+// HUD_BAR: the port's six-slot item bar is on. The native 5-slot strip is pushed off the canvas (nvn/vulkan/exec.c).
+extern volatile int g_touch_bar;
+// The eight-direction shortcut wheel is open; it is drawn even when the touch controls are hidden.
+extern volatile int g_touch_wheel;
 // Where those moved HUD parts are drawn, so a finger on them works them: a tap on the item bar uses the item and a
 // swipe turns it, a tap on a Hunter Art's panel performs it, a tap on the target camera's icon enables the lock-on
 // and subsequent taps select the next monster; holding the icon for 500 ms toggles the lock. The render thread passes
 // each moved part's place (the game's
 // position, and where it went on the 1280x720 canvas: nvn/vulkan/exec.c cbuf_info), and closes each frame (device.c).
-enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_COUNT };
+enum { TZ_ITEM, TZ_ARTS, TZ_TARGET, TZ_MAP, TZ_SHORTCUT, TZ_COUNT };
 // where the player put them in the layout editor: an offset from their default place, in the game's 16:9 canvas
 // units (1280 x 720); the render thread adds it (nvn/vulkan/exec.c)
 extern volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];
@@ -64,6 +68,10 @@ void touch_hud_piece(int zone, float game_x, float game_y, float canvas_x, float
 void touch_hud_art_slot(float game_y, int slot);
 void touch_hud_frame(void);
 void touch_hud_menu(void);  // (render thread) a menu window of the game's was drawn this frame: the menu layout
+// The shortcut wheel's configuration (+ menu): three pages of eight item ids.
+void touch_wheel_config(uint16_t items[3][8], int *page);
+void touch_wheel_assign(int page, int direction, uint16_t item);
+void touch_wheel_set_page(int page);
 
 #ifdef __cplusplus
 }

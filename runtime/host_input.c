@@ -1495,6 +1495,9 @@ void host_input_update(void) {
         if (st->stick == 1) rx = st->x, ry = st->y;
     }
 
+    // The shortcut wheel (runtime/touch.cpp): L + right-stick click opens it, the right stick aims, L released uses.
+    { void touch_wheel_pad(bool connected, uint64_t *buttons, int *rx, int *ry);
+      touch_wheel_pad(pad != NULL, &b, &rx, &ry); }
     // The right stick's click in a hunt turns the lock-on on or off (the camera kept on the target, as in the newer
     // games: runtime/touch.cpp); elsewhere it is the game's
     static bool rstick_was;

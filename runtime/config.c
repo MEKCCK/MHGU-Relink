@@ -128,7 +128,7 @@
     .phone_rumble = 1,                                                                              \
     /* [Touch] */                                                                                   \
     .touch_controls = TOUCH_AUTO,                                                                   \
-    .touch_hud = 1,                                                                                 \
+    .touch_hud = HUD_BAR_WHEEL,                                                                     \
     .touch_auto_r = 0,                                                                              \
     .touch_floating = 0,                                                                            \
     .touch_camera = 1.0f,                                                                           \
@@ -559,8 +559,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; While they show, the HUD moves out of the thumbs' way: the status to the left edge, the item bar to the bottom\n"
     "; middle, the Hunter Arts and the target camera to the top right\n"
-    "; Default: On\n"
-    "MoveHUD = On\n"
+    "; Off: native HUD; On: native HUD moved; Bar: six-slot item bar; Wheel: shortcut wheel; BarWheel: both (default)\n"
+    "MoveHUD = BarWheel\n"
     "\n"
     "; With the weapon sheathed, slide the fixed or floating movement stick past its rim to hold native R\n"
     "; and run when the game allows running; it starts at 1.60x the radius and holds until 1.45x\n"
@@ -1206,7 +1206,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "LockOn", lock_on, false),
     ON_OFF("Controls", "PersistentLockOn", persistent_lock_on, false),
     {"Touch", "Controls", SET_CHOICE, F(touch_controls), 0, 0, 0, "Auto,On,Off", NULL, false, ERR_MISC},
-    ON_OFF("Touch", "MoveHUD", touch_hud, false),
+    {"Touch", "MoveHUD", SET_CHOICE, F(touch_hud), 0, 0, 0, "Off,On,Bar,Wheel,BarWheel", NULL, false, ERR_MISC},
     ON_OFF("Touch", "AutoR", touch_auto_r, false),
     ON_OFF("Touch", "FloatingStick", touch_floating, false),
     ON_OFF("Touch", "ShowAttacks", touch_show[TB_ATTACKS], false),

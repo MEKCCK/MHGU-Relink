@@ -51,19 +51,31 @@ extern volatile uint64_t g_town_ns;  // (hle/quickhunt.c: a town's walking-aroun
 int weapon_drawn(void);  // (hle/weapon.c: 1 the weapon out, 0 sheathed, -1 not known)
 #include "hle/input.h"
 #include "hle/itembar.h"
+#include "hle/hudbar.h"
 #include "hle/menuptr.h"
 #include "hle/mousecam.h"
 SDL_Window *ui_window(void);
 bool host_input_press(const char *button, unsigned frames);
 }
 #include "haptics.h"  // (a short tick on the phone when a control is pressed)
+#include "hud_names.h"  // (the item bar's names; generated from the game's item table)
 #include "overlay.h"
 #include "settings_locale.h"
 #include "touch.h"
 
 extern "C" int presence_in_quest(void);
 
+// (runtime/overlay.cpp) the six-slot bar's atlas and names, merged into ImGui's font atlas there.
+extern int g_icon_id, g_icon_w, g_icon_h;
+extern const short *g_hud_rect;
+extern const short *g_hud_cell;
+extern const unsigned char *g_hud_rgb;
+extern int g_hud_id_max;
+extern ImFont *g_hud_font;
+
 volatile int g_touch_hud;
+volatile int g_touch_bar;   // the self-drawn six-slot bar is on: the native strip is pushed off the canvas
+volatile int g_touch_wheel; // the shortcut wheel is open: draw it even with the touch controls hidden
 volatile float g_touch_zone_dx[TZ_COUNT], g_touch_zone_dy[TZ_COUNT];
 
 namespace {
@@ -76,12 +88,12 @@ enum Ctl {
     C_ATTACK, C_DODGE, C_R, C_ZR, C_ZL, C_L, C_MENU, C_MAP, C_SETTINGS, C_SHEATHE, C_RUN, C_HEAVY, C_LIGHT, C_CORNER,
     C_HMINUS, C_R3, C_HDPAD, C_COMBO, C_COMBO_END = C_COMBO + TOUCH_COMBOS - 1,
     C_RFIRE, C_RSECOND, C_RAIM, C_RSPECIAL, C_RDODGE, C_RSHEATHE, C_AMMO_UP, C_AMMO_DOWN,  // (a bow's or a bowgun's)
-    C_LAYOUT, C_DPAD_TOGGLE, C_STICK, C_RSTICK, C_RSTICK_TOGGLE, C_LOCK,  // append saved controls so existing keys keep their identities
+    C_LAYOUT, C_DPAD_TOGGLE, C_STICK, C_RSTICK, C_RSTICK_TOGGLE, C_LOCK, C_WHEEL,  // append saved controls so existing keys keep their identities
     C_DPAD, C_MPILL, C_FX, C_FY, C_MINUS, C_ML, C_MR,  // (the menu layout's: saved d-pad and fixed face buttons)
     C_MZL, C_MZR,                                       // (and ZL / ZR beside L / R, when [Touch] ShowMenuZL / ZR say so)
     C_COUNT
 };
-const int C_LAID = C_LOCK + 1;
+const int C_LAID = C_WHEEL + 1;
 enum Icon { I_ATTACK, I_DODGE, I_SHIELD, I_BURST, I_TARGET_SELECT, I_CAMERA, I_MENU, I_MAP, I_GEAR, I_SHEATHE, I_RUN, I_STICK, I_DPAD,
             I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN, I_LOCK };
 
@@ -143,6 +155,7 @@ const Def DEFS[C_COUNT] = {
     {"right_stick", "Right stick", I_STICK, "", 0, true, .29f, .22f, .115f},
     {"right_stick_toggle", "Right stick visibility", I_STICK, "", 0, false, .52f, .90f, .043f},
     {"lock", "Lock large monster", I_LOCK, "", 0, true, .20f, .50f, .048f},
+    {"item_wheel", "Item wheel", I_COMBO, "", 0, false, 1.5131f, .4082f, .052f},
     // the menu layout's (the d-pad uses dpad_hunt's saved position)
     {"dpad", "D-pad", I_DPAD, "", 0, false, 0, 0, .145f},
     {"menu_pill", "Confirm and back", I_ATTACK, "", 0, true, 0, 0, .085f},
@@ -221,6 +234,7 @@ bool classic_control(int i) {
            i == C_HDPAD || i == C_DPAD_TOGGLE || i == C_STICK || i == C_RSTICK_TOGGLE || i == C_LOCK || i == C_SETTINGS || is_combo(i);
 }
 bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
+    if (i == C_WHEEL) return in_quest && !menu && hud_has_wheel(config_live_touch_hud());
     if (is_ammo(i)) return in_quest && !menu && config_live_touch_show(TB_AMMO) && weapon_ranged(weapon_hunter());
     if (i == C_LAYOUT || is_ranged(i)) return false;
     if (i == C_LOCK) return in_quest;
@@ -257,6 +271,7 @@ bool in_mode(int i, bool menu, bool in_quest, int ranged = -1) {
 }
 bool in_editor(int i, bool in_quest, int profile) {
     if (profile < 0) return false;
+    if (i == C_WHEEL) return true;
     if (i == C_LOCK) return true;
     if (i == C_RSTICK || i == C_RSTICK_TOGGLE) return true;
     if (i == C_HDPAD) return config_live_touch_controls() != TOUCH_OFF && config_live_touch_show(TB_DPAD);
@@ -361,7 +376,7 @@ void migrate_ranged_guard(Layout &l, int profile) {
     if (l.x[C_R] == DEFS[C_R].x && l.y[C_R] == DEFS[C_R].y && l.scale[C_R] == 1.0f)
         l.x[C_R] = .58f, l.y[C_R] = .78f;
 }
-const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target", "hud_map"};
+const char *const ZONE_KEY[TZ_COUNT] = {"hud_items", "hud_arts", "hud_target", "hud_map", "hud_shortcut"};
 void migrate_common_ammo(Layout &l) {
     // Previously hidden common arrows used positions occupied by the combo grid and R.
     // Move only the untouched old defaults; saved custom placements remain independent.
@@ -447,7 +462,7 @@ bool save_layout_file(const Layout &l, const char *path, const char *name = null
     snprintf(temp, sizeof temp, "%s.tmp", path);
     FILE *f = fopen(temp, "w");
     if (!f) { fprintf(stderr, "[touch] could not save %s\n", path); return false; }
-    fprintf(f, "layout_version 5\n");
+    fprintf(f, "layout_version 7\n");
     if (name) fprintf(f, "template_name %s\n", name);
     fprintf(f, "# touch controls: name, centre (screen heights from its edge and the bottom), size\n");
     for (int i = 0; i < C_LAID; i++) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
@@ -500,6 +515,8 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
         if (!strcmp(line, "layout_version 3")) { version = 3; continue; }
         if (!strcmp(line, "layout_version 4")) { version = 4; continue; }
         if (!strcmp(line, "layout_version 5")) { version = 5; continue; }
+        if (!strcmp(line, "layout_version 6")) { version = 6; continue; }
+        if (!strcmp(line, "layout_version 7")) { version = 7; continue; }
         if (!strncmp(line, "icon ", 5)) {
             int choice;
             char hash[65], extra;
@@ -578,7 +595,7 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
     bool ok = !ferror(f) && version && !invalid_icon && !invalid_editor && (!name || named);
     fclose(f);
     for (int i = 0; i < C_LAID; ++i)
-        if (version >= 5 || i < C_RSTICK_TOGGLE) ok = ok && controls[i];
+        if (i == C_WHEEL ? version >= 6 : (version >= 5 || i < C_RSTICK_TOGGLE)) ok = ok && controls[i];
     for (int k = 0; k < TZ_MAP; ++k) ok = ok && zones[k];
     if (version >= 4) ok = ok && zones[TZ_MAP] && editor_present;
     if (version >= 2) for (int i : ICON_CONTROLS) {
@@ -591,6 +608,8 @@ bool load_layout_file(Layout *out, const char *path, char *name = nullptr, Confi
         ok = ok && config_validate(combos, error, sizeof error);
     }
     if (!ok) return false; // A truncated or corrupt snapshot must not silently overwrite a valid layout.
+    // Before version 7 the shortcut's offset was relative to the item bar's; make it absolute, keeping its place.
+    if (version < 7) layout.zx[TZ_SHORTCUT] += layout.zx[TZ_ITEM], layout.zy[TZ_SHORTCUT] += layout.zy[TZ_ITEM];
     if (version < 3) migrate_common_ammo(layout);
     *out = layout;
     if (name) SDL_utf8strlcpy(name, stored_name, TOUCH_TEMPLATE_NAME_MAX);
@@ -622,6 +641,11 @@ struct Geo {
 Geo place(const Layout &l, int i, float w, float h) {
     const Def &d = DEFS[i];
     if (i == C_DPAD) return place(l, C_HDPAD, w, h);
+    if (i == C_WHEEL) {
+        const float radius = d.r * l.scale[i] * h, margin = std::min(.225f * h, .49f * w);
+        const float x = from_right(l, i) ? w - l.x[i] * h : l.x[i] * h;
+        return {ImVec2(std::clamp(x, margin, w - margin), std::clamp(h - l.y[i] * h, margin, h - margin)), radius};
+    }
     if (i == C_MINUS) return {place(MENU_LAYOUT, C_MAP, w, h).c, d.r * MENU_LAYOUT.scale[C_MAP] * h};
     if (i == C_CORNER) {  // (c: the centre of its bend; a larger band stays against the edges)
         float r = d.r * l.scale[i] * h, in = r * (1 + BAND_T);
@@ -763,7 +787,7 @@ std::vector<ArtPiece> g_build_arts;
 bool g_build_menu;       // (render thread) a menu window of the game's in this frame
 std::atomic<uint64_t> g_menu_ns;  // when one was last drawn
 // how far each part's art reaches past its pieces' positions, in the game's units (left, top, right, bottom)
-const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}, {0, 0, 0, 0}};
+const float MARGIN[TZ_COUNT][4] = {{61, 17, 85, 23}, {17, 13, 115, 11}, {30, 26, 30, 13}, {0, 0, 0, 0}, {12, 12, 12, 12}};
 const float ZONE_SLOP = 10.0f;
 constexpr float ART_ROW_GAP = 22.0f;
 
@@ -894,11 +918,39 @@ Rect editor_zone_rect(const Layout &layout, int k, float w, float h, bool in_que
             r = {right - 260.0f * sx, 0.0f, right, 260.0f * sy, true};
         }
     }
+    if (k == TZ_SHORTCUT) {  // right of the five slots' default place, with only its own offset
+        const float ch = 720.0f, sw = ch * .092f, pitch = sw * 1.1f;
+        const float fx1 = 640.0f + pitch * 2.5f + sw * .16f, gap = pitch * .35f;
+        r = {fx1 + gap, ch * .818f, fx1 + gap + sw, ch * .818f + sw * 1.12f, true};
+    }
+    if (k == TZ_ITEM && hud_has_bar(config_live_touch_hud())) {  // the port's own five slots, not the native strip
+        const float ch = 720.0f, sw = ch * .092f, pitch = sw * 1.1f;
+        r = {640.0f - pitch * 2.5f - sw * .16f, ch * .818f,
+             640.0f + pitch * 2.5f + sw * .16f, ch * .818f + sw * 1.12f, true};
+    }
     Pic p = picture(w, h);
     r.x0 = p.x0 + (r.x0 + (layout.zx[k] - MARGIN[k][0] - ZONE_SLOP) * sx) * p.w / 1280.0f;
     r.x1 = p.x0 + (r.x1 + (layout.zx[k] + MARGIN[k][2] + ZONE_SLOP) * sx) * p.w / 1280.0f;
     r.y0 = p.y0 + (r.y0 + (layout.zy[k] - MARGIN[k][1] - ZONE_SLOP) * sy) * p.h / 720.0f;
     r.y1 = p.y0 + (r.y1 + (layout.zy[k] + MARGIN[k][3] + ZONE_SLOP) * sy) * p.h / 720.0f;
+    // The port's own bar and its shortcut have no native art to allow for: their handles are exactly their size.
+    if (k == TZ_SHORTCUT || (k == TZ_ITEM && hud_has_bar(config_live_touch_hud()))) {
+        float x0, y0, x1, y1;
+        const float ch = 720.0f, sw = ch * .092f, pitch = sw * 1.1f, fh = sw * 1.12f;
+        if (k == TZ_ITEM) {
+            x0 = 640.0f - pitch * 2.5f - sw * .16f, x1 = 640.0f + pitch * 2.5f + sw * .16f;
+            y0 = ch * .818f, y1 = y0 + fh;
+        } else {  // the orbit's bounding square
+            const float cx = 640.0f + pitch * 2.5f + sw * .16f + pitch * .35f + sw * .5f;
+            const float cy = ch * .818f + fh * .5f, orbit = std::max(sw, fh) * .64f;
+            x0 = cx - orbit, x1 = cx + orbit, y0 = cy - orbit, y1 = cy + orbit;
+        }
+        const float zx = layout.zx[k], zy = layout.zy[k];
+        r.x0 = p.x0 + (x0 + zx) * sx * p.w / 1280.0f;
+        r.x1 = p.x0 + (x1 + zx) * sx * p.w / 1280.0f;
+        r.y0 = p.y0 + (y0 + zy) * sy * p.h / 720.0f;
+        r.y1 = p.y0 + (y1 + zy) * sy * p.h / 720.0f;
+    }
     return r;
 }
 
@@ -959,7 +1011,7 @@ Zones zones(void) {
 }
 
 // ------------------------------------------------------------------ fingers (host main thread)
-enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_EDIT, F_GAME_MENU, F_EDIT_PANEL };
+enum Kind { F_NONE, F_BUTTON, F_STICK, F_RSTICK, F_CAMERA, F_MENU, F_ITEM, F_ARTS, F_TARGET, F_WHEEL, F_EDIT, F_GAME_MENU, F_EDIT_PANEL };
 struct Finger {
     SDL_FingerID id;
     Kind kind;
@@ -1002,6 +1054,16 @@ struct State {
     uint64_t hunt_ns;
     uint64_t item_flash, art_flash;
     int item_dir, art_row;
+    uint16_t shortcut_item = 176;  // the sixth slot: Small Barrel Bomb until the player binds another item
+    bool shortcut_binding = false;
+    uint64_t item_anim_ns = 0;     // the six-slot strip's slide-in after a notch
+    bool wheel_open = false;
+    int wheel_page = 0;            // 0..2
+    uint16_t wheel_items[3][8] = {};
+    int wheel_dir = -1;            // the direction under the finger or stick now
+    bool pad_wheel = false;
+    int pad_wheel_slot = -1;
+    uint64_t pad_wheel_prev = 0;
     int drawn;               // weapon_drawn, at the last touch_input
     uint64_t ammo_ready, ammo_hold;  // the next press of the ammo may start then; L held for it until then
     uint64_t bar_since;      // when touch began holding L, including a long item-bar press
@@ -1114,6 +1176,27 @@ void ensure_loaded(State &s) {
     s.loaded = true, s.sel = -1;
     s.in_quest = presence_in_quest();
     s.detected_weapon = -1;
+    if (FILE *file = fopen("touch_shortcut.txt", "r")) {
+        unsigned item;
+        if (fscanf(file, "%u", &item) == 1 && item > 0 && item <= UINT16_MAX) s.shortcut_item = (uint16_t)item;
+        fclose(file);
+    }
+    if (FILE *file = fopen("touch_wheel.txt", "r")) {
+        int page;
+        bool ok = fscanf(file, "%d", &page) == 1 && page >= 0 && page < 3;
+        uint16_t items[3][8] = {};
+        for (int p = 0; p < 3 && ok; p++)
+            for (int i = 0; i < 8; i++) {
+                unsigned id;
+                if (fscanf(file, "%u", &id) != 1 || id > UINT16_MAX) { ok = false; break; }
+                items[p][i] = (uint16_t)id;
+            }
+        if (ok) {
+            s.wheel_page = page;
+            memcpy(s.wheel_items, items, sizeof items);
+        }
+        fclose(file);
+    }
     Layout layout;
     load_common_layout(&layout);
     install_common_layout(s, layout);
@@ -1149,6 +1232,141 @@ bool ammo_step(State &s, int dir, bool from_arrow = false) {
 Geo item_arrow(const Rect &item, int d, float h) {
     float r = .052f * h;
     return {ImVec2(d < 0 ? item.x0 - r * 1.15f : item.x1 + r * 1.15f, (item.y0 + item.y1) * .5f), r};
+}
+
+// ---- the self-drawn five-slot item bar (HUD_BAR); the bound shortcut is its own part, below.
+struct BarGeom { float sw, pitch, cx, cy0, fh, fx0, fx1, fy0, fy1; };
+static BarGeom bar_geom_raw(float w, float h) {
+    // The same 1280x720 HUD grid the editor and the native HUD use (16:9, squeezed on wider pictures),
+    // so a handle's place is exactly the bar's place.
+    const Pic p = picture(w, h);
+    const float ux = p.w / 1280.0f * squeeze(), uy = p.h / 720.0f * squeeze_y();
+    BarGeom g;
+    g.sw = 720.0f * .092f * uy;
+    g.pitch = g.sw * 1.1f;
+    g.cx = p.x0 + 640.0f * ux;
+    g.cy0 = p.y0 + 720.0f * .818f * uy;
+    g.fh = g.sw * 1.12f;
+    g.fx0 = g.cx - g.pitch * 2.5f - g.sw * .16f;
+    g.fx1 = g.cx + g.pitch * 2.5f + g.sw * .16f;
+    g.fy0 = g.cy0;
+    g.fy1 = g.cy0 + g.fh;
+    return g;
+}
+static BarGeom item_bar_geom(const Layout &l, float w, float h) {
+    BarGeom g = bar_geom_raw(w, h);
+    // The touch layout editor's HUD offsets (hud_items), in the game's 1280x720 canvas units.
+    const Pic p = picture(w, h);
+    g.cx += l.zx[TZ_ITEM] * p.w / 1280.0f * squeeze();
+    g.cy0 += l.zy[TZ_ITEM] * p.h / 720.0f * squeeze_y();
+    g.fx0 = g.cx - g.pitch * 2.5f - g.sw * .16f;
+    g.fx1 = g.cx + g.pitch * 2.5f + g.sw * .16f;
+    g.fy0 = g.cy0;
+    g.fy1 = g.cy0 + g.fh;
+    return g;
+}
+// The sixth slot, cut out of the bar: its own HUD part (hud_shortcut), independent of the bar's offset.
+struct ShortcutGeom { float x0, x1, y0, y1, sw, fh; };
+static ShortcutGeom shortcut_geom(const State &s, float w, float h) {
+    BarGeom g = bar_geom_raw(w, h);
+    const Pic p = picture(w, h);
+    const float ox = s.layout.zx[TZ_SHORTCUT] * p.w / 1280.0f * squeeze();
+    const float oy = s.layout.zy[TZ_SHORTCUT] * p.h / 720.0f * squeeze_y();
+    const float gap = g.pitch * .35f;
+    return {g.fx1 + gap + ox, g.fx1 + gap + g.sw + ox, g.fy0 + oy, g.fy1 + oy, g.sw, g.fh};
+}
+static bool bar_mode(const State &s) {
+    return hud_has_bar(config_live_touch_hud()) && s.in_quest && !s.menu && s.detected_weapon != 15;
+}
+static Rect bar_rect(const State &s, float w, float h) {
+    if (!bar_mode(s)) return {};
+    BarGeom g = item_bar_geom(s.layout, w, h);
+    Rect r = {g.fx0 - g.sw * .10f, g.fy0 - g.sw * .14f, g.fx1 + g.sw * .10f, g.fy1 + g.sw * .44f, true};
+    return r;
+}
+static Rect shortcut_rect(const State &s, float w, float h) {
+    if (!bar_mode(s)) return {};
+    ShortcutGeom g = shortcut_geom(s, w, h);
+    const float pad = g.sw * .12f;
+    return {g.x0 - pad, g.y0 - pad, g.x1 + pad, g.y1 + pad, true};
+}
+// 0..4 the five pouch slots, 5 the shortcut, -1 elsewhere.
+static int bar_slot_at(const State &s, float x, float y, float w, float h) {
+    if (!bar_mode(s)) return -1;
+    BarGeom g = item_bar_geom(s.layout, w, h);
+    if (y >= g.fy0 - g.sw * .12f && y <= g.fy1 + g.sw * .45f)
+        for (int d = -2; d <= 2; d++) {
+            float c = g.cx + d * g.pitch;
+            if (x >= c - g.sw * .5f && x <= c + g.sw * .5f) return d + 2;
+        }
+    if (shortcut_rect(s, w, h).in(x, y)) return 5;
+    return -1;
+}
+static void save_shortcut(uint16_t id) {
+    if (FILE *file = fopen("touch_shortcut.txt.tmp", "w")) {
+        bool ok = fprintf(file, "%u\n", (unsigned)id) > 0;
+        if (fclose(file) != 0) ok = false;
+        if (ok) rename("touch_shortcut.txt.tmp", "touch_shortcut.txt");
+        else remove("touch_shortcut.txt.tmp");
+    }
+}
+
+// ---- the eight-direction shortcut wheel (HUD_WHEEL / HUD_BAR_WHEEL): three pages of eight item ids.
+static bool wheel_mode(const State &s) {
+    return hud_has_wheel(config_live_touch_hud()) && s.in_quest && !s.menu && !s.typing &&
+           !overlay_menu_open() && s.detected_weapon != 15;
+}
+static ImVec2 wheel_slot(int i, ImVec2 center, float h) {
+    const float angle = i * .785398163f - 1.570796327f;
+    return {center.x + cosf(angle) * h * .17f, center.y + sinf(angle) * h * .17f};
+}
+static int wheel_direction(float dx, float dy, float h) {
+    if (hypotf(dx, dy) < h * .10f) return -1;
+    return (int)lroundf(atan2f(dy, dx) / .785398163f + 2.f) & 7;
+}
+static void save_wheel(const State &s) {
+    if (FILE *file = fopen("touch_wheel.txt.tmp", "w")) {
+        bool ok = fprintf(file, "%d\n", s.wheel_page) > 0;
+        for (int page = 0; page < 3; page++)
+            for (int i = 0; i < 8; i++)
+                if (fprintf(file, "%u\n", (unsigned)s.wheel_items[page][i]) < 0) ok = false;
+        if (fclose(file) != 0) ok = false;
+        if (ok) rename("touch_wheel.txt.tmp", "touch_wheel.txt");
+        else remove("touch_wheel.txt.tmp");
+    }
+}
+static void wheel_use(State &s, int direction) {
+    if (direction < 0 || direction > 7) return;
+    uint16_t id = s.wheel_items[s.wheel_page][direction];
+    if (id) hudbar_queue_item(id);
+    s.wheel_open = false;
+    s.wheel_dir = -1;
+}
+// A tap on the bar: use that slot's item, bind it to the sixth slot while binding, or use the shortcut.
+static void bar_tap(State &s, float x, float y, float w, float h) {
+    int slot = bar_slot_at(s, x, y, w, h);
+    if (slot < 0) return;
+    HudSlot snap[HUDBAR_SLOTS];
+    int win[5] = {-1, -1, -1, -1, -1};
+    int n = hudbar_copy(snap, HUDBAR_SLOTS);
+    hudbar_window(win, 5);
+    if (s.shortcut_binding) {
+        s.shortcut_binding = false;
+        if (slot >= 0 && slot < 5) {
+            int idx = win[slot];
+            if (idx >= 0 && idx < n && snap[idx].id) {
+                s.shortcut_item = snap[idx].id;
+                save_shortcut(s.shortcut_item);
+            }
+        }
+        return;
+    }
+    if (slot == 5) {
+        if (s.shortcut_item) hudbar_queue_item(s.shortcut_item);
+        return;
+    }
+    int idx = win[slot];
+    if (idx >= 0 && idx < n && snap[idx].id && snap[idx].count) hudbar_use_slot(idx);
 }
 
 bool floating_stick_enabled(const State &s) {
@@ -1286,7 +1504,7 @@ void release_dpad(State &s) {
 }
 
 void item_swipe(State &s, Finger &f, uint64_t now) {
-    if (f.done) return;
+    if (f.done || f.part == 3) return;
     float step = .055f * s.h, ax = fabsf(f.swipe), ay = fabsf(f.swipe_y);
     if (!f.part) {
         if (s.in_quest && weapon_ranged(weapon_hunter()) && ay >= step * 1.3f && ay > ax) f.part = 2;
@@ -1303,7 +1521,12 @@ void item_swipe(State &s, Finger &f, uint64_t now) {
     } else {
         if (now < f.step_at) return;
         s.item_dir = f.swipe > 0 ? 1 : -1;
-        itembar_touch_scroll(s.item_dir);
+        if (bar_mode(s)) {
+            itembar_scroll(s.item_dir);  // (itembar.c routes it to custom_itembar_scroll)
+            s.item_anim_ns = now;
+        } else {
+            itembar_touch_scroll(s.item_dir);
+        }
         s.item_arrow_source = f.item_arrow;
         s.item_flash = now + 200 * MS;
         f.step_at = now + 70 * MS;
@@ -1563,7 +1786,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (!art_touch_enabled(s, z)) cancel_art_input(s);
     if (s.edit && !overlay_menu_open()) { edit_event(s, e, x, y); return true; }
     if (overlay_menu_open()) release_dpad(s), cancel_button_camera(s);
-    if (overlay_menu_open() || s.menu || (!g_visible && !s.auto_wait)) cancel_item_gestures(s);
+    if (overlay_menu_open() || s.menu || ((!g_visible && !s.auto_wait) && !bar_mode(s))) cancel_item_gestures(s);
     if (e->type == SDL_EVENT_FINGER_DOWN) {
         Finger *f = nullptr;
         for (Finger &g : s.f)
@@ -1593,18 +1816,28 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 return true;
             }
             if (menu_touch_begin(s, *f, e)) return true;
+            Rect bar = bar_rect(s, s.w, s.h), shortcut = shortcut_rect(s, s.w, s.h);
+            if (g_touch_bar && shortcut.ok && shortcut.in(x, y)) {
+                f->kind = F_ITEM, f->part = 3;  // (the separate shortcut slot)
+                return true;
+            }
+            if (g_touch_bar && bar.ok && bar.in(x, y)) {
+                f->kind = F_ITEM;  // (controls hidden, the item bar still works)
+                return true;
+            }
             if (art_touch_begin(s, *f, z, x, y)) return true;
             f->kind = F_CAMERA;  // (hidden: a drag still turns the camera)
             return true;
         }
-        Rect item = zone_rect(z, TZ_ITEM, s.w, s.h), arts = zone_rect(z, TZ_ARTS, s.w, s.h),
-             target = zone_rect(z, TZ_TARGET, s.w, s.h);
+        Rect item = bar_mode(s) ? bar_rect(s, s.w, s.h) : zone_rect(z, TZ_ITEM, s.w, s.h),
+             shortcut = bar_mode(s) ? shortcut_rect(s, s.w, s.h) : Rect{},
+             arts = zone_rect(z, TZ_ARTS, s.w, s.h), target = zone_rect(z, TZ_TARGET, s.w, s.h);
         int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, classic && !floating_stick_enabled(s), s.menu, s.in_quest, false, control_profile(s));
         if (!classic && (c == C_R || c == C_DODGE || c == C_CORNER || c == C_RSECOND || c == C_AMMO_UP || c == C_AMMO_DOWN) && item.in(x, y))
             c = -1;  // (narrow screens: their default places, and B's in layouts saved before, reach the item bar)
         int arrow = 0;
         // These arrows are drawn above normal controls: give their entire gesture the same ownership.
-        if (item.ok && !s.menu && config_live_touch_show(TB_ITEM_ARROWS))
+        if (item.ok && !bar_mode(s) && !s.menu && config_live_touch_show(TB_ITEM_ARROWS))
             for (int d = -1; d <= 1; d += 2) {
                 Geo g = item_arrow(item, d, s.h);
                 if (hypotf(x - g.c.x, y - g.c.y) < g.r * 1.2f) arrow = d;
@@ -1639,6 +1872,16 @@ extern "C" bool touch_event(const SDL_Event *e) {
             bool held = false;
             for (const Finger &g : s.f) if (g.kind == F_RSTICK) held = true;
             f->kind = held ? F_MENU : F_RSTICK, f->ctl = c;
+        } else if (c == C_WHEEL) {
+            if (std::any_of(std::begin(s.f), std::end(s.f), [](const Finger &g) { return g.kind == F_WHEEL; })) return true;
+            Geo g = place(s.layout, C_WHEEL, s.w, s.h);
+            f->kind = F_WHEEL;
+            f->part = -1;
+            f->x0 = g.c.x, f->y0 = g.c.y;
+            f->step_at = now;
+            s.wheel_open = true;
+            tap_due();
+            return true;
         } else if (c >= 0 && !is_ammo(c) && !arrow && !on_stick && !item.in(x, y) && !target.in(x, y) && arts.in(x, y) &&
                    hit(s.layout, x, y, s.w, s.h, &core_part, 1.0f, classic && !floating_stick_enabled(s),
                        s.menu, s.in_quest, false, control_profile(s), true) < 0 && art_touch_begin(s, *f, z, x, y)) {
@@ -1676,6 +1919,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
             itembar_touch_cancel();
             s.item_arrow_source = false;
             f->kind = F_ITEM;
+        } else if (!s.menu && shortcut.in(x, y)) {
+            itembar_touch_cancel();
+            s.item_arrow_source = false;
+            f->kind = F_ITEM, f->part = 3;
         } else if (!s.menu && target.in(x, y)) {
             f->kind = F_TARGET;
         } else if (art_touch_begin(s, *f, z, x, y)) {
@@ -1706,6 +1953,35 @@ extern "C" bool touch_event(const SDL_Event *e) {
     }
     Finger *f = finger(s, e->tfinger.fingerID);
     if (!f) return true;
+    if (f->kind == F_WHEEL) {
+        if (!s.wheel_open || !wheel_mode(s) || overlay_menu_open() || s.menu) {
+            s.wheel_open = false;
+            f->kind = F_NONE;
+            return true;
+        }
+        if (e->type == SDL_EVENT_FINGER_MOTION || e->type == SDL_EVENT_FINGER_UP) {
+            int dir = wheel_direction(x - f->x0, y - f->y0, s.h);
+            if (dir != f->part) f->part = dir, f->step_at = now;
+            s.wheel_dir = dir;
+        }
+        if (e->type == SDL_EVENT_FINGER_MOTION) return true;
+        if (e->type == SDL_EVENT_FINGER_CANCELED) {
+            s.wheel_open = false;
+            f->kind = F_NONE;
+            return true;
+        }
+        if (f->part >= 0) {
+            wheel_use(s, f->part);
+        } else if (now - f->t0 < 350 * MS) {
+            s.wheel_page = (s.wheel_page + 1) % 3;
+            save_wheel(s);
+            tap_due();
+        } else {
+            s.wheel_open = false;
+        }
+        f->kind = F_NONE;
+        return true;
+    }
     if (f->kind == F_GAME_MENU) {
         menu_touch_event(s, *f, e, x, y);
         return true;
@@ -1779,9 +2055,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (f->kind == F_STICK) s.stick_on = false, s.run = false;
     if (f->kind == F_EDIT) s.pinch = false;
     if (item_gesture(*f) && cancel) cancel_item_gestures(s);
-    if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && !f->part && now - f->t0 < 220 * MS &&
-        fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
-        pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
+    if (f->kind == F_ITEM && tap && !f->done && !f->bar_open && (!f->part || f->part == 3) && now - f->t0 < 220 * MS &&
+        fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h) {
+        if (bar_mode(s)) bar_tap(s, x, y, s.w, s.h);
+        else pulse(s, B(BTN_Y), 80 * MS);
+        tap_due();  // a tap: that bar slot's item, or Y on the native bar
+    }
     if (f->kind == F_ARTS && tap && !f->done && f->part >= 0 && f->part < 3) {
         uint64_t buttons = weapon_art_buttons(f->part);
         if (buttons) {
@@ -1822,6 +2101,59 @@ extern "C" bool touch_event(const SDL_Event *e) {
     f->kind = F_NONE;
     recompute_held(s);
     return true;
+}
+
+// The controller's wheel: hold L and click the right stick to open, aim with the right stick, release L to use.
+// Another right-stick click while open turns the page. (runtime/host_input.c, before the game sees the buttons.)
+extern "C" void touch_wheel_pad(bool connected, uint64_t *buttons, int *rx, int *ry) {
+    if (!buttons) return;
+    std::lock_guard<std::mutex> lock(g_lock);
+    State &s = g_s;
+    ensure_loaded(s);
+    const uint64_t b = *buttons;
+    const bool active = connected && wheel_mode(s);
+    const bool l = (b & B(BTN_L)) != 0, r3 = (b & B(BTN_RSTICK)) != 0;
+    const bool r3_pressed = r3 && !(s.pad_wheel_prev & B(BTN_RSTICK));
+    if (!active) {
+        s.pad_wheel = false;
+        s.pad_wheel_slot = -1;
+        s.pad_wheel_prev = b;
+        return;
+    }
+    bool opened = false;
+    if (!s.pad_wheel && l && r3_pressed) {
+        s.pad_wheel = true;
+        s.wheel_open = true;
+        s.wheel_dir = -1;
+        s.pad_wheel_slot = -1;
+        opened = true;
+    }
+    if (s.pad_wheel) {
+        if (l) {
+            if (r3_pressed && !opened) {
+                s.wheel_page = (s.wheel_page + 1) % 3;
+                save_wheel(s);
+            }
+            int dir = -1;
+            if (rx && ry && hypotf((float)*rx, (float)*ry) >= 10500.0f)
+                dir = (int)lroundf(atan2f((float)-*ry, (float)*rx) / .785398163f + 2.f) & 7;
+            s.pad_wheel_slot = dir;
+            s.wheel_dir = dir;
+            *buttons &= ~(B(BTN_L) | B(BTN_RSTICK));
+            if (rx) *rx = 0;
+            if (ry) *ry = 0;
+        } else {
+            const int dir = s.pad_wheel_slot;
+            s.pad_wheel = false;
+            s.pad_wheel_slot = -1;
+            s.wheel_dir = -1;
+            if (dir >= 0) wheel_use(s, dir);
+            else {
+                s.wheel_open = false;
+            }
+        }
+    }
+    s.pad_wheel_prev = b;
 }
 
 extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *buttons, int *lx, int *ly, int *rx, int *ry,
@@ -1895,7 +2227,8 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
     bool visible = s.edit || (!typing && (mode == TOUCH_ON || (mode == TOUCH_AUTO && !pad_connected && screen)));
     s.auto_wait = !s.edit && !typing && mode == TOUCH_AUTO && !pad_connected && !screen;
     bool was_visible = g_visible.exchange(visible);
-    if (!visible || menu || s.menu || s.edit) cancel_item_gestures(s);
+    bool keep_bar = bar_mode(s);  // (six-slot bar: its fingers work with the controls hidden)
+    if ((!visible && !keep_bar) || menu || s.menu || s.edit) cancel_item_gestures(s);
     if (!visible || menu || s.menu || s.edit) reset_bow_drag(s);
     if (menu || s.menu || s.edit) cancel_button_camera(s);
     if (!art_touch_enabled(s, zones())) cancel_art_input(s);
@@ -1921,7 +2254,11 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
             was = visible;
         }
     }
-    g_touch_hud = visible && config_live_touch_hud();
+    // The six-slot bar is useful with a controller too; the native moved HUD only while the controls show.
+    g_touch_hud = (visible || pad_connected) && !typing && config_live_touch_hud() != HUD_OFF;
+    g_touch_bar = g_touch_hud && bar_mode(s);
+    if (!wheel_mode(s)) s.wheel_open = false, s.wheel_dir = -1;
+    g_touch_wheel = s.wheel_open;
     bool ammo_hidden = !in_mode(C_AMMO_UP, s.menu, s.in_quest, ranged);
     bool item_hidden = !config_live_touch_show(TB_ITEM_ARROWS);
     if (ammo_hidden && s.ammo_arrow_source) {
@@ -1945,11 +2282,21 @@ extern "C" uint64_t touch_input(bool pad_connected, bool typing, uint64_t *butto
         if (f.kind == F_BUTTON && f.ctl == C_RFIRE && ranged == WEAPON_BOWGUN && s.drawn == 1 && f.btn == B(BTN_X))
             f.done = true;
     }
+    if (bar_mode(s)) {
+        for (Finger &f : s.f) {
+            if (f.kind != F_ITEM || f.done || f.moved) continue;
+            if (now - f.t0 >= 500 * MS && bar_slot_at(s, f.x, f.y, s.w, s.h) == 5) {
+                s.shortcut_binding = true;  // hold the sixth slot, then tap a pouch slot to bind it
+                f.done = true;
+                tap_due();
+            }
+        }
+    }
     validate_bow_drag(s);
-    if (visible && !menu && !s.menu && !s.edit) {
+    if ((visible || g_touch_bar) && !menu && !s.menu && !s.edit) {
         for (Finger &f : s.f) {
             if (!item_gesture(f) || f.done) continue;
-            if (f.kind == F_ITEM && !f.bar_open && now - f.t0 >= 220 * MS) open_bar(s, f, now);
+            if (f.kind == F_ITEM && f.part != 3 && !f.bar_open && now - f.t0 >= 220 * MS) open_bar(s, f, now);
             item_swipe(s, f, now);
             if (f.kind == F_BUTTON && !f.moved && now >= s.ammo_ready)
                 ammo_step(s, f.ctl == C_AMMO_UP ? 1 : -1, true);
@@ -2070,7 +2417,30 @@ extern "C" void touch_art_axes(int *rx, int *ry) {
 }
 extern "C" bool touch_drawn(void) {
     MenuGeom pause;
-    return g_visible || g_gear_only || menuptr_mix_pause_region(&pause);
+    return g_visible || g_touch_bar || g_touch_wheel || g_gear_only || menuptr_mix_pause_region(&pause);
+}
+
+// The + menu's wheel page reads and writes this (runtime/settings_panel.cpp), so bindings persist at once.
+extern "C" void touch_wheel_config(uint16_t items[3][8], int *page) {
+    std::lock_guard<std::mutex> l(g_lock);
+    ensure_loaded(g_s);
+    hudbar_refresh();
+    if (items) memcpy(items, g_s.wheel_items, sizeof g_s.wheel_items);
+    if (page) *page = g_s.wheel_page;
+}
+extern "C" void touch_wheel_assign(int page, int direction, uint16_t item) {
+    if (page < 0 || page > 2 || direction < 0 || direction > 7) return;
+    std::lock_guard<std::mutex> l(g_lock);
+    ensure_loaded(g_s);
+    g_s.wheel_items[page][direction] = item;
+    save_wheel(g_s);
+}
+extern "C" void touch_wheel_set_page(int page) {
+    if (page < 0 || page > 2) return;
+    std::lock_guard<std::mutex> l(g_lock);
+    ensure_loaded(g_s);
+    g_s.wheel_page = page;
+    save_wheel(g_s);
 }
 
 extern "C" void touch_edit_begin(void) {
@@ -2224,6 +2594,11 @@ static void reset_touch_input(State &s) {
     s.ammo_hold = s.ammo_ready = s.bar_since = 0;
     s.ammo_pulse = {};
     s.ammo_arrow_source = s.item_arrow_source = false;
+    s.wheel_open = false;
+    s.wheel_dir = -1;
+    s.pad_wheel = false;
+    s.pad_wheel_slot = -1;
+    s.shortcut_binding = false;
 }
 
 extern "C" void touch_reset(void) {
@@ -3009,6 +3384,16 @@ void ranged_face(int i, int ranged, int drawn, Icon *ic, char *letter, size_t si
 
 void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, float h, const State &s, float a) {
     Geo g = place(l, i, w, h);
+    if (i == C_WHEEL) {
+        dl->AddCircleFilled(g.c, g.r, fade(s.wheel_open ? GLOW : GOLD, a), 32);
+        dl->AddCircle(g.c, g.r, fade(IM_COL32(57, 40, 14, 255), a), 32, g.r * .08f);
+        for (int n = 0; n < 8; n++) {
+            float angle = n * .785398163f - 1.570796327f;
+            dl->AddCircleFilled(ImVec2(g.c.x + cosf(angle) * g.r * .52f, g.c.y + sinf(angle) * g.r * .52f),
+                                g.r * .11f, fade(IM_COL32(57, 40, 14, 255), a), 12);
+        }
+        return;
+    }
     if (i == C_RSTICK) {
         ImVec2 knob = g.c;
         bool on = false;
@@ -3179,7 +3564,7 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 96));
     static const char *const ZONE_HINT[TZ_COUNT] = {"Items: tap to use, swipe to change - drag to move",
                                                    "Hunter Arts - drag to move", "Lock-on - drag to move",
-                                                   "Map - drag to move"};
+                                                   "Map - drag to move", "Shortcut item - drag to move"};
     for (int k = 0; k < TZ_COUNT; k++) {
         if (control_profile(s) < 0) break;
         Rect r = editor_zone_rect(s.layout, k, w, h, s.in_quest);
@@ -3294,6 +3679,259 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
     }
 }
 
+// Supply items use the ordinary item's icon where the sheet has no cell of its own.
+struct HudAlias { int supply, base; };
+static const HudAlias hud_alias[] = {
+    {3432, 18}, {3434, 20}, {3436, 100}, {3438, 88}, {3440, 112}, {3442, 168},
+    {3444, 142}, {3446, 144}, {3448, 56}, {3450, 62}, {3452, 64}, {3454, 166},
+    {3456, 178}, {3458, 66}, {3470, 154},
+};
+static int hud_icon_base(int iid) {
+    for (const HudAlias &a : hud_alias) if (a.supply == iid) return a.base;
+    return iid;
+}
+// The six-slot bar: five live pouch slots (centre and two either side) and the bound shortcut on the right.
+static void draw_item_bar(ImDrawList *dl, ImFont *font, const State &s, float w, float h, uint64_t now, float a) {
+    if (!bar_mode(s)) return;
+    ImFont *hfont = g_hud_font ? g_hud_font : font;
+    BarGeom g = item_bar_geom(s.layout, w, h);
+    const float sw = g.sw, pitch = g.pitch, cx = g.cx, cy0 = g.cy0, fh = g.fh;
+    const float fx0 = g.fx0, fx1 = g.fx1, fy0 = g.fy0, fy1 = g.fy1;
+    const float BAR_ANIM_MS = 120.0f;
+    float anim_off = 0.0f;
+    if (s.item_anim_ns) {
+        float t = std::clamp((now - s.item_anim_ns) / 1e6f / BAR_ANIM_MS, 0.0f, 1.0f);
+        float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+        anim_off = -(float)s.item_dir * pitch * (1.0f - ease);
+    }
+    const ImU32 FRAME_GOLD = IM_COL32(221, 190, 68, 255);
+    const ImU32 BADGE_BG = IM_COL32(16, 2, 7, 235);
+    const ImU32 NUM_WHITE = IM_COL32(245, 245, 245, 255);
+    const ImU32 NAME_OUTLINE = IM_COL32(0, 0, 0, 255);
+    float line = std::max(.0035f * h, 1.0f);
+
+    // Frame: a gold rule top and bottom, separators between the five slots, breathing softly.
+    float pulse = .78f + .22f * sinf(now / 1e9f * 2.4f);
+    dl->AddLine(ImVec2(fx0, fy0), ImVec2(fx1, fy0), fade(FRAME_GOLD, a * pulse), line);
+    dl->AddLine(ImVec2(fx0, fy1), ImVec2(fx1, fy1), fade(FRAME_GOLD, a * pulse), line);
+    for (int k = -2; k <= 1; k++) {
+        float vx = cx + (k + .5f) * pitch;
+        dl->AddLine(ImVec2(vx, fy0 + fh * .18f), ImVec2(vx, fy1 - fh * .18f), fade(FRAME_GOLD, a * .55f), line * .8f);
+    }
+
+    HudSlot snap[HUDBAR_SLOTS];
+    int win[5] = {-1, -1, -1, -1, -1};
+    int n = hudbar_copy(snap, HUDBAR_SLOTS);
+    hudbar_window(win, 5);
+    ImFontAtlasRect irect;
+    bool have_icon = g_icon_id >= 0 && ImGui::GetIO().Fonts->GetCustomRect(g_icon_id, &irect);
+    ImTextureRef icon_tex = have_icon ? ImGui::GetIO().Fonts->TexRef : ImTextureRef();
+    float fs_cnt = .024f * h, pad = sw * .10f, icon_dy = sw * .08f;
+    struct BadgeSlot { float x, y, r; char txt[16]; };
+    BadgeSlot badges[5];
+    int nb = 0;
+    dl->PushClipRect(ImVec2(fx0, fy0), ImVec2(fx1, fy1), true);
+    for (int d = -2; d <= 2; d++) {
+        float sx0 = cx + d * pitch + anim_off - sw * .5f;
+        float sx1 = cx + d * pitch + anim_off + sw * .5f;
+        float ibx0 = sx0 + pad, ibx1 = sx1 - pad;
+        float iby0 = cy0 + pad + icon_dy, iby1 = cy0 + fh * .62f + icon_dy;
+        float icx = (ibx0 + ibx1) * .5f, icy = (iby0 + iby1) * .5f;
+        float side = (iby1 - iby0) * 1.08f;
+        ImVec2 q0(icx - side * .5f, icy - side * .5f), q1(icx + side * .5f, icy + side * .5f);
+        int slot = win[d + 2];
+        if (slot < 0 || slot >= n || snap[slot].id == 0) continue;
+        int iid = snap[slot].id;
+        int bi = hud_icon_base(iid);
+        int cell = (g_hud_cell && bi >= 0 && bi <= g_hud_id_max) ? g_hud_cell[bi] : -1;
+        if (cell >= 0 && have_icon) {
+            const short *r = g_hud_rect + cell * 4;
+            float uw = irect.uv1.x - irect.uv0.x, vh = irect.uv1.y - irect.uv0.y;
+            ImVec2 uv0(irect.uv0.x + r[0] / (float)g_icon_w * uw, irect.uv0.y + r[1] / (float)g_icon_h * vh);
+            ImVec2 uv1(irect.uv0.x + (r[0] + r[2]) / (float)g_icon_w * uw, irect.uv0.y + (r[1] + r[3]) / (float)g_icon_h * vh);
+            unsigned char rr = 255, gg = 255, bb = 255;
+            if (g_hud_rgb && bi >= 0 && bi <= g_hud_id_max) rr = g_hud_rgb[bi * 3], gg = g_hud_rgb[bi * 3 + 1], bb = g_hud_rgb[bi * 3 + 2];
+            dl->AddImage(icon_tex, q0, q1, uv0, uv1, IM_COL32(rr, gg, bb, 255));
+        }
+        if (const char *nm = hud_name_lookup(iid)) {
+            float fs_name = .022f * h;
+            ImVec2 nts = hfont->CalcTextSizeA(fs_name, FLT_MAX, 0, nm);
+            float nx = sx0 + (sw - nts.x) * .5f, ny = cy0 + fh * .78f, ow = fs_name * .14f;
+            for (int k = 0; k < 16; ++k) {
+                float ang = k * (6.283185307179586f / 16.0f);
+                dl->AddText(hfont, fs_name, ImVec2(nx + cosf(ang) * ow, ny + sinf(ang) * ow), fade(NAME_OUTLINE, a), nm);
+            }
+            dl->AddText(hfont, fs_name, ImVec2(nx, ny), fade(NUM_WHITE, a), nm);
+        }
+        int amount = snap[slot].count;
+        if (amount > 0 && nb < 5) {
+            float br = sw * .18f;
+            float bcx = q1.x - br * .55f, bcy = std::max(q0.y + br * .55f, fy0 + br);
+            badges[nb].x = bcx, badges[nb].y = bcy, badges[nb].r = br;
+            snprintf(badges[nb].txt, sizeof badges[nb].txt, "%d", amount);
+            ++nb;
+        }
+    }
+    dl->PopClipRect();
+    for (int k = 0; k < nb; k++) {
+        ImVec2 bc(badges[k].x, badges[k].y);
+        dl->AddCircleFilled(bc, badges[k].r, fade(BADGE_BG, a), 24);
+        ImVec2 ts = hfont->CalcTextSizeA(fs_cnt, FLT_MAX, 0, badges[k].txt);
+        dl->AddText(hfont, fs_cnt, ImVec2(bc.x - ts.x * .5f, bc.y - ts.y * .5f), fade(NUM_WHITE, a), badges[k].txt);
+    }
+
+    // The centre slot's Y button, hanging off the bottom edge.
+    {
+        ImVec2 bc(cx, fy1 + sw * .26f);
+        float br = sw * .17f;
+        dl->AddCircleFilled(bc, br, fade(IM_COL32(255, 255, 255, 255), a), 32);
+        dl->AddCircle(bc, br, fade(IM_COL32(20, 20, 20, 255), a), 32, br * .10f);
+        ImVec2 ts = font->CalcTextSizeA(br * 1.35f, FLT_MAX, 0, "Y");
+        dl->AddText(font, br * 1.35f, ImVec2(bc.x - ts.x * .5f, bc.y - ts.y * .52f), fade(IM_COL32(20, 20, 20, 255), a), "Y");
+    }
+}
+
+// The shortcut slot, on its own: an animated orbit around the bound item, separate from the five-slot bar.
+static void draw_shortcut(ImDrawList *dl, ImFont *font, const State &s, float w, float h, uint64_t now, float a) {
+    if (!bar_mode(s)) return;
+    ImFont *hfont = g_hud_font ? g_hud_font : font;
+    ShortcutGeom g = shortcut_geom(s, w, h);
+    const float sw = g.sw, fh = g.fh, cy0 = g.y0;
+    const ImU32 FRAME_GOLD = IM_COL32(221, 190, 68, 255);
+    const ImU32 BADGE_BG = IM_COL32(16, 2, 7, 235);
+    const ImU32 NUM_WHITE = IM_COL32(245, 245, 245, 255);
+    const ImU32 NAME_OUTLINE = IM_COL32(0, 0, 0, 255);
+    float line = std::max(.0035f * h, 1.0f);
+    HudSlot snap[HUDBAR_SLOTS];
+    int n = hudbar_copy(snap, HUDBAR_SLOTS);
+    ImFontAtlasRect irect;
+    bool have_icon = g_icon_id >= 0 && ImGui::GetIO().Fonts->GetCustomRect(g_icon_id, &irect);
+    ImTextureRef icon_tex = have_icon ? ImGui::GetIO().Fonts->TexRef : ImTextureRef();
+    float fs_cnt = .024f * h, pad = sw * .10f, icon_dy = sw * .08f;
+    int shortcut_id = s.shortcut_item;
+    unsigned count = 0;
+    for (int i = 0; i < n; i++) if (snap[i].id == shortcut_id) count += snap[i].count;
+    ImVec2 orbit((g.x0 + g.x1) * .5f, (g.y0 + g.y1) * .5f);
+    float orbit_r = std::max(sw, fh) * .64f;
+    const float angle = float(now % (3200 * MS)) / (3200 * MS) * 6.2831853f;
+    for (int i = 0; i < 48; ++i) {
+        const float t0 = angle + i * (4.712389f / 48);
+        const float t1 = angle + (i + 1) * (4.712389f / 48);
+        dl->AddLine(ImVec2(orbit.x + cosf(t0) * orbit_r, orbit.y + sinf(t0) * orbit_r),
+                    ImVec2(orbit.x + cosf(t1) * orbit_r, orbit.y + sinf(t1) * orbit_r),
+                    fade(FRAME_GOLD, a * (.2f + .8f * i / 47)), line * .8f);
+    }
+    float alpha = s.shortcut_binding && (now / (180 * MS)) % 2 ? 65 : 255;
+    if (!shortcut_id) return;
+    int bi = hud_icon_base(shortcut_id);
+    int cell = (g_hud_cell && bi >= 0 && bi <= g_hud_id_max) ? g_hud_cell[bi] : -1;
+    float ibx0 = g.x0 + pad, ibx1 = g.x1 - pad;
+    float iby0 = cy0 + pad + icon_dy, iby1 = cy0 + fh * .62f + icon_dy;
+    float icx = (ibx0 + ibx1) * .5f, icy = (iby0 + iby1) * .5f;
+    float side = (iby1 - iby0) * 1.08f;
+    ImVec2 q0(icx - side * .5f, icy - side * .5f), q1(icx + side * .5f, icy + side * .5f);
+    if (cell >= 0 && have_icon) {
+        const short *r = g_hud_rect + cell * 4;
+        float uw = irect.uv1.x - irect.uv0.x, vh = irect.uv1.y - irect.uv0.y;
+        ImVec2 uv0(irect.uv0.x + r[0] / (float)g_icon_w * uw, irect.uv0.y + r[1] / (float)g_icon_h * vh);
+        ImVec2 uv1(irect.uv0.x + (r[0] + r[2]) / (float)g_icon_w * uw, irect.uv0.y + (r[1] + r[3]) / (float)g_icon_h * vh);
+        unsigned char rr = 255, gg = 255, bb = 255;
+        if (g_hud_rgb && bi >= 0 && bi <= g_hud_id_max) rr = g_hud_rgb[bi * 3], gg = g_hud_rgb[bi * 3 + 1], bb = g_hud_rgb[bi * 3 + 2];
+        dl->AddImage(icon_tex, q0, q1, uv0, uv1, IM_COL32(rr, gg, bb, alpha));
+    }
+    if (count > 0) {
+        float br = sw * .18f;
+        ImVec2 bc(q1.x - br * .55f, std::max(q0.y + br * .55f, g.y0 + br));
+        dl->AddCircleFilled(bc, br, fade(BADGE_BG, a), 24);
+        char txt[16];
+        snprintf(txt, sizeof txt, "%u", count);
+        ImVec2 ts = hfont->CalcTextSizeA(fs_cnt, FLT_MAX, 0, txt);
+        dl->AddText(hfont, fs_cnt, ImVec2(bc.x - ts.x * .5f, bc.y - ts.y * .5f), fade(NUM_WHITE, a), txt);
+    }
+    if (const char *nm = hud_name_lookup(shortcut_id)) {
+        float fs_name = .022f * h;
+        ImVec2 nts = hfont->CalcTextSizeA(fs_name, FLT_MAX, 0, nm);
+        float nx = g.x0 + (sw - nts.x) * .5f, ny = cy0 + fh * .78f, ow = fs_name * .14f;
+        for (int k = 0; k < 16; ++k) {
+            float ang = k * (6.283185307179586f / 16.0f);
+            dl->AddText(hfont, fs_name, ImVec2(nx + cosf(ang) * ow, ny + sinf(ang) * ow), fade(NAME_OUTLINE, a), nm);
+        }
+        dl->AddText(hfont, fs_name, ImVec2(nx, ny), fade(NUM_WHITE, a), nm);
+    }
+}
+
+// The eight-direction shortcut wheel: three pages, each direction an item id.
+static void draw_wheel(ImDrawList *dl, ImFont *font, const State &s, float w, float h, uint64_t now, float a) {
+    if (!s.wheel_open || !wheel_mode(s)) return;
+    ImFont *hfont = g_hud_font ? g_hud_font : font;
+    const ImVec2 center = place(s.layout, C_WHEEL, w, h).c;
+    const float r = h * .061f;
+    const ImU32 GOLD = IM_COL32(221, 190, 68, 255), GLOW = IM_COL32(255, 231, 150, 255);
+    const ImU32 DARK = IM_COL32(35, 27, 20, 220);
+    HudSlot snap[HUDBAR_SLOTS];
+    int n = hudbar_copy(snap, HUDBAR_SLOTS);
+    ImFontAtlasRect irect;
+    bool have_icon = g_icon_id >= 0 && ImGui::GetIO().Fonts->GetCustomRect(g_icon_id, &irect);
+    ImTextureRef tex = have_icon ? ImGui::GetIO().Fonts->TexRef : ImTextureRef();
+    dl->AddCircleFilled(center, h * .27f, fade(IM_COL32(20, 12, 8, 150), a), 48);
+    if (s.wheel_dir >= 0) {
+        ImVec2 p = wheel_slot(s.wheel_dir, center, h);
+        dl->AddLine(center, p, fade(GOLD, a), std::max(1.5f, h * .0025f));
+    }
+    for (int i = 0; i < 8; i++) {
+        ImVec2 p = wheel_slot(i, center, h);
+        dl->AddCircleFilled(p, r, fade(DARK, a), 32);
+        dl->AddCircle(p, r, fade(i == s.wheel_dir ? GLOW : GOLD, a), 32, std::max(1.0f, h * .002f));
+        uint16_t id = s.wheel_items[s.wheel_page][i];
+        if (!id) continue;
+        int bi = hud_icon_base(id), cell = (g_hud_cell && bi >= 0 && bi <= g_hud_id_max) ? g_hud_cell[bi] : -1;
+        if (cell >= 0 && have_icon) {
+            const short *rect = g_hud_rect + cell * 4;
+            float uw = irect.uv1.x - irect.uv0.x, vh = irect.uv1.y - irect.uv0.y;
+            ImVec2 uv0(irect.uv0.x + rect[0] / (float)g_icon_w * uw, irect.uv0.y + rect[1] / (float)g_icon_h * vh);
+            ImVec2 uv1(irect.uv0.x + (rect[0] + rect[2]) / (float)g_icon_w * uw, irect.uv0.y + (rect[1] + rect[3]) / (float)g_icon_h * vh);
+            unsigned char rr = 255, gg = 255, bb = 255;
+            if (g_hud_rgb && bi >= 0 && bi <= g_hud_id_max) rr = g_hud_rgb[bi * 3], gg = g_hud_rgb[bi * 3 + 1], bb = g_hud_rgb[bi * 3 + 2];
+            dl->AddImage(tex, ImVec2(p.x - r * .82f, p.y - r * 1.02f), ImVec2(p.x + r * .82f, p.y + r * .62f), uv0, uv1,
+                         IM_COL32(rr, gg, bb, 255));
+        }
+        unsigned count = 0;
+        for (int k = 0; k < n; k++) if (snap[k].id == id) count += snap[k].count;
+        if (count) {
+            char value[16];
+            snprintf(value, sizeof value, "%u", count);
+            dl->AddCircleFilled(ImVec2(p.x + r * .72f, p.y - r * .68f), r * .42f, fade(IM_COL32(16, 2, 7, 235), a), 20);
+            ImVec2 ts = hfont->CalcTextSizeA(r * .62f, FLT_MAX, 0, value);
+            dl->AddText(hfont, r * .62f, ImVec2(p.x + r * .72f - ts.x * .5f, p.y - r * .68f - ts.y * .5f), fade(IM_COL32(245, 245, 245, 255), a), value);
+        }
+        if (const char *nm = hud_name_lookup(id)) {
+            float fs = r * .42f;
+            ImVec2 ts = hfont->CalcTextSizeA(fs, FLT_MAX, 0, nm);
+            if (ts.x > r * 2.1f) fs *= r * 2.1f / ts.x, ts = hfont->CalcTextSizeA(fs, FLT_MAX, 0, nm);
+            float ny = p.y + r * 1.08f;
+            for (int k = 0; k < 8; k++) {
+                float ang = k * (6.283185307179586f / 8.0f);
+                dl->AddText(hfont, fs, ImVec2(p.x - ts.x * .5f + cosf(ang) * fs * .14f, ny + sinf(ang) * fs * .14f),
+                            fade(IM_COL32(0, 0, 0, 255), a), nm);
+            }
+            dl->AddText(hfont, fs, ImVec2(p.x - ts.x * .5f, ny), fade(IM_COL32(245, 245, 245, 255), a), nm);
+        }
+    }
+    char page[16];
+    snprintf(page, sizeof page, "%d/3", s.wheel_page + 1);
+    ImVec2 ts = hfont->CalcTextSizeA(h * .020f, FLT_MAX, 0, page);
+    dl->AddCircleFilled(center, h * .032f, fade(IM_COL32(16, 2, 7, 210), a), 24);
+    dl->AddText(hfont, h * .020f, ImVec2(center.x - ts.x * .5f, center.y - ts.y * .52f), fade(IM_COL32(245, 245, 245, 255), a), page);
+    bool empty = true;
+    for (int i = 0; i < 8; i++) empty = empty && s.wheel_items[s.wheel_page][i] == 0;
+    if (empty) {
+        const char *hint = "在＋菜单配置快捷轮盘";
+        ImVec2 hs = hfont->CalcTextSizeA(h * .018f, FLT_MAX, 0, hint);
+        dl->AddText(hfont, h * .018f, ImVec2(center.x - hs.x * .5f, center.y + h * .29f), fade(GLOW, a), hint);
+    }
+}
+
+
 }  // namespace
 
 extern "C" void touch_draw(float w, float h) {
@@ -3301,7 +3939,7 @@ extern "C" void touch_draw(float w, float h) {
     if (overlay_menu_open()) return;
     MenuGeom pause;
     bool pausing = menuptr_mix_pause_region(&pause);
-    if (!g_visible && !g_gear_only && !pausing) return;
+    if (!g_visible && !g_touch_bar && !g_touch_wheel && !g_gear_only && !pausing) return;
     State s;
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -3324,8 +3962,15 @@ extern "C" void touch_draw(float w, float h) {
     float idle = s.last_ns ? (now - s.last_ns) / 1e9f : 99.0f;
     float a = config_live_touch_opacity() * (idle > 5.0f ? .65f : 1.0f);  // (dimmer after a while untouched)
     ImDrawList *dl = ImGui::GetBackgroundDrawList();  // (under the port's menus and notices)
-    if (!g_visible) {  // (hidden: the settings button alone, a little fainter)
+    if (!g_visible) {  // (hidden: the settings button alone, a little fainter, and the six-slot bar if enabled)
         if (g_gear_only) control(dl, font, s.layout, C_SETTINGS, w, h, s, a * .75f);
+        if (!g_touch_bar && !g_touch_wheel) {
+            if (pausing) draw_mix_pause(dl, font, pause, w, h);
+            return;
+        }
+        if (g_touch_bar) draw_item_bar(dl, font, s, w, h, now, a);
+        if (g_touch_bar) draw_shortcut(dl, font, s, w, h, now, a);
+        if (g_touch_wheel) draw_wheel(dl, font, s, w, h, now, a);
         if (pausing) draw_mix_pause(dl, font, pause, w, h);
         return;
     }
@@ -3335,10 +3980,14 @@ extern "C" void touch_draw(float w, float h) {
         if (i != C_DPAD && !is_ammo(i) && in_mode(i, s.menu, s.in_quest, ranged)) control(dl, font, s.layout, i, w, h, s, a);
     for (int i : {C_AMMO_UP, C_AMMO_DOWN})
         if (in_mode(i, s.menu, s.in_quest, ranged)) control(dl, font, s.layout, i, w, h, s, a);
+    draw_item_bar(dl, font, s, w, h, SDL_GetTicksNS(), a);
+    draw_shortcut(dl, font, s, w, h, SDL_GetTicksNS(), a);
+    draw_wheel(dl, font, s, w, h, SDL_GetTicksNS(), a);
     // the HUD parts that answer a finger: the item bar's turn, the art performed, the lock-on
     Zones z = zones();
-    Rect item = zone_rect(z, TZ_ITEM, w, h), target = zone_rect(z, TZ_TARGET, w, h), arts = zone_rect(z, TZ_ARTS, w, h);
-    if (item.ok && !s.menu && config_live_touch_show(TB_ITEM_ARROWS)) {
+    Rect item = bar_mode(s) ? bar_rect(s, w, h) : zone_rect(z, TZ_ITEM, w, h),
+         target = zone_rect(z, TZ_TARGET, w, h), arts = zone_rect(z, TZ_ARTS, w, h);
+    if (item.ok && !bar_mode(s) && !s.menu && config_live_touch_show(TB_ITEM_ARROWS)) {
         for (int d = -1; d <= 1; d += 2) {
             bool lit = now < s.item_flash && s.item_dir == d;
             Geo g = item_arrow(item, d, h);

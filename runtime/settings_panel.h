@@ -4,12 +4,13 @@
 void settings_panel(bool *open);
 
 void settings_panel_request_close(void); // Thread-safe request; consumed by the game frame.
+void settings_panel_request_wheel(void); // Open at the shortcut wheel's item assignments (the + menu row).
 bool settings_panel_confirming(void);
 
 void settings_panel_before_frame(bool open); // Own navigation keys before ImGui NewFrame.
 void settings_panel_request_back(void); // F1 / chord: same one-level back route.
 bool settings_panel_take_forge(void); // Game frame: the Mods tab's "Open the Forge menu" was chosen (once).
-bool settings_panel_dirty(void); // Atomic for the host close-event handler.
+bool settings_panel_dirty(void);
 int settings_panel_theme(void); // THEME_*: the one picked in the menu while it is open, else the saved one (game frame).
 bool settings_panel_key(int scancode); // Choosing a key (keybind, chat): takes the key pressed (host event thread).
 bool settings_panel_mouse(int button); // Choosing a keybind: takes the mouse button pressed away from the menu's rows.

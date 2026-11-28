@@ -5,6 +5,11 @@ below.
   (runtime/kernel.c, ipc.c, loader.c, dispatch.c, runtime/nvn/objects.c, cmdbuf.c, maxwell/translate.c and others)
   were ported from it and adapted to 32-bit ARM. MIT License.
 - Forge (the MHGU plugin loader): the ImGui overlay's style (runtime/overlay.cpp) follows Forge's own. MIT License.
+- MHGU-CraftWheel (third_party/MHGU-CraftWheel: the shortcut wheel's Forge-plugin source,
+  github.com/NovemLaurant/MHGU-CraftWheel, commit 18164d8, v0.51): vendored as the upstream reference for Relink's
+  built-in wheel (which follows MHGU-Xth's port); it is not compiled into the runtime. Its own source declares no
+  license; the licenses of its dependencies are in its licenses/ directory, and its item atlas and some icons are
+  extracted from the game as its README states.
 - cimgui (third_party/cimgui): MIT License.
 - Dear ImGui (third_party/cimgui/imgui): MIT License.
 - Noto Sans CJK SC (android/app/src/main/assets/cjk.ttf): SIL Open Font License 1.1, Copyright 2014-2021 Adobe; its full license is in android/app/src/main/assets/licenses/NotoSansCJK-OFL.txt.

@@ -10,7 +10,10 @@
 #include "camera_jitter.h"
 #include "gamelib.h"
 #include "hle.h"
+#include "hle/hudbar.h"
 #include "hle/itembar.h"
+#include "hle/wheelmenu.h"
+#include "encyclopedia.h"
 #include "hle/mousecam.h"
 #include "kernel.h"
 #include "mods.h"
@@ -88,6 +91,7 @@ static void boot(const char *root) {
     kernel_init();
     dispatch_init();
     mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
+    encyclopedia_init();  // before Forge's font atlas: its icons join the same atlas
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     { void equipcheck_init(void); equipcheck_init(); }  // (a red X for weapon types this game lacks: runtime/hle/equipcheck.c)
@@ -106,6 +110,8 @@ static void boot(const char *root) {
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     { void bow_reticle_init(void); bow_reticle_init(); }  // (the bow's native direction guide while charging)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
+    hudbar_init();   // (the six-slot bar's pouch snapshot + use queue: runtime/hle/hudbar.c)
+    wheelmenu_init();  // (the + menu's Configure Shortcut Wheel row: runtime/hle/wheelmenu.c)
     { void menuptr_init(void); menuptr_init(); }  // (the mouse in the pause menu: runtime/hle/menuptr.c)
     { void prompts_init(void); prompts_init(); }  // (keyboard and mouse button prompts: runtime/hle/prompts.c)
     { void input_view_init(void); input_view_init(); }  // (game-action rebinding, with [Actions] Enable=1: runtime/hle/input_view.c)

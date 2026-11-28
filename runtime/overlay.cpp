@@ -46,6 +46,8 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "pause.h"
 #include "perfstats.h"
 #include "hle/chat.h"
+#include "hle/wheelmenu.h"
+#include "encyclopedia.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
 #include "voice.h"
@@ -73,6 +75,19 @@ static int g_menu_key;
 static float g_font_size;
 static ImGuiStyle g_base_style;  // (unscaled; scaled copies follow the window's height)
 static float g_scale;
+
+// The six-slot item bar's art (runtime/hle/hudbar.c, runtime/touch.cpp), merged into ImGui's font atlas so the bar
+// costs no texture of its own. The headers are generated from the game's item table and MHGU-CraftWheel's atlas.
+int g_icon_id = -1;
+int g_icon_w = 0, g_icon_h = 0;
+const short *g_hud_rect = nullptr;          // [cell*4] = x,y,w,h in the sheet, px
+const short *g_hud_cell = nullptr;          // [item id] -> cell index, -1 unpaired
+const unsigned char *g_hud_rgb = nullptr;   // [item id*3] = tint RGB
+int g_hud_id_max = 0;
+ImFont *g_hud_font = nullptr;  // the bar's larger face (same built-in font, 36 px)
+int g_encyclopedia_icon_id = -1;
+int g_encyclopedia_icon_w = 0, g_encyclopedia_icon_h = 0;
+const short *g_encyclopedia_icon_rect = nullptr;
 #ifdef __ANDROID__
 static struct {
     bool pressed, moving;
@@ -165,7 +180,7 @@ static ImGuiKey key_of(SDL_Scancode sc, SDL_Keycode kc) {
 static void set_open(bool open) {
     g_forge_open = open;
     if (!open) g_forge_over = false;  // (the settings under it, if any, come back)
-    g_open = open || g_settings_open;
+    g_open = open || g_settings_open || encyclopedia_visible();
     SDL_Window *w = ui_window();
     if (g_open) SDL_ShowCursor();  // (full screen hides it: runtime/ui.c)
     else if (w && (SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN)) SDL_HideCursor();
@@ -191,6 +206,12 @@ void overlay_toggle_settings(void) {
     if (!g_enabled) return;
     if (g_forge_over) { set_open(false); return; }  // (back to the settings under it)
     if (g_settings_open) { settings_panel_request_back(); return; }
+    g_settings_open = true;
+    set_open(g_forge_open);
+}
+void overlay_open_wheel(void) {
+    if (!g_enabled) return;
+    settings_panel_request_wheel();
     g_settings_open = true;
     set_open(g_forge_open);
 }
@@ -526,6 +547,67 @@ static void context_init(const char *font_path, float font_size) {
     if (!font) io.Fonts->AddFontDefaultVector(&cfg);
     if (font) io.FontDefault = font;
     else if (io.Fonts->Fonts.Size == 0) io.Fonts->AddFontDefaultVector(&cfg);
+    // The self-drawn item bar: a larger face and its icon sheet, all into the same atlas. The early context is made
+    // with font_size 0 before the player's font is known; adding fonts after the icon pixels are copied rebuilds the
+    // atlas and loses them, so wait for the real font size.
+    if (g_icon_id < 0 && font_size > 0) {
+        ImFontConfig hudcfg = cfg;
+        hudcfg.SizePixels = 36.0f;
+        hudcfg.FontDataOwnedByAtlas = false;
+        g_hud_font = io.Fonts->AddFontFromMemoryTTF((void *)_binary_font_ttf_start,
+            (int)(_binary_font_ttf_end - _binary_font_ttf_start), 36.0f, &hudcfg,
+            io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+#include "hud_icons.h"
+        ImFontAtlasRect icon_rect;
+        ImFontAtlasRectId icon_id = io.Fonts->AddCustomRect(HUD_ICON_SHEET_W, HUD_ICON_SHEET_H, &icon_rect);
+        ImFontAtlasRect encyc_rect;
+        ImFontAtlasRectId encyc_icon_id = -1;
+        if (encyclopedia_icon_sheet() && encyclopedia_icon_sheet_width() > 0)
+            encyc_icon_id = io.Fonts->AddCustomRect(encyclopedia_icon_sheet_width(),
+                                                    encyclopedia_icon_sheet_height(), &encyc_rect);
+        io.Fonts->Build();
+        if (icon_id >= 0) {
+            unsigned char *atlas_pixels = nullptr;
+            int aw = 0, ah = 0;
+            io.Fonts->GetTexDataAsRGBA32(&atlas_pixels, &aw, &ah);
+            if (atlas_pixels) {
+                io.Fonts->GetCustomRect(icon_id, &icon_rect);
+                for (int y = 0; y < HUD_ICON_SHEET_H && icon_rect.y + y < ah; y++) {
+                    unsigned char *dst = atlas_pixels + ((icon_rect.y + y) * aw + icon_rect.x) * 4;
+                    memcpy(dst, hud_icon_rgba + (size_t)y * HUD_ICON_SHEET_W * 4, HUD_ICON_SHEET_W * 4);
+                }
+            }
+        }
+        g_icon_id = icon_id;
+        g_icon_w = HUD_ICON_SHEET_W;
+        g_icon_h = HUD_ICON_SHEET_H;
+        g_hud_rect = hud_icon_rect[0];
+        g_hud_cell = hud_id_cell;
+        g_hud_rgb = hud_id_rgb[0];
+        g_hud_id_max = HUD_ID_MAX;
+        LOG("[bar] six-slot item icons: atlas rect %d (%dx%d), %d item ids\n", icon_id, HUD_ICON_SHEET_W,
+            HUD_ICON_SHEET_H, HUD_ID_MAX);
+        if (encyc_icon_id >= 0) {
+            io.Fonts->GetCustomRect(encyc_icon_id, &encyc_rect);
+            unsigned char *atlas_pixels = nullptr;
+            int aw = 0, ah = 0;
+            io.Fonts->GetTexDataAsRGBA32(&atlas_pixels, &aw, &ah);
+            const unsigned char *src = encyclopedia_icon_sheet();
+            int w = encyclopedia_icon_sheet_width(), h = encyclopedia_icon_sheet_height();
+            if (atlas_pixels && src) {
+                for (int y = 0; y < h && encyc_rect.y + y < ah; y++) {
+                    unsigned char *dst = atlas_pixels + ((encyc_rect.y + y) * aw + encyc_rect.x) * 4;
+                    memcpy(dst, src + (size_t)y * w * 4, (size_t)w * 4);
+                }
+            }
+        }
+        g_encyclopedia_icon_id = encyc_icon_id;
+        g_encyclopedia_icon_w = encyclopedia_icon_sheet_width();
+        g_encyclopedia_icon_h = encyclopedia_icon_sheet_height();
+        g_encyclopedia_icon_rect = encyclopedia_icon_rects();
+        LOG("[encyclopedia] icon atlas rect %d (%dx%d)\n", encyc_icon_id, g_encyclopedia_icon_w,
+            g_encyclopedia_icon_h);
+    }
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
     forge_style(style);
@@ -1028,11 +1110,13 @@ void overlay_frame(void *cpu) {
     vi_pause_game();
     if (!g_ready) return;
     std::lock_guard<std::mutex> frame(g_frame_lock);
+    if (wheelmenu_take_open()) overlay_open_wheel();
     if (!g_plugins_init && forge_plugins_graphics_ready()) {
         g_plugins_init = true;
         forge_imgui_init(cpu);
     }
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
+    if (g_open && !g_settings_open && !g_forge_open && !encyclopedia_visible()) set_open(false);
     bool open = g_open, free_render = g_plugins_init && forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
@@ -1149,6 +1233,7 @@ void overlay_frame(void *cpu) {
 #endif
         if (!keep) set_open(false);
     }
+    encyclopedia_draw((float)w, (float)h);
     if (free_render) forge_free_render(cpu, w, h);
     if (paused) draw_paused();
     if (notice) draw_notice(now, scale);
