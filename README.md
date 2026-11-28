@@ -86,8 +86,11 @@ cargo test --workspace
 
 ## 许可
 
-MIT，见 `LICENSE`；第三方组件许可见 `THIRD_PARTY_NOTICES`。运行时的内核、IPC、NVN 对象与 Maxwell
-着色器翻译派生自 LAS Recomp（MIT）；Android 另含 volk、libadrenotools、bcdec 等，各自保留许可。
+MIT，见 `LICENSE`；本分支由 MEKCCK 维护，根许可证版权为 MEKCCK。原始 MHGU Recomp / MHGU Relink 由
+Rokk 创建（MIT，Copyright (c) 2026 Rokk），原始版权与许可声明保留在 `THIRD_PARTY_NOTICES` 的
+“MHGU Recomp / MHGU Relink (upstream)” 致谢章节。第三方组件许可见 `THIRD_PARTY_NOTICES`。运行时的内核、
+IPC、NVN 对象与 Maxwell 着色器翻译派生自 LAS Recomp（MIT）；Android 另含 volk、libadrenotools、bcdec 等，
+各自保留许可。
 
 ### 上游 Android 主线的许可证
 

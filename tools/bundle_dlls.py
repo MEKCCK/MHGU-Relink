@@ -17,7 +17,7 @@ import struct
 import sys
 
 NEVER = {'vulkan-1.dll'}
-PROJECT = 'https://github.com/morerokk/MHGURecomp'
+PROJECT = 'https://github.com/MEKCCK/MHGU-Relink'
 
 
 def imports(path):

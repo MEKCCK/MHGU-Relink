@@ -26,7 +26,7 @@
 
 ## 上游 Android 主线的许可证变更
 
-本仓库的 Android 主干来自 `gu-native` 0.1.5 的 MIT 快照（`LICENSE` 版权为 Rokk）。上游在 0.1.7 把项目改成
+本仓库的 Android 主干来自 `gu-native` 0.1.5 的 MIT 快照（上游快照的 `LICENSE` 版权为 Rokk；本分支根 `LICENSE` 已改为 MEKCCK，原始声明保留在 `THIRD_PARTY_NOTICES`）。上游在 0.1.7 把项目改成
 “All rights reserved”：禁止再分发源码或成品，禁止发布修改版，商业使用也需书面许可；0.1.6 及以前仍为 MIT。
 
 我们不认同、并明确谴责这种做法：项目在 MIT 下接收社区协作、被下游合并之后，单方面把后续版本锁成禁止分发的
