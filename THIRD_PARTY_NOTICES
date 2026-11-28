@@ -12,8 +12,8 @@ below.
   of its dependencies are in its licenses/ directory. Its item atlas and some icons are extracted from the game;
   that game material is not covered by the MIT grant.
 - MHGU-Xth 0.2.2-fix100: the six-slot item bar and shortcut-wheel behavior ported into
-  runtime/hle/custom_itembar.c, runtime/hle/hudbar.c and runtime/touch.cpp. MIT License, Copyright (c) 2026 Rokk,
-  granted by the author; the full text is in the MHGU-Xth section below.
+  runtime/hle/custom_itembar.c, runtime/hle/hudbar.c and runtime/touch.cpp. MIT License, granted by the author;
+  the full text is in the MHGU-Xth section below.
 - cimgui (third_party/cimgui): MIT License.
 - Dear ImGui (third_party/cimgui/imgui): MIT License.
 - Noto Sans CJK SC (android/app/src/main/assets/cjk.ttf): SIL Open Font License 1.1, Copyright 2014-2021 Adobe; its full license is in android/app/src/main/assets/licenses/NotoSansCJK-OFL.txt.
@@ -388,7 +388,7 @@ MHGU-Xth
 
 MIT License
 
-Copyright (c) 2026 Rokk
+Copyright (c) 2026
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

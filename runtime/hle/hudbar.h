@@ -1,5 +1,5 @@
 // Six-slot item bar interface, ported from MHGU-Xth 0.2.2-fix100.
-// MIT License, Copyright (c) 2026 Rokk; used with the author's permission.
+// MIT License; used with the author's permission.
 // The six-slot item bar's live pouch snapshot and use queue (runtime/hle/hudbar.c).
 //
 // hudbar_frame runs on the game thread, from the unconditional FN_ITEM_BAR hook (runtime/hle/itembar.c), so it can

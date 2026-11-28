@@ -1,5 +1,5 @@
 // Six-slot item bar and shortcut-wheel behavior ported from MHGU-Xth 0.2.2-fix100.
-// MIT License, Copyright (c) 2026 Rokk; used with the author's permission.
+// MIT License; used with the author's permission.
 // Touch controls for phones, in the Monster Hunter style: bronze-rimmed dark discs with cream glyphs and the game's
 // button letter on a small badge.
 //   - left thumb: floating mode hides the idle stick and places it at the initial touch; fixed mode uses the saved
