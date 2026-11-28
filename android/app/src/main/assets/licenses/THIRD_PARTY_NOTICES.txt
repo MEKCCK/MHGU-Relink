@@ -1,9 +1,9 @@
 MHGU Relink includes or is derived from the following third-party software. Each keeps its own license, reproduced
 below.
 
-MHGU Recomp / MHGU Relink was originally created by Rokk (github.com/morerokk/MHGURecomp) under the MIT License,
-Copyright (c) 2026 Rokk. This repository is a fork maintained by MEKCCK; the original copyright and permission notice
-is retained in the "MHGU Recomp / MHGU Relink (upstream)" section below.
+MHGU Relink is created and maintained by MEKCCK. It began as a merge of two MIT projects: MHGURecomp by Rokk
+(github.com/morerokk/MHGURecomp) and gu-native. Their original copyright and permission notices, Copyright (c) 2026
+Rokk, are retained in the "MHGURecomp / gu-native (upstream)" section below.
 
 - LAS Recomp: the runtime's kernel, IPC, loader, dispatch and NVN object code and the Maxwell shader translator
   (runtime/kernel.c, ipc.c, loader.c, dispatch.c, runtime/nvn/objects.c, cmdbuf.c, maxwell/translate.c and others)
@@ -413,7 +413,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-MHGU Recomp / MHGU Relink (upstream)
+MHGURecomp / gu-native (upstream)
 ================================================================================
 
 MIT License
