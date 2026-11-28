@@ -1,0 +1,56 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+
+    env:
+      DEVKITPRO: /opt/devkitpro
+
+    steps:
+      - name: Install build helpers
+        run: |
+          apt update
+          apt install git liblz4-dev python3 -y
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/profile.d/devkit-env.sh
+          JOBS=$(nproc) bash build-hardware.sh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: forge-build-${{ github.sha }}
+          path: |
+            subsdk.nso
+            main.npdm
+            data/config.ini
+            data/fonts/Roboto-Medium.ttf
+            data/shaders/imgui_frag.fsh
+            data/shaders/imgui_vert.vsh
+            data/shaders/compiled/imgui.fbin
+

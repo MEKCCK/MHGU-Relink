@@ -1,0 +1,5 @@
+/out/
+__pycache__/
+*.pyc
+/*/wheel/wheel.elf
+/*/wheel/gu_craft_wheel.nro

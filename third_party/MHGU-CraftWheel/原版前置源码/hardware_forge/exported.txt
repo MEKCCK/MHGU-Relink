@@ -1,0 +1,26 @@
+{
+    global:
+        forge_init;
+        forge_fini;
+        forge_hook_*;
+        forge_patch_*;
+        forge_socket_*;
+        forge_mem_get*;
+        forge_log;
+        forge_log_getLevel;
+        forge_singleton_get*;
+
+        forge_input_is*;
+        forge_input_get*;
+
+        forge_graphics_is*;
+
+        forge_nnos*;
+
+        forge_fs_*;
+
+        ig*;
+        Im*;
+
+    local: *;
+};  

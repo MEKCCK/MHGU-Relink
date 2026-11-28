@@ -1,0 +1,24 @@
+﻿快捷轮盘 v0.51
+
+Python 3、devkitARM GCC 16.1.0。安装 lz4 后从源码包根目录运行。编译器不在 PATH 时加 --cc 指定路径。
+  python build_mod.py android --output out/android/gu_craft_wheel.nro
+  python build_mod.py port --output out/pc/gu_craft_wheel.nro
+  python build_mod.py switch --output out/switch/gu_craft_wheel.nro
+  python build_mod.py eden --output out/eden/gu_craft_wheel.nro
+将编译结果和 assets/gu_craft_wheel_font.ttc 放入相应完整包内同名文件的位置。PC 与安卓使用不同的 NRO。原版 RomFS 前置源码和许可证随附。
+图标和字体已预生成。若修改图标，使用 Pillow 运行 tools/pack_atlases.py assets/atlases，把新 wheel_pages.inc 复制到对应平台的 wheel 目录。安卓还需运行 python android/art/make_backpack.py 嵌入背包。若修改字符，可安装 fonttools，执行 python make_font.py NotoSansSC-VF.ttf android assets/gu_craft_wheel_font.ttc。
+构建后可安装 pyelftools 和 unicorn，执行 python tests/test_callback.py android --nro out/android/gu_craft_wheel.nro --font assets/gu_craft_wheel_font.ttc。tests/test_presets.py 适用四个平台；tests/test_backpack.py 适用安卓。
+
+3DS 道具袋来自 MHXX 日版下屏面板。程序默认使用 android/art/backpack.png 中的原始图标。要从自己的转储重提，运行 python android/art/make_backpack.py --romfs 转储根目录。
+
+安卓整合版回归可运行 python tests/test_callback.py android --font assets/gu_craft_wheel_font.ttc --portable-bridge --scale-only。
+
+猎猫支援行动图标与配色使用原版动作表指定的高清图标，名称来自对应的简中和英语文本。从自有转储重新导出时运行 python tools/extract_prowler_actions.py <nativeNX目录> <输出的prowler_actions.inc>。替换各平台 wheel 下的同名文件后，可用 make_font.py 从四端源码重新生成字体。
+猎猫回归测试可运行 python tests/test_callback.py eden --prowler-play，再运行 python tests/test_callback.py eden --prowler-settings。原版派发测试使用自有游戏的 exefs/main，运行 python tests/test_prowler_runtime.py --cc <编译器> --main <exefs/main> --include eden/wheel/prowler_runtime.inc。
+
+猎猫支援行动图标与配色使用原版动作表指定的高清图标，名称来自对应的简中和英语文本。从自有转储重新导出时运行 python tools/extract_prowler_actions.py <nativeNX目录> <输出的prowler_actions.inc>。替换各平台 wheel 下的同名文件后，可用 make_font.py 从四端源码重新生成字体。
+猎猫回归测试可运行 python tests/test_callback.py eden --prowler-play，再运行 python tests/test_callback.py eden --prowler-settings。原版派发测试使用自有游戏的 exefs/main，运行 python tests/test_prowler_runtime.py --cc <编译器> --main <exefs/main> --include eden/wheel/prowler_runtime.inc。
+
+猎猫高清贴图来自简中 quest_chS.arc 的 HD_hud00_BM_NOMIP（2048×2048）及 resident_chS.arc 的 HD_cmn_icon_GSM_NOMIP（1024×2048）。导出两张 RGBA PNG 后运行 python tools/make_prowler_frames.py HUD.png icons.png eden/wheel/prowler_actions.inc prowler_frame_pixels.inc。
+
+PC 指针模块由 LLVM-MinGW x86_64 构建：clang -O2 -shared -static cursor/wheel_cursor.c -o GUWheelCursor.dll。

@@ -1,0 +1,191 @@
+#include "result.h"
+#include "kernel/svc.h"
+#include "runtime/diag.h"
+#include <elf.h>
+#include <string.h>
+
+#ifdef __ARM_ARCH_ISA_A64
+#define uXX           u64
+#define ElfXX_Dyn     Elf64_Dyn
+#define ElfXX_Rel	  Elf64_Rel
+#define ElfXX_Rela    Elf64_Rela
+#define ElfXX_Relr    Elf64_Relr
+#define ELFXX_R_TYPE  ELF64_R_TYPE
+#define R_XX_NONE     R_AARCH64_NONE
+#define R_XX_RELATIVE R_AARCH64_RELATIVE
+#else
+#ifndef DT_RELR
+#define DT_RELRSZ 	35    	/* Total size of RELR relative relocations */
+#define DT_RELR		36		/* Address of RELR relative relocations */
+typedef Elf32_Word Elf32_Relr;
+#endif
+#define uXX           u32
+#define ElfXX_Dyn     Elf32_Dyn
+#define ElfXX_Rel	  Elf32_Rel
+#define ElfXX_Rela    Elf32_Rela
+#define ElfXX_Relr    Elf32_Relr
+#define ELFXX_R_TYPE  ELF32_R_TYPE
+#define R_XX_NONE     R_ARM_NONE
+#define R_XX_RELATIVE R_ARM_RELATIVE
+#endif
+
+typedef struct Mod0Header {
+	u32 magic_mod0;
+	s32 dyn_offset;
+	s32 bss_start_offset;
+	s32 bss_end_offset;
+	s32 eh_frame_hdr_start_offset;
+	s32 eh_frame_hdr_end_offset;
+	s32 unused;
+
+	u32 magic_lny0;
+	s32 got_start_offset;
+	s32 got_end_offset;
+
+	u32 magic_lny1;
+	s32 relro_start_offset;
+	s32 relro_end_offset;
+} Mod0Header;
+
+NX_INLINE void* _dynResolveOffset(const Mod0Header* mod0, s32 offset)
+{
+	return (void*)((uintptr_t)mod0 + offset);
+}
+
+static void _dynProcessRel(uintptr_t base, const ElfXX_Rel* rel, size_t relsz)
+{
+	for (; relsz--; rel++) {
+		switch (ELFXX_R_TYPE(rel->r_info)) {
+			case R_XX_RELATIVE: {
+				uXX* ptr = (uXX*)(base + rel->r_offset);
+				*ptr += base;
+				break;
+			}
+		}
+	}
+}
+
+static void _dynProcessRela(uintptr_t base, const ElfXX_Rela* rela, size_t relasz)
+{
+	for (; relasz--; rela++) {
+		switch (ELFXX_R_TYPE(rela->r_info)) {
+			default: {
+				diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_BadReloc));
+				break;
+			}
+
+			case R_XX_NONE: {
+				break;
+			}
+
+			case R_XX_RELATIVE: {
+				uXX* ptr = (uXX*)(base + rela->r_offset);
+				*ptr = base + rela->r_addend;
+				break;
+			}
+		}
+	}
+}
+
+static void _dynProcessRelr(uintptr_t base, const ElfXX_Relr* relr, size_t relrsz)
+{
+	uXX* ptr = NULL;
+	for (; relrsz--; relr++) {
+		if ((*relr & 1) == 0) {
+			ptr = (uXX*)(base + *relr);
+			*ptr++ += base;
+		} else {
+			uXX bitmap = *relr >> 1;
+			while (bitmap) {
+				unsigned id = __builtin_ffsl(bitmap)-1;
+				bitmap &= ~(1UL << id);
+				ptr[id] += base;
+			}
+			ptr += sizeof(uXX) * 8 - 1;
+		}
+	}
+}
+
+void __nx_dynamic(uintptr_t base, const Mod0Header* mod0)
+{
+	// Return early if MOD0 header has been invalidated
+	if (mod0->magic_mod0 != 0x30444f4d) { // MOD0
+		return;
+	}
+
+	// Clear the BSS area
+	u8* bss_start = _dynResolveOffset(mod0, mod0->bss_start_offset);
+	u8* bss_end = _dynResolveOffset(mod0, mod0->bss_end_offset);
+	if (bss_start != bss_end) {
+		memset(bss_start, 0, bss_end - bss_start);
+	}
+
+	// Retrieve pointer to the ELF dynamic section
+	const ElfXX_Dyn* dyn = _dynResolveOffset(mod0, mod0->dyn_offset);
+
+	// Extract relevant information from the ELF dynamic section
+	const ElfXX_Rel* rel = NULL;
+	size_t relsz = 0;
+	const ElfXX_Rela* rela = NULL;
+	size_t relasz = 0;
+	const ElfXX_Relr* relr = NULL;
+	size_t relrsz = 0;
+	for (; dyn->d_tag != DT_NULL; dyn++) {
+		switch (dyn->d_tag) {
+			case DT_REL:
+				rel = (const ElfXX_Rel*)(base + dyn->d_un.d_ptr);
+				break;
+
+			case DT_RELSZ:
+				relsz = dyn->d_un.d_val / sizeof(ElfXX_Rel);
+				break;
+
+			case DT_RELA:
+				rela = (const ElfXX_Rela*)(base + dyn->d_un.d_ptr);
+				break;
+
+			case DT_RELASZ:
+				relasz = dyn->d_un.d_val / sizeof(ElfXX_Rela);
+				break;
+
+			case DT_RELR:
+				relr = (const ElfXX_Relr*)(base + dyn->d_un.d_ptr);
+				break;
+
+			case DT_RELRSZ:
+				relrsz = dyn->d_un.d_val / sizeof(ElfXX_Relr);
+				break;
+		}
+	}
+
+	// Apply REL relocations if present
+	if (rel && relsz) {
+		_dynProcessRel(base, rel, relsz);
+	}
+
+	// Apply RELA relocations if present
+	if (rela && relasz) {
+		_dynProcessRela(base, rela, relasz);
+	}
+
+	// Apply RELR relocations if present
+	if (relr && relrsz) {
+		_dynProcessRelr(base, relr, relrsz);
+	}
+
+	// Return early if LNY0/LNY1 extensions are not present
+	if (mod0->magic_lny0 != 0x30594e4c || mod0->magic_lny1 != 0x31594e4c) { // LNY0, LNY1
+		return;
+	}
+
+	// Reprotect relro segment as read-only now that we're done processing relocations
+	u8* relro_start = _dynResolveOffset(mod0, mod0->relro_start_offset);
+	size_t relro_sz = (u8*)_dynResolveOffset(mod0, mod0->relro_end_offset) - relro_start;
+	Result rc = svcSetMemoryPermission(relro_start, relro_sz, Perm_R);
+	if (R_FAILED(rc)) {
+		diagAbortWithResult(rc);
+	}
+
+	// Lock the relro segment's permissions
+	svcSetMemoryAttribute(relro_start, relro_sz, MemAttr_IsPermissionLocked, MemAttr_IsPermissionLocked);
+}
