@@ -175,7 +175,6 @@ static void publish_live(const Config *c, bool all) {
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
     SDL_LockSpinlock(&live_ldn_lock);
-    if (all || c->crossplay != saved.crossplay) live_crossplay.crossplay = c->crossplay;
     if (all || strcmp(c->ryu_servers, saved.ryu_servers)) memcpy(live_crossplay.ryu_servers, c->ryu_servers, sizeof live_crossplay.ryu_servers);
     if (all || c->ryu_host != saved.ryu_host) live_crossplay.ryu_host = c->ryu_host;
     if (all || c->ryu_port != saved.ryu_port) live_crossplay.ryu_port = c->ryu_port;
@@ -414,7 +413,6 @@ void config_live_ldn(char *server, size_t server_size, char *key, size_t key_siz
 }
 void config_live_crossplay(Config *out) {
     SDL_LockSpinlock(&live_ldn_lock);
-    out->crossplay = live_crossplay.crossplay;
     memcpy(out->ryu_servers, live_crossplay.ryu_servers, sizeof out->ryu_servers);
     out->ryu_host = live_crossplay.ryu_host;
     out->ryu_port = live_crossplay.ryu_port;

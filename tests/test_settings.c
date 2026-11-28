@@ -621,7 +621,7 @@ int main(int argc, char **argv) {
     preserved.hdr = 1; preserved.hdr_format = HDR_FORMAT_HDR10; preserved.hdr_gamma = HDR_GAMMA_24;
     preserved.hdr_peak = 1200; preserved.hdr_game = 210; preserved.hdr_ui = 180;
     preserved.hdr_tonemap = HDR_TONEMAP_RENODRT; preserved.hdr_scene = 1;
-    preserved.ldn_direct = 0; preserved.crossplay = XP_MIXED;
+    preserved.ldn_direct = 0;
     strcpy(preserved.ryu_servers, "127.0.0.1:30457,localhost:30458");
     preserved.ryu_host = 1; preserved.ryu_port = 30457; strcpy(preserved.ryu_password, "ryu-test");
     strcpy(preserved.room_server, "localhost:24873");
@@ -632,7 +632,7 @@ int main(int argc, char **argv) {
     assert(config_live_hdr_peak() == 1200 && config_live_hdr_game() == 210 && config_live_hdr_ui() == 180);
     assert(!config_live_ldn_direct());
     Config network = {0}; config_live_crossplay(&network);
-    assert(network.crossplay == XP_MIXED && network.ryu_host && network.ryu_port == 30457);
+    assert(network.ryu_host && network.ryu_port == 30457);
     assert(!strcmp(network.ryu_servers, preserved.ryu_servers) && !strcmp(network.ryu_password, "ryu-test"));
     assert(network.room_host && network.room_port == 24873 && !strcmp(network.room_server, "localhost:24873"));
     assert(!strcmp(network.room_name, "roundtrip-room") && !strcmp(network.room_password, "room-test"));
@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
     assert(roundtrip.hdr && roundtrip.hdr_format == HDR_FORMAT_HDR10 && roundtrip.hdr_gamma == HDR_GAMMA_24);
     assert(roundtrip.hdr_peak == 1200 && roundtrip.hdr_game == 210 && roundtrip.hdr_ui == 180);
     assert(roundtrip.hdr_tonemap == HDR_TONEMAP_RENODRT && roundtrip.hdr_scene);
-    assert(!roundtrip.ldn_direct && !config_live_ldn_direct() && roundtrip.crossplay == XP_MIXED);
+    assert(!roundtrip.ldn_direct && !config_live_ldn_direct());
     assert(roundtrip.ryu_host && roundtrip.ryu_port == 30457 && !strcmp(roundtrip.ryu_servers, preserved.ryu_servers));
     assert(!strcmp(roundtrip.ryu_password, "ryu-test") && roundtrip.room_host && roundtrip.room_port == 24873);
     assert(!strcmp(roundtrip.room_server, "localhost:24873") && !strcmp(roundtrip.room_name, "roundtrip-room"));

@@ -41,7 +41,7 @@ make -j8                                  # 产物：build/citra-gateway
 ```
 
 - Citra 端直连 `网关地址:8888`，密码与房间密码一致（本项目测试服务器为空）。
-- MHGU 端用 `Crossplay = 多人房间`，`RoomServer` 指向同一个 `mhgu-roomsrv`（默认 UDP 24872）。
+- MHGU 端填 `RoomServer`，指向同一个 `mhgu-roomsrv`（默认 UDP 24872）。
 - `--seconds 0` 常驻；`SIGTERM`/`SIGINT` 正常退出。
 - 诊断：环境变量 `XXGU_GATEWAY_DEBUG=1` 才输出 `[citra]`/`[room->ldn]`/`[gu_host]` 日志，
   默认安静（避免公网对端刷日志）。

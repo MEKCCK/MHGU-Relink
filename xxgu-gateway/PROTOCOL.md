@@ -16,7 +16,7 @@ MAC = 6 字节。传输为 ENet/UDP、channel 0、reliable。ENet 包体就是�
 Citra + MHXX ──(Citra room v4 / ENet)──▶ 本网关 ──(Yuzu/suyu room v1 / ENet)──▶ mhgu-roomsrv
                                                                                    ▲
                                                                MHGU-Relink 玩家 ───┘
-                                                               (Crossplay = 多人房间)
+                                                               (RoomServer 指向房间)
 ```
 
 每个 Citra 客户端对应上游房间里的一个普通成员；网关自身不占成员位。两侧互不可见对方协议版本。

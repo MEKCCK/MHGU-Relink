@@ -162,7 +162,6 @@ F1 设置菜单，Alt+Enter / F11 全屏，F7 切换 MSAA，F12 截图。手柄�
 | `Join` | 搜索主机 | 额外搜索的 `host[:port]` 列表 |
 | `Server` | Hub 服务器 | 互联网 hub；空=默认，`Off`=关闭 |
 | `Key` | 匹配密钥 | 相同密钥的玩家互相可见；空=公开 |
-| `Crossplay` | Crossplay | `Off` / `Ryujinx` / `Room` / `Mixed` |
 | `RyuServers` | RyuLdn 服务器 | `host[:port]` 列表，逗号分隔 |
 | `RyuPassword` | RyuLdn 密码短语 | 空=公开 |
 | `RoomServer` | suyu 房间服务器 | `host[:port]` |

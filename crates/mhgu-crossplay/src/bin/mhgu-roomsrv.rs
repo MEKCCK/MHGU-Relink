@@ -1,4 +1,4 @@
-// Standalone suyu-family room server (LDN rooms for the "Room" crossplay mode).
+// Standalone suyu-family room server (LDN rooms for suyu-family crossplay).
 // Usage: mhgu-roomsrv [-port 24872] [-name MHGU] [-password ""]
 use mhgu_crossplay::roomsrv;
 

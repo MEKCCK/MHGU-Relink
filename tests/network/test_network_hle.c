@@ -30,14 +30,20 @@ void hitsync_aux_received(const void *data, uint32_t n) { (void)data; (void)n; I
 enum { A_CFG=0x10000, A_SEC=0x10100, A_USER=0x10200, A_INFO=0x11000, A_STACK=0x1f000, A_FILTER=0x16000, A_COUNT=0x16100 };
 static Cpu cpu;
 static bool emulator, server_host;
-static int transport;
+enum { TR_NONE, TR_RYU, TR_ROOM, TR_MIXED };
+static int transport = TR_NONE;
 static uint32_t call(HostFn fn, uint32_t a, uint32_t b, uint32_t d, uint32_t e) { cpu.r[0]=a; cpu.r[1]=b; cpu.r[2]=d; cpu.r[3]=e; cpu.r[13]=A_STACK; fn(&cpu); return cpu.r[0]; }
 static int current_state(void) { return (int)call(ldn_get_state,0,0,0,0); }
 static void prepare(int port, const char *name) {
     assert(VirtualAlloc((void *)(uintptr_t)GUEST_BASE, 0x100000, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE) == (void *)(uintptr_t)GUEST_BASE);
-    Config c = g_config; c.ldn_port = port; c.crossplay = XP_OFF; c.ryu_host = c.room_host = 0;
+    Config c = g_config; c.ldn_port = port; c.ryu_host = c.room_host = 0;
     strcpy(c.ldn_server, "Off"); snprintf(c.ldn_join,sizeof c.ldn_join,"127.0.0.1:%d", port); c.ryu_servers[0]=c.room_server[0]=0;
-    if (emulator) { c.crossplay=transport; c.ryu_host=server_host && transport!=XP_ROOM; c.room_host=server_host && transport!=XP_RYU; c.ryu_port=c.room_port=port; snprintf(c.ryu_servers,sizeof c.ryu_servers,"127.0.0.1:%d",port); snprintf(c.room_server,sizeof c.room_server,"127.0.0.1:%d",port); snprintf(c.room_name,sizeof c.room_name,"%s",name); }
+    if (emulator) {
+        c.ryu_port = c.room_port = port;
+        if (transport == TR_RYU || transport == TR_MIXED) { c.ryu_host = server_host; snprintf(c.ryu_servers,sizeof c.ryu_servers,"127.0.0.1:%d",port); }
+        if (transport == TR_ROOM || transport == TR_MIXED) { c.room_host = server_host; snprintf(c.room_server,sizeof c.room_server,"127.0.0.1:%d",port); }
+        snprintf(c.room_name,sizeof c.room_name,"%s",name);
+    }
     g_config=c; config_store_loaded(&c); config_runtime_init(&c);
     uint8_t *cfg = G2H(A_CFG); wr32(cfg, 0x11223344); wr16(cfg+0x10,6); cfg[0x12]=4; wr16(cfg+0x14,0x1234);
     strncpy(G2H(A_USER),name,0x20);
@@ -52,7 +58,7 @@ static uint8_t *network_info(int nodes) {
     for(int i=0;i<nodes;i++) { uint8_t *nd=node_at(p,i); assert(nd[NODE_CONNECTED] && nd[NODE_ID]==i && rd16(nd+NODE_LCV)==0x1234); }
     return p;
 }
-static void create(void) { assert(call(ldn_open_ap,0,0,0,0)==0); uint32_t r=call(ldn_create,A_CFG,A_SEC,A_USER,0); for(int w=0; transport==XP_ROOM && r && w<120; w++) { assert(current_state()==ST_ACCESS_POINT); Sleep(50); r=call(ldn_create,A_CFG,A_SEC,A_USER,0); } assert(r==0); assert(current_state()==ST_AP_CREATED && ldn_net_up() && ldn_hosting()); network_info(1); }
+static void create(void) { assert(call(ldn_open_ap,0,0,0,0)==0); uint32_t r=call(ldn_create,A_CFG,A_SEC,A_USER,0); for(int w=0; transport==TR_ROOM && r && w<120; w++) { assert(current_state()==ST_ACCESS_POINT); Sleep(50); r=call(ldn_create,A_CFG,A_SEC,A_USER,0); } assert(r==0); assert(current_state()==ST_AP_CREATED && ldn_net_up() && ldn_hosting()); network_info(1); }
 static void destroy(void) { assert(call(ldn_destroy,0,0,0,0)==0); assert(current_state()==ST_ACCESS_POINT && !ldn_net_up()); assert(call(ldn_get_network_info,A_INFO,0,0,0)==R_INVALID_STATE); }
 static void finish(void) { call(ldn_finalize,0,0,0,0); assert(current_state()==ST_NONE && !ldn_net_up() && !room_keep_started); VirtualFree((void *)(uintptr_t)GUEST_BASE,0,MEM_RELEASE); }
 static int lifecycle(int port) {
@@ -92,7 +98,7 @@ static int station(int port, const char *stop) {
     uint8_t selected[NETINFO_SIZE]; memcpy(selected,G2H(A_INFO),NETINFO_SIZE); assert(info_sane(selected));
     assert(call(ldn_connect,A_INFO,A_SEC,A_USER,0x1234)==0 && current_state()==ST_STATION_CONNECTED);
     assert(ldn_crossplay()==emulator);
-    if(transport==XP_RYU) assert(ldn_broadcast_ip()==0x0a72ffffu);
+    if(transport==TR_RYU) assert(ldn_broadcast_ip()==0x0a72ffffu);
     uint8_t *info=network_info(2); uint32_t host_ip=rd32(node_at(info,0)+NODE_IP);
     assert(L.own_ip && L.own_ip!=host_ip); VPacket p={L.own_ip,host_ip,5500,6600,VPROTO_UDP,0,0}; ldn_send(&p,"ping",4);
     uint64_t end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && (!packet_count || (!emulator && (!em_count || !hp_count || !hs_count)))) Sleep(10);
@@ -100,7 +106,7 @@ static int station(int port, const char *stop) {
     puts("PASS Scan/Connect/GetNetworkInfo, virtual packet roundtrip and all AUX handlers (emsync, hpscale, hitsync)");
     FILE *f=fopen(stop,"wb"); assert(f); fputs("stop",f); fclose(f);
     end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && current_state()==ST_STATION_CONNECTED) Sleep(10);
-    if(transport==XP_ROOM) assert(current_state()==ST_STATION && call(ldn_get_reason,0,0,0,0)==DR_DESTROYED_BY_SYSTEM && down_count);
+    if(transport==TR_ROOM) assert(current_state()==ST_STATION && call(ldn_get_reason,0,0,0,0)==DR_DESTROYED_BY_SYSTEM && down_count);
     else assert(current_state()==ST_ERROR && call(ldn_get_reason,0,0,0,0)==(emulator ? DR_SIGNAL_LOST : DR_DESTROYED_BY_USER) && down_count);
     assert(call(ldn_get_network_info,A_INFO,0,0,0)==R_INVALID_STATE);
     if(current_state()==ST_ERROR) assert(call(ldn_disconnect,0,0,0,0)==0 && current_state()==ST_STATION); finish();
@@ -108,7 +114,7 @@ static int station(int port, const char *stop) {
 }
 static int edge_cases(int port) {
     prepare(port,"edge cases");
-    Config config=g_config; config.crossplay=XP_ROOM; config.room_host=0; snprintf(config.room_server,sizeof config.room_server,"127.0.0.1:%d",port);
+    Config config=g_config; config.room_host=0; snprintf(config.room_server,sizeof config.room_server,"127.0.0.1:%d",port);
     config_store_loaded(&config); config_runtime_init(&config);
     assert(call(ldn_open_ap,0,0,0,0)==0);
     assert(call(ldn_create,A_CFG,A_SEC,A_USER,0)==R_CONNECT_FAILURE);
@@ -157,18 +163,18 @@ static int three_host(int port,const char *ready,const char *stop) {
     assert(joined); destroy(); finish(); puts("PASS Mixed host bridged an ordinary Ryu player and a Room player"); return 0;
 }
 static int three_peer(int port,const char *stop) {
-    prepare(port,transport==XP_RYU ? "three-ryu" : "three-room"); join_any();
+    prepare(port,transport==TR_RYU ? "three-ryu" : "three-room"); join_any();
     uint64_t end=plat_now_ns()+10000000000ull;
     while(plat_now_ns()<end && L.info[NI_NODE_COUNT]!=3) Sleep(10);
     assert(L.info[NI_NODE_COUNT]==3);
-    if(transport==XP_RYU) {
+    if(transport==TR_RYU) {
         uint32_t target=0;
         for(int i=1;i<MAX_NODES;i++) { uint8_t *nd=node_at(L.info,i); if(nd[NODE_CONNECTED] && rd32(nd+NODE_IP)!=L.own_ip) target=rd32(nd+NODE_IP); }
         assert(target); VPacket p={L.own_ip,target,7000,7001,VPROTO_UDP,0,0}; ldn_send(&p,"ping",4);
     }
     end=plat_now_ns()+5000000000ull; while(plat_now_ns()<end && !packet_count) Sleep(10);
     assert(packet_count && last_size==4);
-    if(transport==XP_ROOM) {
+    if(transport==TR_ROOM) {
         assert(!memcmp(last_data,"ping",4) && (last_packet.src_ip&0xffffff00u)==0xc0a8fa00u);
         VPacket p=last_packet; uint32_t ip=p.src_ip;p.src_ip=p.dst_ip;p.dst_ip=ip;
         uint16_t pp=p.src_port;p.src_port=p.dst_port;p.dst_port=pp;ldn_send(&p,"pong",4);
@@ -207,10 +213,10 @@ static int delayed_mixed(int port) {
 }
 int main(int argc, char **argv) {
     setvbuf(stdout,NULL,_IONBF,0); assert(argc>=3); int port=atoi(argv[2]);
-    if(argc>3 && !strcmp(argv[argc-1],"ryu")) transport=XP_RYU;
-    if(argc>3 && !strcmp(argv[argc-1],"room")) transport=XP_ROOM;
-    if(argc>3 && !strcmp(argv[argc-1],"mixed")) transport=XP_MIXED;
-    emulator=transport!=XP_OFF;
+    if(argc>3 && !strcmp(argv[argc-1],"ryu")) transport=TR_RYU;
+    if(argc>3 && !strcmp(argv[argc-1],"room")) transport=TR_ROOM;
+    if(argc>3 && !strcmp(argv[argc-1],"mixed")) transport=TR_MIXED;
+    emulator=transport!=TR_NONE;
     server_host=emulator && (!strcmp(argv[1],"host") || !strcmp(argv[1],"three-host") || !strcmp(argv[1],"delayed"));
     if(emulator) argc--;
     if(!strcmp(argv[1],"delayed")) return delayed_mixed(port);

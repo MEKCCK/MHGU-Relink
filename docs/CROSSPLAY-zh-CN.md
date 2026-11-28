@@ -1,13 +1,6 @@
 # 跨平台联机
 
-在游戏的设置中打开“网络”，使用“跨平台联机”选择连接方式。默认值为“关”，继续使用原有集会所、LAN 搜索及中继连接。
-
-| 模式 | 连接方式 |
-| --- | --- |
-| 关 | 原有重编译版集会所和中继。 |
-| Ryujinx | 通过 RyuLdn 服务器建立或搜索集会所。 |
-| 多人房间 | 使用 suyu 兼容的多人房间协议。 |
-| 混合联机 | 将同一集会所桥接到 RyuLdn 和多人房间两端。 |
+跨平台联机自动生效，没有模式开关。填写 RyuLdn 服务器/RyuHost 就启用 Ryujinx，填写房间服务器/RoomHost 就启用 suyu 兼容房间；两者都填时，同一个集会所会自动桥接两端。全部留空则只使用原有集会所、LAN 搜索及中继连接。
 
 RyuLdn 服务器地址填写 `主机` 或 `主机:端口`，多个地址用逗号分隔。默认端口为 `30456`。也可开启“运行 RyuLdn 服务器”，让其他玩家填写本机地址与该端口。RyuLdn 配对口令留空表示公开；使用私密配对时，所有玩家填写相同的 `Ryujinx-` 加八位十六进制数字口令。
 
@@ -30,19 +23,19 @@ RoomInformation、SetGameInfo、ProxyPacket（zstd blob 原样转发）与 LdnPa
 Citra + MHXX ──(Citra room v4 / UDS)──▶ XXGU-Gateway ──(Yuzu room v1)──▶ mhgu-roomsrv
                                                                               ▲
                                                           MHGU-Relink 玩家 ───┘
-                                                          （Crossplay = 多人房间）
+                                                          （RoomServer 指向房间）
 ```
 
 配置要点：
 
 - 网关填我们的房间地址（`127.0.0.1:24872`，或公网服务器 `IP:24872`）与房间密码；Citra 玩家连网关的
   Citra 接入端口（默认 `8888`）。
-- 本作玩家 `Crossplay = 多人房间`，`RoomServer` 填同一地址，房间名一致（默认 `MHGU`）。
+- 本作玩家填写 `RoomServer` 为同一地址，房间名一致（默认 `MHGU`）。
 - 网关是独立 GPL-2.0-or-later 程序，仅作为外部进程运行；不要把它的源码复制进本仓库的 MIT 模块。
   上游官方构建是 Windows GUI/CLI；本部署使用 POSIX 移植的 CLI（无 GUI），由 GPL 子树的 `Makefile` 用
   g++/zstd 构建。生产二进制不链接 Yuzu 源码；上游测试程序才需要 `room.cpp` 等快照。
 - 公共测试服务器已内置该网关：`UDP 8888`（网关，监听 `0.0.0.0`）→ `127.0.0.1:24872`（`mhgu-roomsrv`）。
-  Citra 的多人直连填 `114.66.25.224:8888`；本作玩家 `Crossplay = 多人房间`、`RoomServer =
+  Citra 的多人直连填 `114.66.25.224:8888`；本作玩家 `RoomServer =
   114.66.25.224:24872`，两边密码都留空。systemd 单元 `xxgu-gateway.service`，源码在服务器
   `/opt/xxgu-gateway/src`。
 - POSIX 端口已按 **suyu v0.0.4** 的房间线格式对齐（本仓库的房间与客户端源自 suyu 家族）：

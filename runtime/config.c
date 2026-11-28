@@ -156,7 +156,6 @@
     .ldn_friend_requests = 1,                                                                       \
     .ldn_friend_online_notices = 0,                                                                 \
     .ldn_friend_hub_notices = 0,                                                                    \
-    .crossplay = XP_OFF,                                                                            \
     .ryu_servers = "",                                                                              \
     .ryu_host = 0,                                                                                  \
     .ryu_port = 30456,                                                                              \
@@ -737,9 +736,8 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "FriendHubNotices = Off\n"
     "\n"
-    "; Crossplay mode: Off keeps native hubs; Ryujinx uses RyuLdn servers; Room uses suyu-compatible rooms; Mixed bridges both. Use the same MHGU game version (1.4.0). Port-only features such as small-monster synchronization and HP scaling are disabled in crossplay hubs.\n"
-    "; Default: Off\n"
-    "Crossplay = Off\n"
+    "; Crossplay is automatic: RyuServers/RyuHost enable Ryujinx players, RoomServer/RoomHost enable suyu-family rooms.\n"
+    "; Set both to share one hub; leave the addresses empty to stay on native/local hubs only. Use the same MHGU 1.4.0.\n"
     "\n"
     "; RyuLdn server addresses, host[:port], separated by commas. Default port: 30456. Leave empty when only running the built-in server. Use a server that allows your client.\n"
     "; Default: \n"
@@ -1098,7 +1096,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_FSR "Invalid FSR quality, provider, sharpness or reactive mask."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
-#define ERR_XP "Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#')."
+#define ERR_XP "Invalid crossplay port, server, room name or password (no newlines, ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_MOUSE "Mouse sensitivity must be 0.1-10 and smoothing 0-0.9."
@@ -1276,7 +1274,6 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Multiplayer", "FriendRequests", ldn_friend_requests, false),
     ON_OFF("Multiplayer", "FriendOnlineNotices", ldn_friend_online_notices, false),
     ON_OFF("Multiplayer", "FriendHubNotices", ldn_friend_hub_notices, false),
-    {"Multiplayer", "Crossplay", SET_CHOICE, F(crossplay), 0, 0, 0, "Off,Ryujinx,Room,Mixed", NULL, false, ERR_XP},
     {"Multiplayer", "RyuServers", SET_TEXT, F(ryu_servers), sizeof g_config.ryu_servers, 0, 0, NULL, NULL, false, ERR_XP},
     ON_OFF("Multiplayer", "RyuHost", ryu_host, false),
     {"Multiplayer", "RyuPort", SET_INT, F(ryu_port), 0, 1, 65535, NULL, NULL, false, ERR_XP},
@@ -1842,7 +1839,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
     if ((e = getenv("MHGU_LDN_DIRECT"))) g_config.ldn_direct = atoi(e) != 0;
     static const struct { const char *env, *key; } crossplay_env[] = {
-        {"MHGU_CROSSPLAY", "Crossplay"}, {"MHGU_RYU_SERVERS", "RyuServers"},
+        {"MHGU_RYU_SERVERS", "RyuServers"},
         {"MHGU_RYU_HOST", "RyuHost"}, {"MHGU_RYU_PORT", "RyuPort"},
         {"MHGU_RYU_PASSWORD", "RyuPassword"}, {"MHGU_ROOM_SERVER", "RoomServer"},
         {"MHGU_ROOM_HOST", "RoomHost"}, {"MHGU_ROOM_PORT", "RoomPort"},
@@ -1854,10 +1851,6 @@ void config_load(void) {
         if (!value) continue;
         if (setting->kind == SET_BOOL && (!strcmp(value, "0") || !strcmp(value, "1")))
             value = *value == '0' ? "Off" : "On";
-        if (!strcmp(crossplay_env[i].key, "Crossplay") && strlen(value) == 1 && *value >= '0' && *value <= '3') {
-            static const char *const modes[] = {"Off", "Ryujinx", "Room", "Mixed"};
-            value = modes[*value - '0'];
-        }
         if (setting->kind == SET_TEXT && strlen(value) >= setting->field2) continue;
         Config candidate = g_config;
         if (config_parse(setting, value, &candidate) && config_valid(setting, &candidate)) g_config = candidate;

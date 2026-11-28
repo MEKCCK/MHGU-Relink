@@ -615,7 +615,6 @@ bool equal(const Config &a, const Config &b) {
     SAME(kbm_prompts);
     SAME(prompt_icons);
     SAME(ldn_port);
-    SAME(crossplay);
     SAME(ryu_host);
     SAME(ryu_port);
     SAME(room_host);
@@ -2293,7 +2292,6 @@ void reset_section() {
         c.ldn_friend_requests = f.ldn_friend_requests;
         c.ldn_friend_online_notices = f.ldn_friend_online_notices;
         c.ldn_friend_hub_notices = f.ldn_friend_hub_notices;
-        c.crossplay = f.crossplay;
         SDL_strlcpy(c.ryu_servers, f.ryu_servers, sizeof c.ryu_servers);
         c.ryu_host = f.ryu_host;
         c.ryu_port = f.ryu_port;
@@ -3012,11 +3010,9 @@ void session_rows(std::vector<Row> &r) {
 }
 void crossplay_rows(std::vector<Row> &r) {
     Config &c = s.draft;
-    add_choice(r, "crossplay", tr("Crossplay"), c.crossplay, {tr("Off"), tr("Ryujinx"), tr("Room"), tr("Mixed")},
-               [](int v) { s.draft.crossplay = v; }, ini("Crossplay"));
-    r.back().help = tr("Join console players through emulator LDN servers: Ryujinx (RyuLdn), suyu rooms, or both (a mixed hub).");
     text(r, "ryu.servers", tr("RyuLdn servers"), c.ryu_servers, sizeof c.ryu_servers,
          *c.ryu_servers ? c.ryu_servers : std::string(tr("None")), ini("RyuServers"));
+    r.back().help = tr("Crossplay is automatic: filling the Ryu fields enables Ryujinx, the room fields enable suyu-family rooms, and both together share one hub.");
     add_bool(r, "ryu.host", tr("Run a RyuLdn server"), &c.ryu_host, ini("RyuHost"));
     number(r, "ryu.port", tr("RyuLdn port"), &c.ryu_port, (int)lo("RyuPort"), (int)hi("RyuPort"), 1, ini("RyuPort"));
     text(r, "ryu.password", tr("RyuLdn passphrase"), c.ryu_password, sizeof c.ryu_password,

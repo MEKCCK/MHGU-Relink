@@ -91,10 +91,10 @@ python3 tools/build_game.py /path/to/MHGU
 ## 联机
 
 - **局域网 / hub**：游戏内本地通信创建/搜索房间；与 PC 版同一套协议。
-- **Crossplay**：齿轮 → **Network**：
-  - `Crossplay = Ryujinx`：填 `RyuServers`，连 RyuLdn 服务器
-  - `Crossplay = Room`：填 `RoomServer`，连 suyu 房间
-  - `Crossplay = Mixed`：同时填两者，房间玩家会由主机桥接进 RyuLdn hub
+- **Crossplay**：齿轮 → **Network**，自动按已填地址启用：
+  - 填 `RyuServers` 连 RyuLdn 服务器
+  - 填 `RoomServer` 连 suyu 房间
+  - 两者都填时自动共用同一集会所，不需要选择模式
 - 公共测试服务器：RyuLdn `114.66.25.224:30456`，suyu 房间 `114.66.25.224:24872`，hub `114.66.25.224:39510`。
 - 所有人游戏版本必须是 1.4.0；密码短语/房间密码要一致。
 

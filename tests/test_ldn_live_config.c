@@ -85,9 +85,8 @@ int main(int argc, char **argv) {
     CHECK(cpu.r[0] == 0);
     CHECK(scan() == 0);  // crossplay off, no server: nothing to find
 
-    // The player opens the settings, picks Ryujinx crossplay, types the server, saves.
+    // The player opens the settings, types the RyuLdn server, saves.
     Config c = config_editable();
-    c.crossplay = XP_RYU;
     snprintf(c.ryu_servers, sizeof c.ryu_servers, "%s", addr);
     char error[256];
     CHECK(config_save(&c, error, sizeof error));

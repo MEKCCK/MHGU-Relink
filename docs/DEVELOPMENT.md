@@ -8,7 +8,7 @@
 | 路径 | 内容 |
 |---|---|
 | `runtime/` | C 运行时：guest 内核/`svc`、HLE、NVN→Vulkan、音频、媒体库、设置菜单 |
-| `runtime/net/ldn.c` | `nn::ldn` 的 HLE；按 `Crossplay` 模式转给 Rust 模块 |
+| `runtime/net/ldn.c` | `nn::ldn` 的 HLE；按已配置的 Ryu/Room 传输转给 Rust 模块 |
 | `tools/` | `gen.py`（函数发现/代码生成）、`lifter.py`（A32/VFP）、`neon.py`、`nso.py`、`build_game.py`（Android）、`build_game_windows.py`（Windows DLL） |
 | `crates/mhgu-protocol` | MHGS/MHGR/MHGL/MHGD 线格式、`VPacket`、`NetworkInfo` |
 | `crates/mhgu-link` / `-ffi` | 局域网/互联网 link 客户端与 C 库 |
@@ -76,7 +76,7 @@ Android native 构建、桌面构建和 `tools/build_game.py` 都从
 - `mhgu-link`：原 MHGL/MHGD 局域网和 hub 中继。
 - `mhgu-crossplay/ryu.rs`：RyuLdn 客户端；`ryu_server.rs`：RyuLdn 主服务器。
 - `room.rs` / `roomsrv.rs`：suyu 房间客户端与服务器（ENet、zstd）。
-- `bridge.rs`：主机在 RyuLdn hub 上同时接纳房间玩家，做 IP/MAC 改写；`Crossplay = Mixed`。
+- `bridge.rs`：主机在 RyuLdn hub 上同时接纳房间玩家，做 IP/MAC 改写；Ryu 与 Room 都配置时自动启用。
 
 C API 在 `crates/mhgu-crossplay/src/ffi.rs`，由 `runtime/net/ldn.c` 直接声明调用；PC 与 Android 都链接
 `libmhgu_crossplay.a`。

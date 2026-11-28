@@ -192,12 +192,11 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 ## Crossplay（Ryujinx / suyu）
 
 `crates/mhgu-crossplay` 把上游 0.15 的模拟器联机功能移植为 Rust：`runtime/net/ldn.c` 在 `CreateNetwork` /
-`Scan` / `Connect` / `Disconnect` / `SetAdvertiseData` / `Reject` 等入口按模式分支，游戏包通过
+`Scan` / `Connect` / `Disconnect` / `SetAdvertiseData` / `Reject` 等入口按已配置的传输分支，游戏包通过
 `ldn_send` 交给 RyuLdn 服务器或 suyu 房间中继。
 
 | 设置（INI，Network 页） | 说明 |
 |---|---|
-| `Crossplay = Off/Ryujinx/Room/Mixed` | 关闭、Ryujinx LDN 服务器、suyu 房间、两者同时（混合 hub） |
 | `RyuServers` | `host[:port]` 列表，逗号分隔；`RyuHost` 开启时也会用本机服务器 |
 | `RyuHost` / `RyuPort` / `RyuPassword` | 本进程内嵌 RyuLdn 服务器（端口默认 30456）、大厅密码短语 |
 | `RoomServer` | suyu 房间服务器 `host[:port]`；`RoomHost` 开启时本机内嵌 |
@@ -208,8 +207,8 @@ Key 是**客户端**的概念：客户端把 `Key` 算成 16 字节房间
 - `CreateNetwork` 在 Ryu/Room 模式下由服务器分配虚拟地址（`10.114.x.y` 或 `192.168.x.y`），C 侧只保留
   `nn::ldn` 状态；`GetIpv4Address` 返回服务器的子网掩码。
 - `Scan` 合并 LAN、hub 服务器、RyuLdn 服务器与房间内的大厅；`Connect` 按来源选择对应链路。
-- `Crossplay = Mixed`（或 Ryujinx 模式同时配置了 RoomServer/RoomHost）时，混合 hub（`bridge.rs`）会把房间玩家桥接到 Ryu 大厅，
-  地址/MAC 双向改写；房间客户端与服务器协议保持逐字节兼容。
+- RyuLdn 与 Room 同时配置并连接时，混合 hub（`bridge.rs`）会把房间玩家桥接到 Ryu 大厅，地址/MAC 双向改写；
+  房间客户端与服务器协议保持逐字节兼容。
 - 端口类辅助功能（`emsync`、`hpscale` 的 AUX 消息）在 crossplay 下关闭，与上游相同；延迟补偿（`hitsync`）是例外，
   它在 crossplay 下改走 UDP `47318`。
 

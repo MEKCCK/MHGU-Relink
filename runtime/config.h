@@ -128,7 +128,6 @@ typedef struct {
     int ldn_friend_requests;  // [Multiplayer] FriendRequests: get friend requests and share the friend code in hubs (net/ldn.c)
     int ldn_friend_online_notices;  // [Multiplayer] FriendOnlineNotices: a notice when a friend comes online (net/ldn.c)
     int ldn_friend_hub_notices;     // [Multiplayer] FriendHubNotices: a notice when a friend opens a hub (net/ldn.c)
-    int crossplay;            // [Multiplayer] Crossplay: XP_OFF, XP_RYU (Ryujinx LDN server) or XP_ROOM (suyu rooms)
     char ryu_servers[256];    // [Multiplayer] RyuServers: RyuLdn servers (host[:port], comma separated)
     int ryu_host;             // [Multiplayer] RyuHost: run the RyuLdn server in this process when hosting
     int ryu_port;             // [Multiplayer] RyuPort: the embedded server's TCP port
@@ -226,8 +225,6 @@ enum { BOTTOM_BG_WALLPAPER, BOTTOM_BG_DARK, BOTTOM_BG_BLACK };
 #define BOTTOM_PANELS_DEFAULT "itembar@0,0 map@0,1 arts3v@2,0"  // (MHXX's quest screen: item, map below, Hunter Arts right)
 uint32_t config_combo_mask(const char *text);  // "A+X" -> the BTN_* bits, 0 if there is nothing or anything else in it
 void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
-enum { XP_OFF, XP_RYU, XP_ROOM, XP_MIXED };
-
 // The hub server used when ini Server is empty (runtime/net/ldn.c, crates/mhgu-hub): the project's public one (an Oracle
 // Cloud VM). "" = no default: no internet hubs unless the player names a server.
 #define LDN_DEFAULT_SERVER "114.66.25.224:39510"

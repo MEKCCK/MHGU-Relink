@@ -820,14 +820,8 @@ static void mixed_bridge_start(void) {
         mhgu_xb_begin(L.info, L.own_ip, L.ryu_mask);
     pthread_mutex_unlock(&L.mu);
 }
-static bool ryu_configured(void) {
-    return (xp_config.crossplay == XP_RYU || xp_config.crossplay == XP_MIXED) &&
-           (xp_config.ryu_servers[0] || xp_config.ryu_host);
-}
-static bool room_configured(void) {
-    return (xp_config.crossplay == XP_ROOM || xp_config.crossplay == XP_MIXED) &&
-           (xp_config.room_server[0] || xp_config.room_host);
-}
+static bool ryu_configured(void) { return xp_config.ryu_servers[0] || xp_config.ryu_host; }
+static bool room_configured(void) { return xp_config.room_server[0] || xp_config.room_host; }
 static char roomsrv_self[32];
 static pthread_mutex_t roomsrv_addr_mu = PTHREAD_MUTEX_INITIALIZER;
 static const char *room_server(void) {
@@ -940,11 +934,11 @@ static void crossplay_prepare(void) {
     pthread_mutex_lock(&L.mu);
     bool active = L.state == ST_AP_CREATED || L.state == ST_STATION_CONNECTED;
     pthread_mutex_unlock(&L.mu);
-    bool room_changed = prepared && (applied.crossplay != xp_config.crossplay ||
+    bool room_changed = prepared && (
         applied.room_host != xp_config.room_host || applied.room_port != xp_config.room_port ||
         strcmp(applied.room_server, xp_config.room_server) || strcmp(applied.room_name, xp_config.room_name) ||
         strcmp(applied.room_password, xp_config.room_password));
-    bool ryu_changed = prepared && (applied.crossplay != xp_config.crossplay ||
+    bool ryu_changed = prepared && (
         applied.ryu_host != xp_config.ryu_host || applied.ryu_port != xp_config.ryu_port ||
         strcmp(applied.ryu_servers, xp_config.ryu_servers) || strcmp(applied.ryu_password, xp_config.ryu_password));
     if (!active) {
@@ -2835,7 +2829,7 @@ HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan)
             ryu_of[n++] = rsrv[j] + 1;
         }
     }
-    if (xp_config.crossplay == XP_ROOM && room_enabled() && mhgu_room_connected() && n < MAX_FOUND) {
+    if (room_enabled() && mhgu_room_connected() && n < MAX_FOUND) {
         uint8_t own[4], all[4] = {0xFF, 0xFF, 0xFF, 0xFF};
         mhgu_room_own_ip(own);
         pthread_mutex_lock(&room_scan_mu);

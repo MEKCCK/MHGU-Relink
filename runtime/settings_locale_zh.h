@@ -644,6 +644,7 @@ static inline const char *settings_text_zh(int language, const char *english) {
         {"The game stopped because of an error. The details are in log.txt, in Android/data/com.mhgu.relink/files.",
          "游戏因错误停止。详情请查看 Android/data/com.mhgu.relink/files 中的 log.txt。"},
         {"Crossplay", "跨平台联机"},
+        {"Crossplay is automatic: filling the Ryu fields enables Ryujinx, the room fields enable suyu-family rooms, and both together share one hub.", "跨平台联机自动生效：填写 Ryu 字段启用 Ryujinx，填写房间字段启用 suyu 兼容房间；两者都填时共用同一集会所。"},
         {"Ryujinx", "Ryujinx"},
         {"Room", "多人房间"},
         {"Mixed", "混合联机"},
@@ -656,7 +657,7 @@ static inline const char *settings_text_zh(int language, const char *english) {
         {"Room port", "多人房间端口"},
         {"Room name", "房间名称"},
         {"Room password", "房间密码"},
-        {"Invalid crossplay mode, port, server, room name or password (no newlines, ';' or '#').", "跨平台联机模式、端口、服务器、房间名或密码无效（不能包含换行、; 或 #）。"},
+        {"Invalid crossplay port, server, room name or password (no newlines, ';' or '#').", "跨平台联机端口、服务器、房间名或密码无效（不能包含换行、; 或 #）。"},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].zh;
@@ -775,7 +776,6 @@ static inline const char *settings_help_zh(const char *key) {
         {"FriendOnlineNotices", "好友上线时在屏幕上提示。开：提示；关：不提示。好友开集会所的提示由 FriendHubNotices 单独控制。默认：关。"},
         {"FriendHubNotices", "好友开设集会所时在屏幕上提示；设置菜单的“好友”页始终显示谁在开集会所。默认：关。"},
         {"HUDSize", "整个狩猎 HUD 朝各自角落缩小的比例：时钟与状态条、道具栏、狩技、地图、目标相机一起缩放，实时生效。范围：60 到 100。默认：100。"},
-        {"Crossplay", "跨平台联机模式。关：仅原生集会所；Ryujinx：RyuLdn 服务器；多人房间：suyu 兼容房间；混合联机：桥接两种方式。所有玩家需使用相同的 MHGU 版本（1.4.0）。跨平台集会所中，小型怪物同步与体力缩放等重编译版专属功能会关闭。保存后从下次进入本地联机生效。默认：关"},
         {"RyuServers", "RyuLdn 服务器地址，格式为 主机[:端口]，多个地址用逗号分隔，默认端口 30456。仅运行本机服务器时可留空。请使用允许当前客户端连接的服务器。"},
         {"RyuHost", "在本机运行 RyuLdn 服务器，供 Ryujinx 玩家连接。其他玩家将 LDN 服务器设为本机地址和 RyuLdn 端口。互联网连接需端口转发或同一 VPN 网络。默认：关"},
         {"RyuPort", "本机 RyuLdn 服务器使用的 TCP 端口。范围：1 到 65535。默认：30456"},
