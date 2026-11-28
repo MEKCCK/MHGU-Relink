@@ -1,3 +1,5 @@
+// Six-slot item bar navigation, ported from MHGU-Xth 0.2.2-fix100.
+// MIT License, Copyright (c) 2026 Rokk; used with the author's permission.
 // The six-slot bar's navigation: a swipe (or a wheel notch) turns the native pouch selection one item at a time,
 // without holding L, while the bar is drawn by runtime/touch.cpp from the snapshot in runtime/hle/hudbar.c.
 //

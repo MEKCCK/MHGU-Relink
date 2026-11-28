@@ -1,3 +1,5 @@
+// Six-slot item bar snapshot/use queue, ported from MHGU-Xth 0.2.2-fix100.
+// MIT License, Copyright (c) 2026 Rokk; used with the author's permission.
 // Independent touch HUD item bar: live pouch snapshot + use-slot command queue.
 //
 // Threading:
